@@ -97,5 +97,14 @@ def run_setup(argv: list[str]) -> int:
     return 0
 
 
-def install_skill() -> None:
-    raise NotImplementedError  # Task 9
+def install_skill(dest_root=None) -> None:
+    import shutil
+    from importlib.resources import files
+    from pathlib import Path
+
+    src = files("vikunja_mcp").joinpath("skills/tracker/SKILL.md")
+    root = Path(dest_root) if dest_root else Path("~/.claude").expanduser()
+    dest = root / "skills" / "tracker"
+    dest.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(str(src), dest / "SKILL.md")
+    print(f"skill installed: {dest / 'SKILL.md'}")
