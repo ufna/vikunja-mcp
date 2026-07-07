@@ -69,3 +69,90 @@ class VikunjaAPI:
             "PUT", f"/tasks/{task_id}/relations",
             json={"other_task_id": other_task_id, "relation_kind": kind},
         )
+
+    # --- projects ---
+    def projects(self) -> list[dict]:
+        return [p for p in (self._req("GET", "/projects") or []) if p.get("id", 0) > 0]
+
+    def create_project(self, title: str) -> dict:
+        return self._req("PUT", "/projects", json={"title": title})
+
+    def project_users(self, project_id: int) -> list[dict]:
+        return self._req("GET", f"/projects/{project_id}/users") or []
+
+    def share_project(self, project_id: int, username: str, permission: int) -> None:
+        for share in self.project_users(project_id):
+            if share.get("username") == username:
+                return
+        self._req(
+            "PUT", f"/projects/{project_id}/users",
+            json={"username": username, "permission": permission},
+        )
+
+    # --- views & buckets ---
+    def views(self, project_id: int) -> list[dict]:
+        return self._req("GET", f"/projects/{project_id}/views") or []
+
+    def kanban_view(self, project_id: int) -> dict:
+        return next(v for v in self.views(project_id) if v["view_kind"] == "kanban")
+
+    def buckets(self, project_id: int, view_id: int) -> list[dict]:
+        return self._req("GET", f"/projects/{project_id}/views/{view_id}/buckets") or []
+
+    def create_bucket(self, project_id: int, view_id: int, title: str) -> dict:
+        return self._req(
+            "PUT", f"/projects/{project_id}/views/{view_id}/buckets", json={"title": title}
+        )
+
+    def delete_bucket(self, project_id: int, view_id: int, bucket_id: int) -> None:
+        self._req("DELETE", f"/projects/{project_id}/views/{view_id}/buckets/{bucket_id}")
+
+    def update_bucket(
+        self, project_id: int, view_id: int, bucket: dict, position: float
+    ) -> dict:
+        # full-replace бакета: шлём title + position, порядок колонок = position
+        return self._req(
+            "POST", f"/projects/{project_id}/views/{view_id}/buckets/{bucket['id']}",
+            json={"title": bucket["title"], "position": position},
+        )
+
+    def view_tasks(self, project_id: int, view_id: int) -> list[dict]:
+        return self._req("GET", f"/projects/{project_id}/views/{view_id}/tasks") or []
+
+    def move_task(self, project_id: int, view_id: int, bucket_id: int, task_id: int) -> None:
+        self._req(
+            "POST", f"/projects/{project_id}/views/{view_id}/buckets/{bucket_id}/tasks",
+            json={"task_id": task_id},
+        )
+
+    def configure_kanban(
+        self, project_id: int, view: dict, default_bucket_id: int, done_bucket_id: int
+    ) -> dict:
+        # full-replace: без mode+position канбан теряет колонки
+        return self._req(
+            "POST", f"/projects/{project_id}/views/{view['id']}",
+            json={
+                "title": view["title"],
+                "view_kind": "kanban",
+                "bucket_configuration_mode": "manual",
+                "position": view.get("position") or 400,
+                "default_bucket_id": default_bucket_id,
+                "done_bucket_id": done_bucket_id,
+            },
+        )
+
+    # --- labels ---
+    def labels(self) -> list[dict]:
+        return self._req("GET", "/labels") or []
+
+    def create_label(self, title: str) -> dict:
+        return self._req("PUT", "/labels", json={"title": title})
+
+    def add_label(self, task_id: int, label_id: int) -> None:
+        self._req("PUT", f"/tasks/{task_id}/labels", json={"label_id": label_id})
+
+    def get_or_create_label(self, title: str) -> dict:
+        for label in self.labels():
+            if label.get("title") == title:
+                return label
+        return self.create_label(title)
