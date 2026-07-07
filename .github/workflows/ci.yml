@@ -1,0 +1,34 @@
+name: ci
+on:
+  push: { branches: [main] }
+  pull_request:
+
+jobs:
+  lint-and-unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync
+      - run: uv run ruff check .
+      - run: uv run pytest tests/unit -q
+
+  integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - name: start vikunja
+        run: |
+          docker run -d --name vikunja -p 3456:3456 \
+            -e VIKUNJA_DATABASE_TYPE=sqlite -e VIKUNJA_DATABASE_PATH=/tmp/vikunja.db \
+            -e VIKUNJA_FILES_BASEPATH=/tmp/files \
+            -e VIKUNJA_SERVICE_JWTSECRET=ci-secret \
+            -e VIKUNJA_SERVICE_PUBLICURL=http://localhost:3456/ \
+            -e VIKUNJA_SERVICE_ENABLEREGISTRATION=true \
+            vikunja/vikunja:2.3.0
+          timeout 60 bash -c 'until curl -sf http://localhost:3456/api/v1/info; do sleep 1; done'
+      - run: uv sync
+      - run: uv run pytest tests/integration -q
+        env:
+          VIKUNJA_TEST_URL: http://localhost:3456
