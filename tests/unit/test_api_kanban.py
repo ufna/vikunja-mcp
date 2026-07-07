@@ -49,13 +49,27 @@ def test_configure_kanban_sends_full_replace_with_mode():
         return httpx.Response(200, json=body)
 
     api = make_api(handler)
-    view = {"id": 11, "title": "Kanban", "view_kind": "kanban", "position": 400}
+    view = {"id": 11, "title": "Kanban", "view_kind": "kanban", "position": 250}
     api.configure_kanban(3, view, default_bucket_id=1, done_bucket_id=9)
     assert seen["body"]["bucket_configuration_mode"] == "manual"
-    assert seen["body"]["position"] == 400
+    assert seen["body"]["position"] == 250
     assert seen["body"]["default_bucket_id"] == 1
     assert seen["body"]["done_bucket_id"] == 9
     assert seen["body"]["view_kind"] == "kanban"
+
+
+def test_configure_kanban_preserves_zero_position():
+    seen = {}
+
+    def handler(request):
+        body = json.loads(request.content)
+        seen["body"] = body
+        return httpx.Response(200, json=body)
+
+    api = make_api(handler)
+    view = {"id": 11, "title": "Kanban", "view_kind": "kanban", "position": 0}
+    api.configure_kanban(3, view, default_bucket_id=1, done_bucket_id=9)
+    assert seen["body"]["position"] == 0
 
 
 def test_update_bucket_is_full_replace_with_position():

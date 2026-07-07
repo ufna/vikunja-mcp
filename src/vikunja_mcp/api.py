@@ -135,7 +135,7 @@ class VikunjaAPI:
                 "title": view["title"],
                 "view_kind": "kanban",
                 "bucket_configuration_mode": "manual",
-                "position": view.get("position") or 400,
+                "position": view["position"] if view.get("position") is not None else 400,
                 "default_bucket_id": default_bucket_id,
                 "done_bucket_id": done_bucket_id,
             },
