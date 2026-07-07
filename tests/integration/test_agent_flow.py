@@ -81,5 +81,11 @@ def test_call_human_return_and_decompose(project):
     res = wf1.decompose(t3["id"], subtasks=[{"title": "часть 1"}, {"title": "часть 2"}])
     for child in res["created"]:
         assert wf1.get_task(child["id"])["stage"] == "Queue"
+        # related_tasks — дикт по kind'ам родства, значения — списки полных задач
+        # (проверено против реальной 2.3.0: add_relation(child, parent, "parenttask")
+        # кладёт связь на child под ключом "parenttask")
+        child_raw = boss.get_task(child["id"])
+        parents = child_raw.get("related_tasks", {}).get("parenttask") or []
+        assert t3["id"] in [p["id"] for p in parents]
     d3 = wf1.get_task(t3["id"])
     assert d3["stage"] == "Backlog" and "epic" in d3["labels"]
