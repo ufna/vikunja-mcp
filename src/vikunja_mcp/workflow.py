@@ -241,13 +241,25 @@ class Workflow:
         return {"commented": task_id}
 
     def get_task(self, task_id: int) -> dict:
-        task, stage = self._find_task(task_id)
+        """Полное досье: в отличие от _summary (next_task/claim), описание НЕ обрезано
+        и добавлены related — компактный dict {relation_kind: [{"id", "title"}, ...]}."""
+        _, stage = self._find_task(task_id)
+        task = self.api.get_task(task_id)
         raw_comments = self.api.comments(task_id)
+        related_raw = task.get("related_tasks") or {}
+        related = {
+            kind: [{"id": rt["id"], "title": rt["title"]} for rt in items]
+            for kind, items in related_raw.items()
+        }
         return {
-            **self._summary(task),
+            "id": task["id"],
+            "title": task["title"],
+            "priority": task.get("priority", 0),
+            "description": task.get("description") or "",
             "stage": stage,
             "assignees": [a.get("username", "?") for a in task.get("assignees") or []],
             "labels": [lb.get("title") for lb in task.get("labels") or []],
+            "related": related,
             "comments": [
                 {"author": c.get("author", {}).get("username", "?"), "text": c.get("comment", "")}
                 for c in raw_comments

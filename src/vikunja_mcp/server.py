@@ -60,7 +60,8 @@ def claim(task_id: int) -> dict:
 @mcp.tool()
 @_tool
 def get_task(task_id: int) -> dict:
-    """Досье задачи: описание, стадия, assignees, лейблы и все комментарии."""
+    """Досье задачи: полное (не обрезанное) описание, стадия, assignees, лейблы,
+    related (связанные задачи по видам родства) и все комментарии."""
     return _wf().get_task(task_id)
 
 

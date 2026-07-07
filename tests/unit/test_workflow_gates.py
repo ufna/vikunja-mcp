@@ -105,3 +105,25 @@ def test_comment_and_get_task(env):
     assert dossier["stage"] == "Design"
     assert dossier["comments"][-1]["text"] == "нашёл гочу в API"
     assert dossier["assignees"] == ["agent-infra"]
+
+
+def test_get_task_returns_untruncated_description_and_related(env):
+    """F3: get_task — полное досье, а не урезанная _summary (500 символов, без related)."""
+    api, wf, t = env
+    long_description = "х" * 600
+    api.tasks[t["id"]]["description"] = long_description
+    parent = api.add_task("epic", "Backlog")
+    api.add_relation(t["id"], parent["id"], "parenttask")
+
+    dossier = wf.get_task(t["id"])
+    assert dossier["description"] == long_description
+    assert len(dossier["description"]) > 500
+    assert dossier["related"] == {
+        "parenttask": [{"id": parent["id"], "title": "epic"}],
+    }
+
+
+def test_get_task_related_defaults_to_empty_dict_without_relations(env):
+    api, wf, t = env
+    dossier = wf.get_task(t["id"])
+    assert dossier["related"] == {}

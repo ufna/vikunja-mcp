@@ -51,7 +51,16 @@ class FakeAPI:
         return self.me_user
 
     def get_task(self, task_id):
-        return dict(self.tasks[task_id])
+        t = dict(self.tasks[task_id])
+        # зеркалим реальную vikunja 2.3.0: related_tasks — дикт по kind, значения —
+        # ПОЛНЫЕ таск-дикты (наблюдалось эмпирически), выведен из relations "на лету"
+        # (не хранится отдельно на таске) -> add_relation сразу видно в get_task.
+        related: dict[str, list[dict]] = {}
+        for tid, other_id, kind in self.relations:
+            if tid == task_id and other_id in self.tasks:
+                related.setdefault(kind, []).append(dict(self.tasks[other_id]))
+        t["related_tasks"] = related
+        return t
 
     def update_task(self, task_id, **fields):
         self.tasks[task_id].update(fields)
