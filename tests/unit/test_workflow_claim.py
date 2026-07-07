@@ -41,6 +41,37 @@ def test_next_task_prefers_my_active(env):
     assert res["stage"] == "Build"
 
 
+def test_next_task_resumes_stuck_claim_in_queue(env):
+    """F2: клейм с не доведённым до конца move (assign ok, move failed) — задача моя,
+    но всё ещё в Queue. next_task обязан её вернуть, а не молча пропустить."""
+    api, wf = env
+    stuck = api.add_task("half-claimed", "Queue", assignee=api.me_user)
+    res = wf.next_task()
+    assert res["resume"] is True
+    assert res["stage"] == "Queue"
+    assert res["task"]["id"] == stuck["id"]
+    assert "claim" in res["note"]
+
+
+def test_next_task_stuck_claim_outranks_higher_priority_free_task(env):
+    """Возврат к своему недоклейменному таску важнее, даже если в очереди есть
+    более приоритетная свободная задача — сначала долечи то, что уже на тебе."""
+    api, wf = env
+    api.add_task("free-and-shiny", "Queue", priority=10)
+    stuck = api.add_task("half-claimed", "Queue", priority=1, assignee=api.me_user)
+    res = wf.next_task()
+    assert res["resume"] is True and res["task"]["id"] == stuck["id"]
+
+
+def test_next_task_active_stage_still_wins_over_stuck_queue(env):
+    """Активная Design/Build задача (обычный resume) приоритетнее недоклейменной в Queue."""
+    api, wf = env
+    api.add_task("half-claimed", "Queue", assignee=api.me_user)
+    active = api.add_task("in build", "Build", assignee=api.me_user)
+    res = wf.next_task()
+    assert res["resume"] is True and res["stage"] == "Build" and res["task"]["id"] == active["id"]
+
+
 def test_claim_happy_path(env):
     api, wf = env
     t = api.add_task("job", "Queue")
@@ -62,6 +93,26 @@ def test_claim_refuses_already_assigned(env):
     api, wf = env
     t = api.add_task("taken", "Queue", assignee={"id": 9, "username": "other"})
     with pytest.raises(WorkflowError, match="other"):
+        wf.claim(t["id"])
+
+
+def test_claim_self_heals_when_sole_assignee_is_already_me(env):
+    """F2: партиальный клейм (assign прошёл, move — нет) или человек руками вернул
+    заклеймленную задачу в Queue. Повторный claim должен долечить, а не отказывать."""
+    api, wf = env
+    t = api.add_task("half-claimed", "Queue", assignee=api.me_user)
+    res = wf.claim(t["id"])
+    assert res["claimed"] is True
+    assert api.stage_of(t["id"]) == "Design"
+    assert [a["id"] for a in api.tasks[t["id"]]["assignees"]] == [api.me_user["id"]]
+    assert any(c.startswith("[claim]") for c in api.comments_text(t["id"]))
+
+
+def test_claim_does_not_self_heal_outside_queue(env):
+    """Сам себе назначен, но задача не в Queue — обычный отказ, self-heal тут не при чём."""
+    api, wf = env
+    t = api.add_task("half-claimed-elsewhere", "Build", assignee=api.me_user)
+    with pytest.raises(WorkflowError, match="Queue"):
         wf.claim(t["id"])
 
 

@@ -95,6 +95,14 @@ class Workflow:
                 "note": "это твоя активная задача — продолжай её, новую не клеймить",
             }
 
+        stuck = [t for t in board.get("Queue", []) if my_id in self._assignee_ids(t)]
+        if stuck:
+            stuck.sort(key=lambda t: -t.get("priority", 0))
+            return {
+                "resume": True, "stage": "Queue", "task": self._summary(stuck[0]),
+                "note": "клейм не доведён — вызови claim(task_id) повторно",
+            }
+
         queue = [
             t for t in board.get("Queue", [])
             if not self._assignee_ids(t) and not self._has_label(t, LABEL_BLOCKED)
@@ -109,12 +117,17 @@ class Workflow:
         if stage != "Queue":
             raise WorkflowError(f"задача в '{stage}', клеймить можно только из Queue")
         existing = task.get("assignees") or []
-        if existing:
+        me = self._me()
+        # self-heal: партиальный клейм (assign прошёл, move — нет) или человек руками
+        # вернул заклеймленную задачу в Queue — я тут единственный assignee, долечиваем
+        # вместо отказа. Кто-то ДРУГОЙ среди assignees (один или вместе со мной) — отказ как раньше.
+        self_heal = len(existing) == 1 and existing[0].get("id") == me["id"]
+        if existing and not self_heal:
             names = ", ".join(a.get("username", "?") for a in existing)
             raise WorkflowError(f"уже занята ({names}) — возьми следующую через next_task")
 
-        me = self._me()
-        self.api.add_assignee(task_id, me["id"])
+        if not self_heal:
+            self.api.add_assignee(task_id, me["id"])
         fresh = self.api.get_task(task_id)
         others = [a for a in fresh.get("assignees") or [] if a["id"] != me["id"]]
         if others:
