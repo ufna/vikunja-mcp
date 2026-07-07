@@ -128,3 +128,115 @@ class Workflow:
             "claimed": True, "task": self._summary(fresh),
             "next": "опиши подход и вызови advance(to='build', spec=...)",
         }
+
+    def _move(self, task_id: int, stage: str) -> None:
+        self.api.move_task(
+            self.project_id, self._view()["id"], self._bucket(stage)["id"], task_id
+        )
+
+    def advance(
+        self, task_id: int, to: str,
+        spec: str | None = None, worklog: str | None = None, evidence: str | None = None,
+    ) -> dict:
+        to = (to or "").strip().lower()
+        if to == "done":
+            raise WorkflowError("в Done переводит только человек после ревью — тебе туда нельзя")
+        if to not in AGENT_ADVANCE:
+            raise WorkflowError(f"недопустимый переход '{to}'; доступны: build, review")
+        from_stage, to_stage = AGENT_ADVANCE[to]
+
+        task, stage = self._find_task(task_id)
+        self._require_mine(task)
+        if stage != from_stage:
+            raise WorkflowError(
+                f"переход в {to_stage} возможен только из {from_stage}, задача сейчас в {stage}"
+            )
+
+        if to == "build":
+            if not (spec or "").strip():
+                raise WorkflowError("нужен spec: краткое описание подхода перед реализацией")
+            self.api.add_comment(task_id, f"[spec]\n{spec.strip()}")
+        else:
+            if not (worklog or "").strip() or not (evidence or "").strip():
+                raise WorkflowError(
+                    "для Review нужны worklog (что сделано) и evidence "
+                    "(ссылка на коммит/PR или вывод верификации)"
+                )
+            self.api.add_comment(
+                task_id, f"[worklog]\n{worklog.strip()}\n\nEvidence: {evidence.strip()}"
+            )
+        self._move(task_id, to_stage)
+        return {"moved_to": to_stage, "task_id": task_id}
+
+    def call_human(self, task_id: int, question: str) -> dict:
+        if not (question or "").strip():
+            raise WorkflowError("сформулируй вопрос: что нужно от человека и какие варианты ты рассмотрел")
+        task, stage = self._find_task(task_id)
+        self._require_mine(task)
+        if stage not in ACTIVE_STAGES:
+            raise WorkflowError(f"call_human доступен только из Design/Build, задача в {stage}")
+        self.api.add_comment(task_id, f"[нужен человек] {question.strip()}")
+        self._move(task_id, "Call to Human")
+        return {
+            "moved_to": "Call to Human", "task_id": task_id,
+            "note": "assignee сохранён; человек ответит комментом и вернёт задачу в Design/Build",
+        }
+
+    def return_task(self, task_id: int, reason: str) -> dict:
+        if not (reason or "").strip():
+            raise WorkflowError("укажи причину блокировки — она уйдёт комментом в задачу")
+        task, _stage = self._find_task(task_id)
+        self._require_mine(task)
+        self.api.add_comment(task_id, f"[blocked] {reason.strip()}")
+        label = self.api.get_or_create_label(LABEL_BLOCKED)
+        self.api.add_label(task_id, label["id"])
+        self.api.remove_assignee(task_id, self._me()["id"])
+        self._move(task_id, "Backlog")
+        return {"moved_to": "Backlog", "task_id": task_id, "labeled": LABEL_BLOCKED}
+
+    def decompose(self, task_id: int, subtasks: list[dict]) -> dict:
+        if not subtasks or len(subtasks) < 2:
+            raise WorkflowError("декомпозиция — это минимум 2 подзадачи")
+        if any(not (st.get("title") or "").strip() for st in subtasks):
+            raise WorkflowError("у каждой подзадачи должен быть title")
+        task, _stage = self._find_task(task_id)
+        self._require_mine(task)
+
+        created = []
+        for st in subtasks:
+            child = self.api.create_task(
+                self.project_id, st["title"].strip(),
+                description=st.get("description", ""), priority=int(st.get("priority", 0)),
+            )
+            self.api.add_relation(child["id"], task_id, "parenttask")
+            self._move(child["id"], "Queue")
+            created.append({"id": child["id"], "title": child["title"]})
+
+        listing = ", ".join(f"#{c['id']} {c['title']}" for c in created)
+        self.api.add_comment(task_id, f"[decompose] создано: {listing}")
+        label = self.api.get_or_create_label(LABEL_EPIC)
+        self.api.add_label(task_id, label["id"])
+        self.api.remove_assignee(task_id, self._me()["id"])
+        self._move(task_id, "Backlog")
+        return {"created": created, "parent": {"id": task_id, "moved_to": "Backlog", "labeled": LABEL_EPIC}}
+
+    def comment(self, task_id: int, text: str) -> dict:
+        if not (text or "").strip():
+            raise WorkflowError("пустой коммент не нужен")
+        self._find_task(task_id)
+        self.api.add_comment(task_id, text.strip())
+        return {"commented": task_id}
+
+    def get_task(self, task_id: int) -> dict:
+        task, stage = self._find_task(task_id)
+        raw_comments = self.api.comments(task_id)
+        return {
+            **self._summary(task),
+            "stage": stage,
+            "assignees": [a.get("username", "?") for a in task.get("assignees") or []],
+            "labels": [lb.get("title") for lb in task.get("labels") or []],
+            "comments": [
+                {"author": c.get("author", {}).get("username", "?"), "text": c.get("comment", "")}
+                for c in raw_comments
+            ],
+        }
