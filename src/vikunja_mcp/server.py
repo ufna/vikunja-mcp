@@ -2,6 +2,7 @@
 import sys
 from functools import wraps
 
+import httpx
 from mcp.server.fastmcp import FastMCP
 
 from vikunja_mcp import __version__
@@ -36,6 +37,11 @@ def _tool(fn):
             return {"error": str(e)}
         except VikunjaError as e:
             return {"error": f"Vikunja API: {e.status} {e.message}"}
+        except httpx.HTTPError as e:
+            return {
+                "error": f"трекер недоступен ({e.__class__.__name__}): "
+                f"проверь url в .vikunja-mcp.toml и VPN"
+            }
 
     return wrapper
 
