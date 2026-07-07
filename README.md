@@ -52,7 +52,7 @@ Config is resolved from three layers, in priority order:
 [tracker]
 url = "https://vikunja.example.com"
 project_id = 12
-project = "My Project"   # label only, printed in messages; not used for lookup
+project = "My Project"   # informational label; not used for lookup
 ```
 
 ```
