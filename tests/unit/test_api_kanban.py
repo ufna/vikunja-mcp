@@ -1,8 +1,10 @@
 import json
 
 import httpx
+import pytest
 
 from tests.unit.test_api import make_api
+from vikunja_mcp.api import VikunjaError
 
 
 def test_projects_filters_pseudo():
@@ -23,6 +25,98 @@ def test_kanban_view_picks_kanban_kind():
 
     api = make_api(handler)
     assert api.kanban_view(3)["id"] == 11
+
+
+def test_kanban_view_missing_raises_actionable_error():
+    """Гоча: голый next() на пустом генераторе роняет StopIteration — бесполезная ошибка."""
+    def handler(request):
+        return httpx.Response(200, json=[
+            {"id": 10, "view_kind": "list"}, {"id": 12, "view_kind": "table"},
+        ])
+
+    api = make_api(handler)
+    with pytest.raises(VikunjaError, match="kanban-вида"):
+        api.kanban_view(3)
+
+
+def test_view_tasks_merges_paginated_buckets():
+    """F1: GET .../views/{v}/tasks пагинирует tasks[] ВНУТРИ бакета через page= (наблюдалось
+    эмпирически против vikunja 2.3.0: фиксированный page size 50, как max_items_per_page из
+    /info; per_page на эту вложенную пагинацию не влияет). Без мёржа страниц next_task/
+    _find_task слепнут после первых 50 задач в бакете."""
+    calls = []
+
+    def handler(request):
+        page = int(request.url.params.get("page", "1"))
+        calls.append(page)
+        if page == 1:
+            tasks = [{"id": i, "title": f"t{i}"} for i in range(1, 51)]     # полная страница
+        elif page == 2:
+            tasks = [{"id": i, "title": f"t{i}"} for i in range(51, 61)]    # хвост, 10 < 50
+        else:
+            tasks = []
+        return httpx.Response(200, json=[{"id": 4, "title": "Queue", "tasks": tasks}])
+
+    api = make_api(handler)
+    board = api.view_tasks(3, 11)
+    assert calls == [1, 2]                        # остановились по "меньше page size", без page=3
+    assert len(board) == 1
+    ids = [t["id"] for t in board[0]["tasks"]]
+    assert sorted(ids) == list(range(1, 61))       # все 60 смёржены, ничего не потеряно
+
+
+def test_view_tasks_dedupes_overlap_between_pages():
+    """Наблюдалось эмпирически: нестабильная сортировка отдаёт одну и ту же задачу на двух
+    страницах подряд — мёрж обязан схлопнуть дубликат по id (а не завести вторую копию),
+    но НЕ ценой потери новых задач, которые пришли на той же странице рядом с повтором."""
+    def handler(request):
+        page = int(request.url.params.get("page", "1"))
+        if page == 1:
+            tasks = [{"id": i, "title": f"t{i}"} for i in range(1, 51)]
+        elif page == 2:
+            tasks = [{"id": i, "title": f"t{i}"} for i in range(41, 61)]    # 41-50 повтор + 51-60 новые
+        else:
+            tasks = []
+        return httpx.Response(200, json=[{"id": 4, "title": "Queue", "tasks": tasks}])
+
+    api = make_api(handler)
+    board = api.view_tasks(3, 11)
+    ids = [t["id"] for t in board[0]["tasks"]]
+    assert sorted(ids) == list(range(1, 61))       # обе страницы смёржены
+    assert len(ids) == len(set(ids))                # без дублей 41-50
+
+
+def test_view_tasks_independent_buckets_stop_separately():
+    """Один бакет с полной страницей, другой уже исчерпан на page=1 — обязаны дойти до
+    исчерпания бОльшего бакета, не потеряв меньший и не зациклившись на пустом."""
+    def handler(request):
+        page = int(request.url.params.get("page", "1"))
+        big = [{"id": i, "title": f"t{i}"} for i in range(1, 51)] if page == 1 else (
+            [{"id": i, "title": f"t{i}"} for i in range(51, 56)] if page == 2 else []
+        )
+        small = [{"id": 900, "title": "solo"}] if page == 1 else []
+        return httpx.Response(200, json=[
+            {"id": 4, "title": "Queue", "tasks": big},
+            {"id": 5, "title": "Doing", "tasks": small},
+        ])
+
+    api = make_api(handler)
+    board = api.view_tasks(3, 11)
+    by_title = {b["title"]: [t["id"] for t in b["tasks"]] for b in board}
+    assert sorted(by_title["Queue"]) == list(range(1, 56))
+    assert by_title["Doing"] == [900]
+
+
+def test_view_tasks_single_page_unchanged():
+    def handler(request):
+        assert request.url.params.get("page") == "1"
+        return httpx.Response(
+            200, json=[{"id": 4, "title": "Queue", "tasks": [{"id": 1, "title": "only"}]}]
+        )
+
+    api = make_api(handler)
+    board = api.view_tasks(3, 11)
+    assert board == [{"id": 4, "title": "Queue", "tasks": [{"id": 1, "title": "only"}]}]
 
 
 def test_move_task_posts_to_bucket_endpoint():

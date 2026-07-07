@@ -80,12 +80,51 @@ def test_call_human_return_and_decompose(project):
     wf1.claim(t3["id"])
     res = wf1.decompose(t3["id"], subtasks=[{"title": "часть 1"}, {"title": "часть 2"}])
     for child in res["created"]:
-        assert wf1.get_task(child["id"])["stage"] == "Queue"
-        # related_tasks — дикт по kind'ам родства, значения — списки полных задач
-        # (проверено против реальной 2.3.0: add_relation(child, parent, "parenttask")
-        # кладёт связь на child под ключом "parenttask")
+        child_dossier = wf1.get_task(child["id"])
+        assert child_dossier["stage"] == "Queue"
+        # F3: get_task теперь возвращает related — компактный дикт по kind'ам родства,
+        # построенный из raw related_tasks (проверено против реальной 2.3.0:
+        # add_relation(child, parent, "parenttask") кладёт связь на child под ключом
+        # "parenttask", значения — полные таск-дикты, отсюда компактим до id/title)
+        assert t3["id"] in [p["id"] for p in child_dossier["related"].get("parenttask", [])]
+        # тот же факт напрямую через raw API — независимое подтверждение формы related_tasks
         child_raw = boss.get_task(child["id"])
         parents = child_raw.get("related_tasks", {}).get("parenttask") or []
         assert t3["id"] in [p["id"] for p in parents]
     d3 = wf1.get_task(t3["id"])
     assert d3["stage"] == "Backlog" and "epic" in d3["labels"]
+
+
+def test_pagination_beyond_first_page(boss_jwt, agent_jwts):
+    """F1: >50 задач в одном бакете Queue. GET .../views/{v}/tasks у vikunja 2.3.0
+    пагинирует tasks[] ВНУТРИ бакета независимо (params={"page": n}, фиксированный page
+    size 50 = max_items_per_page сервера, не зависит от per_page) — без мёржа страниц
+    (см. api.view_tasks) next_task/_find_task слепнут на задачах за пределами page 1.
+
+    Изолированный проект (не шарим board с другими тестами модуля), чтобы 56 задач
+    не мешали приоритетным сравнениям в остальных тестах файла.
+
+    `top` создаётся ПЕРВЫМ, то есть самой "старой" задачей бакета, а 55 менее
+    приоритетных filler'ов — следом: эмпирически (отчёт F1) vikunja отдаёт на page=1
+    самые СВЕЖИЕ 50 задач бакета, более старые — только на следующих страницах, так что
+    top гарантированно недостижим без пагинации по страницам.
+    """
+    boss = VikunjaAPI(BASE, boss_jwt)
+    pid = reconcile(boss, f"page-{uuid.uuid4().hex[:8]}", shares=[("agent1", 1)])
+    view = boss.kanban_view(pid)
+    queue_id = next(b["id"] for b in boss.buckets(pid, view["id"]) if b["title"] == "Queue")
+
+    top = boss.create_task(pid, "самый приоритетный", priority=9)
+    boss.move_task(pid, view["id"], queue_id, top["id"])
+    for i in range(55):
+        filler = boss.create_task(pid, f"filler-{i:03d}", priority=1)
+        boss.move_task(pid, view["id"], queue_id, filler["id"])
+
+    jwt1, _ = agent_jwts
+    wf1 = Workflow(VikunjaAPI(BASE, mint_scoped_token(jwt1)), pid)
+
+    picked = wf1.next_task()
+    assert picked["task"]["id"] == top["id"]   # не потерялся среди 56 задач в Queue
+
+    wf1.claim(top["id"])                        # _find_task обязан найти его за page 1
+    assert wf1.get_task(top["id"])["stage"] == "Design"

@@ -94,7 +94,10 @@ class VikunjaAPI:
         return self._req("GET", f"/projects/{project_id}/views") or []
 
     def kanban_view(self, project_id: int) -> dict:
-        return next(v for v in self.views(project_id) if v["view_kind"] == "kanban")
+        for v in self.views(project_id):
+            if v["view_kind"] == "kanban":
+                return v
+        raise VikunjaError(404, "у проекта нет kanban-вида — прогони `vikunja-mcp setup`")
 
     def buckets(self, project_id: int, view_id: int) -> list[dict]:
         return self._req("GET", f"/projects/{project_id}/views/{view_id}/buckets") or []
@@ -116,8 +119,44 @@ class VikunjaAPI:
             json={"title": bucket["title"], "position": position},
         )
 
+    # эмпирически против vikunja 2.3.0 (см. отчёт F1): GET .../views/{v}/tasks пагинирует
+    # tasks[] ВНУТРИ каждого бакета независимо через params={"page": n} с фиксированным
+    # page size = max_items_per_page сервера (50 в дефолтной поставке; per_page на эту
+    # вложенную пагинацию не влияет). Страницы могут перекрываться на 1-2 задачи из-за
+    # нестабильной сортировки при равных ключах (без ORDER BY тайбрейкера) — наблюдался
+    # дубль, ни разу не пропуск. Мёржим по (bucket_id, task_id), останавливаемся когда ни
+    # один бакет не отдал полную страницу (значит дальше для всех пусто) ИЛИ страница не
+    # принесла ни одной новой задачи (защита от зацикливания на нестабильной сортировке).
+    _VIEW_TASKS_PAGE_SIZE = 50
+
     def view_tasks(self, project_id: int, view_id: int) -> list[dict]:
-        return self._req("GET", f"/projects/{project_id}/views/{view_id}/tasks") or []
+        merged: dict[int, dict] = {}
+        seen: dict[int, set] = {}
+        page = 1
+        while True:
+            buckets = self._req(
+                "GET", f"/projects/{project_id}/views/{view_id}/tasks", params={"page": page}
+            ) or []
+            if not buckets:
+                break
+            saw_full_page = False
+            added_new = False
+            for bucket in buckets:
+                bid = bucket["id"]
+                dest = merged.setdefault(bid, {**bucket, "tasks": []})
+                ids = seen.setdefault(bid, set())
+                tasks = bucket.get("tasks") or []
+                if len(tasks) >= self._VIEW_TASKS_PAGE_SIZE:
+                    saw_full_page = True
+                for task in tasks:
+                    if task["id"] not in ids:
+                        ids.add(task["id"])
+                        dest["tasks"].append(task)
+                        added_new = True
+            if not saw_full_page or not added_new:
+                break
+            page += 1
+        return list(merged.values())
 
     def move_task(self, project_id: int, view_id: int, bucket_id: int, task_id: int) -> None:
         self._req(
