@@ -1,6 +1,6 @@
 import pytest
 
-from vikunja_mcp.config import Config, ConfigError, load_config
+from vikunja_mcp.config import Config, ConfigError, _parse_env_file, load_config
 
 
 def _write_toml(path, project_id=3, url="https://tracker.zz.hgdev.com"):
@@ -71,3 +71,39 @@ def test_env_only_no_toml_works(tmp_path):
         "VIKUNJA_TOKEN": "tk", "VIKUNJA_URL": "http://x", "VIKUNJA_PROJECT_ID": "5",
     })
     assert cfg.project_id == 5 and cfg.project_name is None
+
+
+# --- F4: quotes / inline comments in the user env file ---
+
+def test_env_file_strips_surrounding_double_quotes(tmp_path):
+    path = tmp_path / "userenv"
+    path.write_text('VIKUNJA_TOKEN="abc"\n')
+    assert _parse_env_file(path)["VIKUNJA_TOKEN"] == "abc"
+
+
+def test_env_file_strips_surrounding_single_quotes(tmp_path):
+    path = tmp_path / "userenv"
+    path.write_text("VIKUNJA_TOKEN='abc'\n")
+    assert _parse_env_file(path)["VIKUNJA_TOKEN"] == "abc"
+
+
+def test_env_file_strips_trailing_comment_on_unquoted_value(tmp_path):
+    path = tmp_path / "userenv"
+    path.write_text("VIKUNJA_TOKEN=abc # note\n")
+    assert _parse_env_file(path)["VIKUNJA_TOKEN"] == "abc"
+
+
+def test_env_file_keeps_hash_inside_quotes(tmp_path):
+    """Кавычки защищают значение — # внутри них не комментарий."""
+    path = tmp_path / "userenv"
+    path.write_text('VIKUNJA_TOKEN="abc # not a comment"\n')
+    assert _parse_env_file(path)["VIKUNJA_TOKEN"] == "abc # not a comment"
+
+
+# --- F5: bad VIKUNJA_PROJECT_ID ---
+
+def test_bad_project_id_raises_config_error(tmp_path):
+    with pytest.raises(ConfigError, match="VIKUNJA_PROJECT_ID/project_id должен быть числом"):
+        load_config(cwd=tmp_path, environ={
+            "VIKUNJA_TOKEN": "tk", "VIKUNJA_URL": "http://x", "VIKUNJA_PROJECT_ID": "abc",
+        })

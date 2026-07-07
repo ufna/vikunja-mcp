@@ -32,7 +32,12 @@ def _parse_env_file(path: Path) -> dict[str, str]:
         if not line or line.startswith("#") or "=" not in line:
             continue
         key, _, value = line.partition("=")
-        out[key.strip()] = value.strip()
+        value = value.strip()
+        if len(value) >= 2 and value[0] in "\"'" and value[-1] == value[0]:
+            value = value[1:-1]              # кавычки защищают значение — # внутри не комментарий
+        else:
+            value = value.split(" #", 1)[0].rstrip()   # только у НЕзакавыченных значений
+        out[key.strip()] = value
     return out
 
 
@@ -70,7 +75,13 @@ def load_config(cwd: Path | None = None, environ: Mapping[str, str] | None = Non
             f"нет токена: положи VIKUNJA_TOKEN=... в {USER_ENV_FILE} (chmod 600) "
             f"или передай через env {ENV_TOKEN}"
         )
+    try:
+        project_id = int(raw_pid)
+    except (TypeError, ValueError):
+        raise ConfigError(
+            f"VIKUNJA_PROJECT_ID/project_id должен быть числом, получено {raw_pid!r}"
+        )
     return Config(
         url=str(url), token=str(token),
-        project_id=int(raw_pid), project_name=repo.get("project"),
+        project_id=project_id, project_name=repo.get("project"),
     )
