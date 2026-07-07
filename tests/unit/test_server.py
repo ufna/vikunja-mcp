@@ -1,0 +1,29 @@
+import asyncio
+
+from vikunja_mcp import server
+
+
+def test_exposes_exactly_eight_workflow_tools():
+    tools = asyncio.run(server.mcp.list_tools())
+    names = {t.name for t in tools}
+    assert names == {
+        "next_task", "claim", "get_task", "comment",
+        "advance", "call_human", "return_task", "decompose",
+    }
+
+
+def test_tool_errors_are_returned_not_raised(monkeypatch, tmp_path):
+    """Без конфига тулза должна вернуть {'error': ...}, а не уронить сервер."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("VIKUNJA_TOKEN", raising=False)
+    monkeypatch.delenv("VIKUNJA_URL", raising=False)
+    monkeypatch.delenv("VIKUNJA_PROJECT_ID", raising=False)
+    monkeypatch.setattr("vikunja_mcp.config.USER_ENV_FILE", tmp_path / "nope")
+    server._reset_workflow_cache()
+    result = server.next_task()
+    assert "error" in result
+
+
+def test_version_flag(capsys):
+    server.main(argv=["--version"])
+    assert "0.1.0" in capsys.readouterr().out
