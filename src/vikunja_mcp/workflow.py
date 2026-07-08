@@ -248,13 +248,13 @@ class Workflow:
             self._remove_label(task, LABEL_REVIEW_FAILED)
         self._move(task_id, to_stage)
         result = {"moved_to": to_stage, "task_id": task_id}
-        # push-нудж: багфикс требует независимого ревью — в стиле next/note-хинтов
-        # просим оркестратора сразу задиспатчить свежий review-саб-агент в фоне
+        # push-нудж: багфикс требует независимого ревью — пер-таск-агент вернёт
+        # review_needed оркестратору, тот задиспатчит ревьюера (author != reviewer)
         if to == "review" and self._has_label(task, LABEL_BUG):
             result["review_needed"] = True
             result["note"] = (
-                "это баг — сразу задиспатчь свежий review-саб-агент в фоне "
-                "(он вынесет review_task), и параллельно бери следующую задачу"
+                "это баг — верни оркестратору признак review_needed в своём итоге: "
+                "он задиспатчит независимого ревьюера в фоне (author ≠ reviewer)"
             )
         return result
 

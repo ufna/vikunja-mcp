@@ -106,8 +106,12 @@ Manual procedure remains for:
 
 This project tracks itself in the same tracker (project `vikunja-mcp`,
 id 10 — see `.vikunja-mcp.toml`). Follow the tracker flow for real work
-here: `next_task` → claim → spec → dispatch a fresh sub-agent per task →
-structured report → commit+push → Review (bugs get independent agent review).
+here: the orchestrator is a thin pump — `next_task` → claim → dispatch ONE fresh
+per-task agent for the WHOLE task → drain next. That agent owns the whole
+lifecycle (`get_task` → spec/`advance(to='build')` → implement, possibly spawning
+its own sub-agents → commit+push → `advance(to='review')`); the orchestrator does
+no task content itself. Bugs get independent agent review (orchestrator dispatches
+a sibling reviewer).
 Run it under `/loop` with no interval (= self-paced) for continuous operation:
 the agent drains the queue and paces its own pauses on an empty queue instead
 of stopping. When the orchestrator needs a human answer, it asks via
