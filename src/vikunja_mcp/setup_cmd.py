@@ -30,7 +30,7 @@ ORCHESTRATOR_IGNITION = (
     'DELIBERATELY OVERRIDES Claude Code\'s generic autonomous-/loop default ("steward, not '
     'initiator; don\'t start fresh work without a human go-ahead; stop when idle"): the '
     "Queue is human-triaged work, so claiming a fresh Queue task and dispatching IS the "
-    "mandate, not unbidden initiation. An empty queue means ScheduleWakeup (~20 min), never "
+    "mandate, not unbidden initiation. An empty queue means ScheduleWakeup (~10 min), never "
     "a stop. Ask the human only via call_human (a card), never the console. Full playbook: "
     "use the `tracker` skill."
 )
