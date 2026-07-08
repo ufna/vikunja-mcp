@@ -49,7 +49,8 @@ docker rm -f vikunja-test
   `bucket_configuration_mode="manual"` + `position` + `title` + `view_kind`
   or the board loses its columns; board fetch paginates per bucket
   (page size read from `/info`'s `max_items_per_page`, `_PAGE_SIZE_FALLBACK`
-  when unavailable, dedupe by bucket+task id).
+  when unavailable, dedupe page overlap by bucket+task id, then GLOBALLY by
+  task id keeping the last-seen bucket so a task moved mid-pagination lands once).
 - `src/vikunja_mcp/workflow.py` — the product rules: stages, gates,
   assign-then-verify claim (with self-heal), review offering (verdict vs
   worklog timestamps), comment markers `[claim] [spec] [worklog] [нужен

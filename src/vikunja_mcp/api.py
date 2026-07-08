@@ -150,6 +150,7 @@ class VikunjaAPI:
         page_size = self._page_size()
         merged: dict[int, dict] = {}
         seen: dict[int, set] = {}
+        owner: dict[int, int] = {}          # task_id -> последний бакет, где её видели (см. дедуп ниже)
         page = 1
         while True:
             buckets = self._req(
@@ -167,6 +168,7 @@ class VikunjaAPI:
                 if len(tasks) >= page_size:
                     saw_full_page = True
                 for task in tasks:
+                    owner[task["id"]] = bid          # последнее вхождение выигрывает (см. дедуп ниже)
                     if task["id"] not in ids:
                         ids.add(task["id"])
                         dest["tasks"].append(task)
@@ -174,6 +176,15 @@ class VikunjaAPI:
             if not saw_full_page or not added_new:
                 break
             page += 1
+        # #41 глобальный дедуп по task id: задачу, переезжающую между колонками ВО ВРЕМЯ
+        # постраничного чтения, мы видим в старом бакете на ранней странице и в новом — на поздней,
+        # т.е. дважды. Покомпонентный (bucket_id, task_id) merge выше оба вхождения сохранял, и
+        # _find_task (берёт первое) залипал на устаревшей колонке. Оставляем задачу ТОЛЬКО в её
+        # последнем бакете: страницы читаются последовательно во времени, поздняя = более свежее
+        # наблюдение доски, куда бы задачу ни двигали. После этого прохода каждый task id встречается
+        # ровно один раз, поэтому дедуп и _find_task (первое вхождение) согласованы по определению.
+        for bid, dest in merged.items():
+            dest["tasks"] = [t for t in dest["tasks"] if owner.get(t["id"]) == bid]
         return list(merged.values())
 
     def move_task(self, project_id: int, view_id: int, bucket_id: int, task_id: int) -> None:

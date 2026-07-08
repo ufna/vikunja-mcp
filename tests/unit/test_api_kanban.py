@@ -90,6 +90,38 @@ def test_view_tasks_dedupes_overlap_between_pages():
     assert len(ids) == len(set(ids))                # без дублей 41-50
 
 
+def test_view_tasks_dedupes_moved_task_globally_keeping_last_bucket():
+    """#41: задачу двигают между колонками ВО ВРЕМЯ постраничного чтения — она приходит в старом
+    бакете на page 1 и в новом на page 2, попадая в снапшот дважды. Покомпонентный дедуп по
+    (bucket_id, task_id) обе копии сохранял, и _find_task залипал на первой (устаревшей) колонке.
+    Глобальный дедуп по task id оставляет ровно одно вхождение — в ПОСЛЕДНЕМ виденном бакете
+    (поздняя страница = более свежее наблюдение доски)."""
+    def handler(request):
+        if request.url.path.endswith("/info"):
+            return httpx.Response(200, json={"max_items_per_page": 2})
+        page = int(request.url.params.get("page", "1"))
+        if page == 1:
+            queue = [{"id": 1, "title": "t1"}, {"id": 7, "title": "t7"}]   # 2 = полная → тянем page 2
+            build = []
+        elif page == 2:
+            queue = []                                                      # задача 7 уехала из Queue…
+            build = [{"id": 7, "title": "t7"}]                             # …в Build (свежая колонка)
+        else:
+            queue = build = []
+        return httpx.Response(200, json=[
+            {"id": 4, "title": "Queue", "tasks": queue},
+            {"id": 5, "title": "Build", "tasks": build},
+        ])
+
+    api = make_api(handler)
+    board = api.view_tasks(3, 11)
+    by_title = {b["title"]: [t["id"] for t in b["tasks"]] for b in board}
+    all_ids = [tid for ids in by_title.values() for tid in ids]
+    assert all_ids.count(7) == 1                     # ровно одно вхождение глобально, а не два
+    assert by_title["Build"] == [7]                  # выжила последняя (свежая) колонка
+    assert by_title["Queue"] == [1]                  # устаревшая колонка потеряла 7, но не 1
+
+
 def test_view_tasks_independent_buckets_stop_separately():
     """Один бакет с полной страницей, другой уже исчерпан на page=1 — обязаны дойти до
     исчерпания бОльшего бакета, не потеряв меньший и не зациклившись на пустом."""
