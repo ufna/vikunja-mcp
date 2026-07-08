@@ -6,6 +6,8 @@ ACTIVE_STAGES = ("Design", "Build")
 LABEL_BLOCKED = "blocked"
 LABEL_EPIC = "epic"
 LABEL_BUG = "bug"
+LABEL_REVIEWED = "reviewed"            # прошёл независимое агентское ревью
+LABEL_REVIEW_FAILED = "review-failed"  # отбит на доработку, сейчас переделывается
 
 # advance: to -> (откуда, куда)
 AGENT_ADVANCE = {"build": ("Design", "Build"), "review": ("Build", "Review")}
@@ -63,6 +65,17 @@ class Workflow:
     @staticmethod
     def _has_label(task: dict, title: str) -> bool:
         return any(lb.get("title") == title for lb in task.get("labels") or [])
+
+    def _add_label(self, task_id: int, title: str) -> None:
+        label = self.api.get_or_create_label(title)
+        self.api.add_label(task_id, label["id"])
+
+    def _remove_label(self, task: dict, title: str) -> None:
+        # снимаем только реально висящую на снапшоте метку — иначе DELETE по
+        # несуществующей связи вернул бы 404
+        lb = next((x for x in task.get("labels") or [] if x.get("title") == title), None)
+        if lb:
+            self.api.remove_label(task["id"], lb["id"])
 
     def _require_mine(self, task: dict) -> None:
         if self._me()["id"] not in self._assignee_ids(task):
@@ -231,8 +244,19 @@ class Workflow:
             report.append(f"Сделано: {worklog.strip()}")
             report.append(f"\nEvidence: {evidence.strip()}")
             self.api.add_comment(task_id, "\n".join(report))
+            # resubmit-reset: снимаем прошлый review-failed (no-op на первом сабмите)
+            self._remove_label(task, LABEL_REVIEW_FAILED)
         self._move(task_id, to_stage)
-        return {"moved_to": to_stage, "task_id": task_id}
+        result = {"moved_to": to_stage, "task_id": task_id}
+        # push-нудж: багфикс требует независимого ревью — в стиле next/note-хинтов
+        # просим оркестратора сразу задиспатчить свежий review-саб-агент в фоне
+        if to == "review" and self._has_label(task, LABEL_BUG):
+            result["review_needed"] = True
+            result["note"] = (
+                "это баг — сразу задиспатчь свежий review-саб-агент в фоне "
+                "(он вынесет review_task), и параллельно бери следующую задачу"
+            )
+        return result
 
     def review_task(self, task_id: int, verdict: str, report: str) -> dict:
         verdict = (verdict or "").strip().lower()
@@ -248,11 +272,15 @@ class Workflow:
 
         if verdict == "approve":
             self.api.add_comment(task_id, f"[review] APPROVE\n{report.strip()}")
+            self._add_label(task_id, LABEL_REVIEWED)
+            self._remove_label(task, LABEL_REVIEW_FAILED)
             return {
                 "verdict": "approve", "task_id": task_id,
                 "note": "вердикт записан; в Done задачу переводит человек",
             }
         self.api.add_comment(task_id, f"[review] NEEDS WORK\n{report.strip()}")
+        self._add_label(task_id, LABEL_REVIEW_FAILED)
+        self._remove_label(task, LABEL_REVIEWED)
         self._move(task_id, "Build")
         return {
             "verdict": "needs_work", "task_id": task_id, "moved_to": "Build",

@@ -214,3 +214,91 @@ def test_review_reoffered_after_needs_work_rework(env):
 
     reviewer.review_task(t["id"], verdict="approve", report="теперь по причине")
     assert not reviewer.next_task().get("review")          # свежий вердикт закрыл цикл
+
+
+def _label_titles(api, task_id):
+    return [lb["title"] for lb in api.tasks[task_id]["labels"]]
+
+
+def _to_review(wf, task_id):
+    wf.advance(task_id, to="build", spec="s")
+    return wf.advance(task_id, to="review", worklog="w", evidence="e")
+
+
+def test_review_approve_adds_reviewed_strips_review_failed(env):
+    """approve вешает reviewed и снимает review-failed (взаимоисключающие вердикт-метки)."""
+    api, wf, t = env
+    _to_review(wf, t["id"])
+    # на момент апрува на задаче ещё висит review-failed (belt-and-suspenders на всякий)
+    api.tasks[t["id"]]["labels"].append({"id": 999, "title": "review-failed"})
+    wf.review_task(t["id"], verdict="approve", report="воспроизвёл, фикс по причине")
+    titles = _label_titles(api, t["id"])
+    assert "reviewed" in titles
+    assert "review-failed" not in titles
+    assert api.stage_of(t["id"]) == "Review"  # апрув оставляет задачу в Review для человека
+
+
+def test_review_needs_work_adds_review_failed_strips_reviewed(env):
+    """needs_work вешает review-failed и снимает reviewed."""
+    api, wf, t = env
+    _to_review(wf, t["id"])
+    # на момент needs_work на задаче висит reviewed (например, была одобрена и переоткрыта)
+    api.tasks[t["id"]]["labels"].append({"id": 999, "title": "reviewed"})
+    wf.review_task(t["id"], verdict="needs_work", report="фикс лечит симптом")
+    titles = _label_titles(api, t["id"])
+    assert "review-failed" in titles
+    assert "reviewed" not in titles
+    assert api.stage_of(t["id"]) == "Build"  # needs_work возвращает задачу в Build
+
+
+def test_advance_review_resubmit_strips_review_failed(env):
+    """Ресабмит в Review (после needs_work) снимает review-failed — reset вердикта."""
+    api, wf, t = env
+    api.tasks[t["id"]]["labels"].append({"id": 999, "title": "bug"})
+    wf.advance(t["id"], to="build", spec="s")
+    wf.advance(t["id"], to="review", worklog="w1", evidence="e1")
+    wf.review_task(t["id"], verdict="needs_work", report="не закрыта причина")
+    assert "review-failed" in _label_titles(api, t["id"])  # needs_work повесил
+    wf.advance(t["id"], to="review", worklog="w2: доработано", evidence="e2")
+    assert "review-failed" not in _label_titles(api, t["id"])  # ресабмит снял
+
+
+def test_advance_review_first_submit_no_review_failed_label(env):
+    """Первый сабмит в Review: review-failed нет — снятие это no-op, метка НЕ добавляется."""
+    api, wf, t = env
+    api.tasks[t["id"]]["labels"].append({"id": 999, "title": "bug"})
+    wf.advance(t["id"], to="build", spec="s")
+    wf.advance(t["id"], to="review", worklog="w", evidence="e")  # не падает
+    assert "review-failed" not in _label_titles(api, t["id"])
+    assert api.stage_of(t["id"]) == "Review"
+
+
+def test_advance_review_bug_returns_review_needed_note(env):
+    """advance(to='review') на баге отдаёт review_needed=True + подсказку про push-ревью."""
+    api, wf, t = env
+    api.tasks[t["id"]]["labels"].append({"id": 999, "title": "bug"})
+    res = _to_review(wf, t["id"])
+    assert res["review_needed"] is True
+    assert res.get("note")
+
+
+def test_advance_review_non_bug_no_review_needed(env):
+    """На не-баге ничего лишнего в payload нет — только moved_to/task_id."""
+    api, wf, t = env
+    res = _to_review(wf, t["id"])
+    assert "review_needed" not in res
+    assert res == {"moved_to": "Review", "task_id": t["id"]}
+
+
+def test_fake_remove_label_idempotent_and_mirrors_client(env):
+    """FakeAPI.remove_label зеркалит клиент и идемпотентен (отсутствующий id — no-op)."""
+    api, wf, t = env
+    lb = api.get_or_create_label("reviewed")
+    api.add_label(t["id"], lb["id"])
+    assert "reviewed" in _label_titles(api, t["id"])
+    api.remove_label(t["id"], lb["id"])
+    assert "reviewed" not in _label_titles(api, t["id"])
+    # повторное снятие того же id и снятие никогда не висевшего id — без ошибки
+    api.remove_label(t["id"], lb["id"])
+    api.remove_label(t["id"], 123456)
+    assert "reviewed" not in _label_titles(api, t["id"])

@@ -95,6 +95,18 @@ def test_call_human_return_and_decompose(project):
     assert d3["stage"] == "Backlog" and "epic" in d3["labels"]
 
 
+def test_remove_label_round_trip(project):
+    """remove_label реально дёргает DELETE /tasks/{id}/labels/{label_id} и доска это
+    отражает — метка исчезает с задачи (проверяем форму эндпоинта против 2.3.0)."""
+    boss, _, enqueue, _, _ = project
+    t = enqueue("метка на удаление")
+    label = boss.get_or_create_label(f"tmp-{uuid.uuid4().hex[:6]}")
+    boss.add_label(t["id"], label["id"])
+    assert any(lb["id"] == label["id"] for lb in boss.get_task(t["id"]).get("labels") or [])
+    boss.remove_label(t["id"], label["id"])
+    assert not any(lb["id"] == label["id"] for lb in boss.get_task(t["id"]).get("labels") or [])
+
+
 def test_pagination_beyond_first_page(boss_jwt, agent_jwts):
     """F1: >50 задач в одном бакете Queue. GET .../views/{v}/tasks у vikunja 2.3.0
     пагинирует tasks[] ВНУТРИ бакета независимо (params={"page": n}, фиксированный page

@@ -167,6 +167,11 @@ class FakeAPI:
         lb = next(x for x in self._labels if x["id"] == label_id)
         self.tasks[task_id]["labels"].append(dict(lb))
 
+    def remove_label(self, task_id, label_id):
+        # идемпотентно: фильтруем по id, отсутствующий id — no-op
+        t = self.tasks[task_id]
+        t["labels"] = [lb for lb in t["labels"] if lb["id"] != label_id]
+
     def get_or_create_label(self, title):
         for lb in self._labels:
             if lb["title"] == title:

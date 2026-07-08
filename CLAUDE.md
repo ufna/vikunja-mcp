@@ -53,8 +53,10 @@ docker rm -f vikunja-test
 - `src/vikunja_mcp/workflow.py` — the product rules: stages, gates,
   assign-then-verify claim (with self-heal), review offering (verdict vs
   worklog timestamps), comment markers `[claim] [spec] [worklog] [нужен
-  человек] [blocked] [decompose] [review]`. Behavior changes belong here,
-  with a unit test per gate.
+  человек] [blocked] [decompose] [review]` plus mutually-exclusive verdict
+  labels `reviewed`/`review-failed` (push-review of bug fixes:
+  `advance(to='review')` nudges `review_needed` and resets `review-failed`).
+  Behavior changes belong here, with a unit test per gate.
 - `src/vikunja_mcp/server.py` — thin FastMCP wiring; `_tool` decorator
   converts `WorkflowError/ConfigError/VikunjaError/httpx.HTTPError` into
   `{"error": ...}` tool results (never crashes the stdio server). Tool

@@ -208,6 +208,9 @@ class VikunjaAPI:
     def add_label(self, task_id: int, label_id: int) -> None:
         self._req("PUT", f"/tasks/{task_id}/labels", json={"label_id": label_id})
 
+    def remove_label(self, task_id: int, label_id: int) -> None:
+        self._req("DELETE", f"/tasks/{task_id}/labels/{label_id}")
+
     def get_or_create_label(self, title: str) -> dict:
         # Vikunja labels are owned per-user; GET /labels surfaces every label used on a
         # task the caller can read (not just its own), so match case- and whitespace-
