@@ -133,3 +133,42 @@ def test_claim_race_lost_backs_off(env):
         wf.claim(t["id"])
     assert all(a["id"] != 2 for a in api.tasks[t["id"]]["assignees"])  # себя сняли
     assert api.stage_of(t["id"]) == "Queue"                            # не двигали
+
+
+def test_claim_raises_when_assignee_vanishes_normal_path(env):
+    """Vanish-window: между нашим assign и re-read человек снял назначение — fresh без
+    assignees. others пуст, но двигать в Design без ассайни нельзя (невидимое состояние):
+    задача осталась бы вне next_task (не моя активная) и вне Queue (никто не заклеймит)."""
+    api, wf = env
+    t = api.add_task("job", "Queue")
+
+    original_get = api.get_task
+
+    def vanishing_get(task_id):
+        api.remove_assignee(task_id, api.me_user["id"])   # человек снял в окно перед re-read
+        return original_get(task_id)
+
+    api.get_task = vanishing_get
+    with pytest.raises(WorkflowError, match="исчез"):
+        wf.claim(t["id"])
+    assert api.stage_of(t["id"]) == "Queue"                # не уехала в Design
+    assert api.tasks[t["id"]]["assignees"] == []           # без ассайни, как в реальном vanish
+
+
+def test_claim_raises_when_assignee_vanishes_self_heal_path(env):
+    """Тот же vanish, но self-heal путь: задача предзаклеймлена на меня (add_assignee не
+    звался). Окно между re-read и move то же — отказ обязан сработать и здесь."""
+    api, wf = env
+    t = api.add_task("half-claimed", "Queue", assignee=api.me_user)
+
+    original_get = api.get_task
+
+    def vanishing_get(task_id):
+        api.remove_assignee(task_id, api.me_user["id"])
+        return original_get(task_id)
+
+    api.get_task = vanishing_get
+    with pytest.raises(WorkflowError, match="исчез"):
+        wf.claim(t["id"])
+    assert api.stage_of(t["id"]) == "Queue"
+    assert api.tasks[t["id"]]["assignees"] == []

@@ -168,10 +168,19 @@ class Workflow:
         if not self_heal:
             self.api.add_assignee(task_id, me["id"])
         fresh = self.api.get_task(task_id)
-        others = [a for a in fresh.get("assignees") or [] if a["id"] != me["id"]]
+        fresh_ids = self._assignee_ids(fresh)
+        others = [aid for aid in fresh_ids if aid != me["id"]]
         if others:
             self.api.remove_assignee(task_id, me["id"])
             raise WorkflowError("проиграна гонка за задачу — возьми следующую через next_task")
+        # vanish-window: человек мог снять моё назначение в окно между assign и re-read.
+        # others пуст — но без меня в assignees move уведёт задачу в Design «ничьей»
+        # (невидимо для next_task и незаклеймимо из Queue). Отказ до move закрывает окно
+        # и в обычном, и в self-heal пути (там add_assignee не звался — окно то же).
+        if me["id"] not in fresh_ids:
+            raise WorkflowError(
+                "ассайн исчез во время клейма (человек снял назначение) — повтори next_task"
+            )
 
         view = self._view()
         self.api.move_task(self.project_id, view["id"], self._bucket("Design")["id"], task_id)
