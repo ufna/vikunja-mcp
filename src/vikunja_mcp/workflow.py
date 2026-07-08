@@ -105,9 +105,21 @@ class Workflow:
             raise WorkflowError(f"task {task['id']} is not assigned to you — claim it first")
 
     @staticmethod
+    def _ref(task: dict) -> str:
+        """Human-searchable task reference for agents to echo: the Vikunja identifier
+        (project prefix + per-project index, e.g. 'VMCP-27') plus the global id in
+        parens -> 'VMCP-27 (82)'. A human searches the tracker by the identifier; the
+        bare global id (#82) is not searchable. Vikunja already returns `identifier` on
+        every task read (a project with no prefix yields '#<index>', which we keep);
+        falls back to '#<id>' only if it's absent."""
+        ident = (task.get("identifier") or "").strip()
+        return f"{ident} ({task['id']})" if ident else f"#{task['id']}"
+
+    @staticmethod
     def _summary(task: dict) -> dict:
         return {
             "id": task["id"],
+            "ref": Workflow._ref(task),
             "title": task["title"],
             "priority": task.get("priority", 0),
             "description": (task.get("description") or "")[:500],
@@ -451,6 +463,7 @@ class Workflow:
         }
         return {
             "id": task["id"],
+            "ref": self._ref(task),
             "title": task["title"],
             "priority": task.get("priority", 0),
             "description": task.get("description") or "",

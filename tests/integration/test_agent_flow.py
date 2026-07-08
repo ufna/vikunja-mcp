@@ -33,6 +33,10 @@ def test_happy_path_queue_to_review(project):
     t = enqueue("сделать фичу", priority=3)
     picked = wf1.next_task()
     assert picked["task"]["id"] == t["id"]
+    # #82: ref = human-searchable identifier + global id, sourced from the real task's
+    # `identifier` field as it comes back on the board (verified end-to-end vs 2.3.0;
+    # a no-prefix project yields identifier "#<index>")
+    assert picked["task"]["ref"] == f"{boss.get_task(t['id'])['identifier']} ({t['id']})"
     wf1.claim(t["id"])
     wf1.advance(t["id"], to="build", spec="подход: X")
     wf1.advance(t["id"], to="review", worklog="сделано X", evidence="commit deadbeef")

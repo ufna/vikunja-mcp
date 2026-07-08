@@ -5,9 +5,12 @@ import itertools
 class FakeAPI:
     def __init__(self, me_id=2, me_username="agent-infra", buckets=None):
         self._ids = itertools.count(100)
+        self._task_index = itertools.count(1)   # per-project running index (Vikunja `index`)
         self.me_user = {"id": me_id, "username": me_username}
         self.users = {me_id: self.me_user}
-        self.project = {"id": 3, "title": "hgdev-infra"}
+        # projects carry an `identifier` prefix (like the real "VMCP"); tasks then read
+        # back a computed `identifier` = "<prefix>-<index>" (see _task_identity)
+        self.project = {"id": 3, "title": "hgdev-infra", "identifier": "HGI"}
         self.view = {"id": 11, "title": "Kanban", "view_kind": "kanban", "position": 400}
         self._buckets = []
         for title in buckets or []:
@@ -21,6 +24,14 @@ class FakeAPI:
         self.shares = []         # (project_id, username, permission)
 
     # --- helpers для тестов ---
+    def _task_identity(self):
+        """Mirror Vikunja: every task read carries a per-project `index` and a computed
+        `identifier` = '<project identifier>-<index>' (or '#<index>' when the project has
+        no identifier prefix — verified against real 2.3.0)."""
+        idx = next(self._task_index)
+        prefix = self.project.get("identifier") or ""
+        return idx, (f"{prefix}-{idx}" if prefix else f"#{idx}")
+
     def add_bucket(self, title):
         b = {"id": next(self._ids), "title": title, "position": (len(self._buckets) + 1) * 100}
         self._buckets.append(b)
@@ -30,8 +41,10 @@ class FakeAPI:
         return next(b["id"] for b in self._buckets if b["title"] == title)
 
     def add_task(self, title, bucket_title, priority=0, assignee=None, labels=()):
+        idx, identifier = self._task_identity()
         t = {
             "id": next(self._ids), "title": title, "description": "", "priority": priority,
+            "index": idx, "identifier": identifier,
             "done": False, "assignees": [assignee] if assignee else [],
             "labels": [{"id": next(self._ids), "title": lb} for lb in labels],
         }
@@ -67,9 +80,11 @@ class FakeAPI:
         return dict(self.tasks[task_id])
 
     def create_task(self, project_id, title, description="", priority=0):
+        idx, identifier = self._task_identity()
         t = {
             "id": next(self._ids), "title": title, "description": description,
-            "priority": priority, "done": False, "assignees": [], "labels": [],
+            "priority": priority, "index": idx, "identifier": identifier,
+            "done": False, "assignees": [], "labels": [],
         }
         self.tasks[t["id"]] = t
         self.task_bucket[t["id"]] = self._buckets[0]["id"]  # default = первый бакет
@@ -102,7 +117,9 @@ class FakeAPI:
         return [dict(self.project)]
 
     def create_project(self, title):
-        self.project = {"id": next(self._ids), "title": title}
+        # mirror real 2.3.0: create_task sends only title -> the new project has an empty
+        # identifier (tasks in it then read back identifier "#<index>")
+        self.project = {"id": next(self._ids), "title": title, "identifier": ""}
         for b in list(self._buckets):
             self._buckets.remove(b)
         for title_ in ["To-Do", "Doing", "Done"]:  # vikunja auto-buckets

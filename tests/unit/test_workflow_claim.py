@@ -1,3 +1,5 @@
+import re
+
 import pytest
 
 from tests.unit.fakes import FakeAPI
@@ -45,6 +47,25 @@ def test_next_task_free_queue_note_overrides_steward_default(env):
     note = wf.next_task()["note"]
     assert "mandate" in note      # взять свежую — мандат, не «самовольная инициатива»
     assert "stop" in note         # ...и НЕ останавливать /loop (собственно косяк DOGE)
+
+
+def test_next_task_surfaces_searchable_ref(env):
+    """#82: the task next_task hands out carries a human-searchable ref (identifier + id,
+    "HGI-1 (107)"-shaped like the human's "VMCP-27 (82)"), not just the raw global id."""
+    api, wf = env
+    t = api.add_task("free", "Queue", priority=3)
+    ref = wf.next_task()["task"]["ref"]
+    assert ref == f"{api.tasks[t['id']]['identifier']} ({t['id']})"
+    assert re.fullmatch(rf"HGI-\d+ \({t['id']}\)", ref)
+
+
+def test_claim_surfaces_searchable_ref(env):
+    """claim echoes the same human-searchable ref for the task it just moved to Design."""
+    api, wf = env
+    t = api.add_task("job", "Queue")
+    ref = wf.claim(t["id"])["task"]["ref"]
+    assert ref == f"{api.tasks[t['id']]['identifier']} ({t['id']})"
+    assert re.fullmatch(rf"HGI-\d+ \({t['id']}\)", ref)
 
 
 def test_next_task_skips_assigned_and_blocked(env):

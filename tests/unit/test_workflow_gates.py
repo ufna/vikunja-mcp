@@ -229,6 +229,25 @@ def test_get_task_related_defaults_to_empty_dict_without_relations(env):
     assert dossier["related"] == {}
 
 
+def test_ref_composes_human_searchable_identifier():
+    """#82: agents must echo the human-searchable ref "<identifier> (<id>)" — exactly the
+    "VMCP-27 (82)" shape the human asked for — not the bare, unsearchable global id."""
+    assert Workflow._ref({"id": 82, "identifier": "VMCP-27"}) == "VMCP-27 (82)"
+    # project with no identifier prefix -> Vikunja returns "#<index>", which we keep
+    assert Workflow._ref({"id": 82, "identifier": "#27"}) == "#27 (82)"
+    # defensive fallback when identifier is empty/absent -> bare "#<id>"
+    assert Workflow._ref({"id": 82, "identifier": ""}) == "#82"
+    assert Workflow._ref({"id": 82}) == "#82"
+
+
+def test_get_task_surfaces_searchable_ref(env):
+    """get_task dossier carries the human-searchable ref alongside the raw id."""
+    api, wf, t = env
+    dossier = wf.get_task(t["id"])
+    assert dossier["ref"] == f"{api.tasks[t['id']]['identifier']} ({t['id']})"
+    assert dossier["ref"].startswith("HGI-") and dossier["ref"].endswith(f"({t['id']})")
+
+
 def test_review_flow_for_bug_labels(env):
     api, wf, t = env
     # довели багфикс до Review
