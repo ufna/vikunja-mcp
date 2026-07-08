@@ -191,7 +191,13 @@ class VikunjaAPI:
         self._req("PUT", f"/tasks/{task_id}/labels", json={"label_id": label_id})
 
     def get_or_create_label(self, title: str) -> dict:
+        # Vikunja labels are owned per-user; GET /labels surfaces every label used on a
+        # task the caller can read (not just its own), so match case- and whitespace-
+        # insensitively to REUSE an existing label instead of minting a divergent
+        # duplicate. Without this an agent typing "Bug"/"bug " forks a second, colorless
+        # label beside the canonical one (real incident 2026-07-08: a bot did exactly that).
+        want = title.strip().casefold()
         for label in self.labels():
-            if label.get("title") == title:
+            if (label.get("title") or "").strip().casefold() == want:
                 return label
         return self.create_label(title)
