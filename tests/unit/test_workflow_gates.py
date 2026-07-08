@@ -1,6 +1,7 @@
 import pytest
 
 from tests.unit.fakes import FakeAPI
+from vikunja_mcp.api import VikunjaError
 from vikunja_mcp.workflow import STAGES, Workflow, WorkflowError
 
 
@@ -108,6 +109,59 @@ def test_decompose_creates_children_in_queue_parent_epic(env):
     assert api.tasks[t["id"]]["assignees"] == []
     assert any(lb["title"] == "epic" for lb in api.tasks[t["id"]]["labels"])
     assert any(c.startswith("[decompose]") for c in api.comments_text(t["id"]))
+
+
+def test_decompose_partial_failure_reports_created_children(env):
+    # A failure on the 2nd create_task (network/429) must not drop a bare VikunjaError:
+    # the child created by the 1st call is already on the board, and a blind retry would
+    # duplicate it. decompose must raise a WorkflowError that surfaces that partial result.
+    api, wf, t = env
+    real_create = api.create_task
+    calls = {"n": 0}
+    created_ids = []
+
+    def flaky_create(*args, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 2:
+            raise VikunjaError(429, "rate limited")
+        child = real_create(*args, **kwargs)
+        created_ids.append(child["id"])
+        return child
+
+    api.create_task = flaky_create
+
+    with pytest.raises(WorkflowError) as ei:
+        wf.decompose(t["id"], subtasks=[
+            {"title": "first child"},
+            {"title": "second child"},
+        ])
+    msg = str(ei.value)
+    first_id = created_ids[0]
+    # the already-created first child is named by id AND title -> the human/agent can see
+    # exactly what leaked instead of blindly retrying
+    assert f"#{first_id}" in msg
+    assert "first child" in msg
+    assert "second child" not in msg  # the 2nd child was never created
+    # the partial result really is on the board (in Queue) — not imaginary
+    assert first_id in api.tasks
+    assert api.stage_of(first_id) == "Queue"
+    # the parent is left un-finalized: no epic label, still assigned, not moved to Backlog
+    assert not any(lb["title"] == "epic" for lb in api.tasks[t["id"]]["labels"])
+    assert api.tasks[t["id"]]["assignees"][0]["id"] == api.me_user["id"]
+    assert api.stage_of(t["id"]) == "Design"
+
+
+def test_decompose_first_child_failure_reraises_bare_error(env):
+    # nothing was created yet -> no partial result to report; the bare error is safe to
+    # retry, so decompose must NOT wrap it into a misleading "already created" message.
+    api, wf, t = env
+
+    def failing_create(*args, **kwargs):
+        raise VikunjaError(429, "rate limited")
+
+    api.create_task = failing_create
+    with pytest.raises(VikunjaError):
+        wf.decompose(t["id"], subtasks=[{"title": "a"}, {"title": "b"}])
 
 
 def test_file_task_files_finding_into_backlog_with_marker_and_relation(env):

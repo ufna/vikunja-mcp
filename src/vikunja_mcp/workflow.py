@@ -1,6 +1,10 @@
 """Stages and gates of the agent flow. The rules are baked in here, not in prompts."""
 from typing import Any
 
+import httpx
+
+from .api import VikunjaError
+
 STAGES = ["Backlog", "Queue", "Design", "Build", "Review", "Your Call", "Done"]
 ACTIVE_STAGES = ("Design", "Build")
 LABEL_BLOCKED = "blocked"
@@ -364,15 +368,29 @@ class Workflow:
         task, _stage = self._find_task(task_id)
         self._require_mine(task)
 
-        created = []
-        for st in subtasks:
-            child = self.api.create_task(
-                self.project_id, st["title"].strip(),
-                description=st.get("description", ""), priority=int(st.get("priority", 0)),
-            )
-            self.api.add_relation(child["id"], task_id, "parenttask")
-            self._move(child["id"], "Queue")
-            created.append({"id": child["id"], "title": child["title"]})
+        created: list[dict] = []
+        try:
+            for st in subtasks:
+                child = self.api.create_task(
+                    self.project_id, st["title"].strip(),
+                    description=st.get("description", ""), priority=int(st.get("priority", 0)),
+                )
+                # record the child the instant it exists on the board — BEFORE add_relation
+                # /_move — so a failure anywhere below still reports it. This is the retry-
+                # duplication boundary: once create_task returned, a naive re-run doubles it.
+                created.append({"id": child["id"], "title": child["title"]})
+                self.api.add_relation(child["id"], task_id, "parenttask")
+                self._move(child["id"], "Queue")
+        except (VikunjaError, httpx.HTTPError) as exc:
+            if not created:
+                raise  # nothing landed on the board yet — the bare error is safe to retry
+            listing = ", ".join(f"#{c['id']} {c['title']}" for c in created)
+            raise WorkflowError(
+                f"decompose failed after creating {len(created)} of {len(subtasks)} "
+                f"subtask(s) ({exc}). Already on the board: {listing}. Do NOT blindly "
+                f"retry — you would duplicate these; delete them first, or re-run "
+                f"decompose for the remaining subtasks only."
+            ) from exc
 
         listing = ", ".join(f"#{c['id']} {c['title']}" for c in created)
         self.api.add_comment(task_id, f"[decompose] создано: {listing}")
