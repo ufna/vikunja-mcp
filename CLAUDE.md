@@ -110,7 +110,10 @@ here: `next_task` → claim → spec → dispatch a fresh sub-agent per task →
 structured report → commit+push → Review (bugs get independent agent review).
 Run it under `/loop` with no interval (= self-paced) for continuous operation:
 the agent drains the queue and paces its own pauses on an empty queue instead
-of stopping.
+of stopping. When the orchestrator needs a human answer, it asks via
+`call_human` (a card) — never a console prompt (`AskUserQuestion`/`ExitPlanMode`/
+plain text), since the human isn't at the console; after asking it keeps draining,
+and the human answers and moves the card back so the loop resumes.
 Each task lands as its own commit on `main`, pushed at `advance(to='review')`
 time (`… (tracker #N)`, `evidence` = the sha) — a completed task commits and
 pushes itself, and that green push auto-releases a patch (CI bumps both version
