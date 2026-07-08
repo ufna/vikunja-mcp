@@ -79,7 +79,11 @@ class FakeAPI:
         return list(self._comments.get(task_id, []))
 
     def add_comment(self, task_id, text):
-        entry = {"comment": text, "author": dict(self.me_user)}
+        # created монотонно растёт и лексикографически сортируем — как ISO у реального API
+        entry = {
+            "comment": text, "author": dict(self.me_user),
+            "created": f"2026-07-08T00:00:00.{next(self._ids):06d}Z",
+        }
         self._comments.setdefault(task_id, []).append(entry)
         return entry
 

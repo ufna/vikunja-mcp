@@ -179,9 +179,9 @@ def test_review_flow_for_bug_labels(env):
     reviewer.review_task(t["id"], verdict="approve", report="воспроизвёл, фикс по причине")
     assert api.stage_of(t["id"]) == "Review"
     assert any(c.startswith("[review] APPROVE") for c in api.comments_text(t["id"]))
-    # задача с [review]-вердиктом исчезает из review-выдачи... но после нового
-    # worklog старый вердикт остался — v1: повторное ревью по запросу человека
-    assert "review" not in reviewer.next_task() or reviewer.next_task()["task"]["id"] != t["id"]
+    # свежий APPROVE (новее последнего worklog) закрывает ревью — задача не предлагается
+    res = reviewer.next_task()
+    assert not res.get("review"), res
 
 
 def test_review_not_offered_without_bug_label(env):
@@ -192,3 +192,25 @@ def test_review_not_offered_without_bug_label(env):
     reviewer._me_cache = {"id": 77, "username": "agent-reviewer"}
     res = reviewer.next_task()
     assert "review" not in res
+
+
+def test_review_reoffered_after_needs_work_rework(env):
+    """Цикл: needs_work -> доработка -> Review снова -> задача ОПЯТЬ предлагается на ревью."""
+    api, wf, t = env
+    api.tasks[t["id"]]["labels"].append({"id": 999, "title": "bug"})
+    wf.advance(t["id"], to="build", spec="s")
+    wf.advance(t["id"], to="review", worklog="w1", evidence="e1")
+
+    reviewer = type(wf)(api, project_id=3)
+    reviewer._me_cache = {"id": 77, "username": "agent-reviewer"}
+    assert reviewer.next_task().get("review") is True
+
+    reviewer.review_task(t["id"], verdict="needs_work", report="не закрыта причина")
+    assert not reviewer.next_task().get("review")          # в Build — ревьюить нечего
+
+    wf.advance(t["id"], to="review", worklog="w2: доработано", evidence="e2")
+    offered = reviewer.next_task()
+    assert offered.get("review") is True and offered["task"]["id"] == t["id"]  # re-offer!
+
+    reviewer.review_task(t["id"], verdict="approve", report="теперь по причине")
+    assert not reviewer.next_task().get("review")          # свежий вердикт закрыл цикл

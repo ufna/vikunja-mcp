@@ -116,10 +116,20 @@ class Workflow:
         for t in sorted(board.get("Review", []), key=lambda t: -t.get("priority", 0)):
             if not self._has_label(t, LABEL_BUG) or my_id in self._assignee_ids(t):
                 continue
-            if any(
-                (c.get("comment") or "").startswith("[review]")
-                for c in self.api.comments(t["id"])
-            ):
+            # вердикт актуален, только если он свежее последнего отчёта: после цикла
+            # needs_work -> доработка -> Review задача должна снова попасть к ревьюеру
+            comments = self.api.comments(t["id"])
+            last_review = max(
+                (c.get("created") or "" for c in comments
+                 if (c.get("comment") or "").startswith("[review]")),
+                default=None,
+            )
+            last_worklog = max(
+                (c.get("created") or "" for c in comments
+                 if (c.get("comment") or "").startswith("[worklog]")),
+                default="",
+            )
+            if last_review is not None and last_review >= last_worklog:
                 continue
             return {
                 "review": True, "task": self._summary(t),
