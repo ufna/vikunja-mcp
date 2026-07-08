@@ -18,6 +18,11 @@ Backlog → Queue → Design → Build → Review → Done
 - `Your Call` (abbreviated `YC`) is a side branch reachable from `Design`/`Build`
   when an agent needs a decision or input; the human answers and moves it back.
 
+Run that loop under Claude Code's `/loop` with no interval — that lets the model
+self-pace. The agent drains the queue one task at a time and schedules its own
+wake-ups when the queue is empty, so it keeps working without a human
+re-prompting it each turn.
+
 ## Install
 
 ```bash

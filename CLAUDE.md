@@ -98,6 +98,9 @@ This project tracks itself in the same tracker (project `vikunja-mcp`,
 id 10 — see `.vikunja-mcp.toml`). Follow the tracker flow for real work
 here: `next_task` → claim → spec → dispatch a fresh sub-agent per task →
 structured report → commit+push → Review (bugs get independent agent review).
+Run it under `/loop` with no interval (= self-paced) for continuous operation:
+the agent drains the queue and paces its own pauses on an empty queue instead
+of stopping.
 Each task lands as its own commit on `main`, pushed at `advance(to='review')`
 time (`… (tracker #N)`, `evidence` = the sha) — a completed task commits and
 pushes itself; only the tag + `stable` move wait for the release task. The repo
