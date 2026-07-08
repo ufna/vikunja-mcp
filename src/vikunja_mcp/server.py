@@ -24,7 +24,10 @@ def _wf() -> Workflow:
     global _workflow
     if _workflow is None:
         cfg = load_config()
-        _workflow = Workflow(VikunjaAPI(cfg.url, cfg.token), cfg.project_id)
+        _workflow = Workflow(
+            VikunjaAPI(cfg.url, cfg.token), cfg.project_id,
+            enforce_single_wip=cfg.enforce_single_wip,
+        )
     return _workflow
 
 
@@ -63,7 +66,9 @@ def claim(task_id: int) -> dict:
     """Take a task from Queue: assigns you and moves it to Design. You may take free
     tasks or ones already assigned to you; one assigned to someone else is "for humans"
     and claim won't hand it over. Also refused outside Queue and on a lost race (call
-    next_task then)."""
+    next_task then). If the single-WIP policy is enabled (enforce_single_wip in the repo
+    toml, off by default), claim also refuses while you already have an active
+    Design/Build task — finish it or return_task it first."""
     return _wf().claim(task_id)
 
 

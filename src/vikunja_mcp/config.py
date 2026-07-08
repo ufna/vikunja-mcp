@@ -23,6 +23,10 @@ class Config:
     token: str
     project_id: int
     project_name: str | None = None
+    # committed team policy (read ONLY from the repo toml, not env/secret): when true,
+    # claim() refuses a new task while you already have an active Design/Build one.
+    # Default off -> ships inert and reversible; opt in per team.
+    enforce_single_wip: bool = False
 
 
 def _parse_env_file(path: Path) -> dict[str, str]:
@@ -95,4 +99,5 @@ def load_config(cwd: Path | None = None, environ: Mapping[str, str] | None = Non
     return Config(
         url=str(url), token=str(token),
         project_id=project_id, project_name=repo.get("project"),
+        enforce_single_wip=bool(repo.get("enforce_single_wip", False)),
     )

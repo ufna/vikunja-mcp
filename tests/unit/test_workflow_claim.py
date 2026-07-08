@@ -195,3 +195,53 @@ def test_claim_raises_when_assignee_vanishes_self_heal_path(env):
         wf.claim(t["id"])
     assert api.stage_of(t["id"]) == "Queue"
     assert api.tasks[t["id"]]["assignees"] == []
+
+
+# --- #38: optional single-WIP gate in claim (enforce_single_wip, default off) ---
+
+def test_claim_refused_with_active_task_when_wip_gate_on():
+    """Flag on + caller already has a Design/Build task -> claiming a new Queue task is
+    refused, and the message NAMES the active task so the agent knows what to finish."""
+    api = FakeAPI(buckets=STAGES)
+    wf = Workflow(api, project_id=3, enforce_single_wip=True)
+    active = api.add_task("mine-in-build", "Build", assignee=api.me_user)
+    free = api.add_task("tempting", "Queue")
+    with pytest.raises(WorkflowError, match=rf"#{active['id']}") as exc:
+        wf.claim(free["id"])
+    assert "return" in str(exc.value).lower()               # tells you how to override
+    assert api.stage_of(free["id"]) == "Queue"              # not moved
+    assert api.tasks[free["id"]]["assignees"] == []         # not assigned — hard refusal
+
+
+def test_claim_allowed_with_active_task_when_wip_gate_off():
+    """Default (flag off): the gate is INERT — claim works even with an active task, so
+    the rollout changes nothing for consumers that don't opt in."""
+    api = FakeAPI(buckets=STAGES)
+    wf = Workflow(api, project_id=3)   # enforce_single_wip defaults False
+    api.add_task("mine-in-build", "Build", assignee=api.me_user)
+    free = api.add_task("second", "Queue")
+    res = wf.claim(free["id"])
+    assert res["claimed"] is True
+    assert api.stage_of(free["id"]) == "Design"
+
+
+def test_claim_allowed_without_active_task_when_wip_gate_on():
+    """Flag on but caller has no active Design/Build task -> claim proceeds normally."""
+    api = FakeAPI(buckets=STAGES)
+    wf = Workflow(api, project_id=3, enforce_single_wip=True)
+    free = api.add_task("first", "Queue")
+    res = wf.claim(free["id"])
+    assert res["claimed"] is True
+    assert api.stage_of(free["id"]) == "Design"
+
+
+def test_claim_wip_gate_still_self_heals_stuck_queue_claim():
+    """Flag on, but a task pre-assigned to me is still in Queue (a stuck claim, NOT an
+    active Design/Build task). The gate keys off Design/Build only, so self-heal still
+    works — finishing a half-done claim isn't starting a second task."""
+    api = FakeAPI(buckets=STAGES)
+    wf = Workflow(api, project_id=3, enforce_single_wip=True)
+    stuck = api.add_task("half-claimed", "Queue", assignee=api.me_user)
+    res = wf.claim(stuck["id"])
+    assert res["claimed"] is True
+    assert api.stage_of(stuck["id"]) == "Design"

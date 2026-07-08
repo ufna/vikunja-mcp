@@ -191,3 +191,20 @@ def test_no_repo_env_file_behavior_unchanged(tmp_path, monkeypatch):
     monkeypatch.setattr("vikunja_mcp.config.USER_ENV_FILE", user_file)
     cfg = load_config(cwd=tmp_path, environ={})
     assert cfg.token == "tk_from_file"
+
+
+# --- #38: enforce_single_wip policy flag (committed in the toml, default off) ---
+
+def test_enforce_single_wip_defaults_false(tmp_path):
+    """Absent from the toml -> the WIP gate ships inert."""
+    _write_toml(tmp_path)
+    cfg = load_config(cwd=tmp_path, environ={"VIKUNJA_TOKEN": "tk"})
+    assert cfg.enforce_single_wip is False
+
+
+def test_enforce_single_wip_reads_true_from_toml(tmp_path):
+    tmp_path.joinpath(".vikunja-mcp.toml").write_text(
+        '[tracker]\nurl = "http://x"\nproject_id = 3\nenforce_single_wip = true\n'
+    )
+    cfg = load_config(cwd=tmp_path, environ={"VIKUNJA_TOKEN": "tk"})
+    assert cfg.enforce_single_wip is True

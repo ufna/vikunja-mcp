@@ -18,9 +18,12 @@ class WorkflowError(Exception):
 
 
 class Workflow:
-    def __init__(self, api: Any, project_id: int):
+    def __init__(self, api: Any, project_id: int, enforce_single_wip: bool = False):
         self.api = api
         self.project_id = project_id
+        # optional WIP gate: when true, claim() refuses a new task while you already
+        # have an active one. Off by default -> the gate does zero extra work.
+        self.enforce_single_wip = enforce_single_wip
         self._me_cache: dict | None = None
         self._view_cache: dict | None = None
         self._buckets_cache: dict[str, dict] | None = None
@@ -50,6 +53,22 @@ class Workflow:
     # --- поиск и проверки ---
     def _board(self) -> list[dict]:
         return self.api.view_tasks(self.project_id, self._view()["id"])
+
+    def _my_active_tasks(self, board: list[dict] | None = None) -> list[tuple[str, dict]]:
+        """(stage, task) for tasks in an ACTIVE stage (Design/Build) assigned to the
+        caller — the 'one task at a time' set. Shared by next_task's resume branch and
+        claim's optional WIP gate. Pass a pre-fetched board (the raw _board() list) to
+        skip a second fetch; a stuck claim still sitting in Queue is deliberately NOT
+        active (finishing it isn't starting a second task)."""
+        raw = self._board() if board is None else board
+        by_stage = {b["title"]: (b.get("tasks") or []) for b in raw}
+        my_id = self._me()["id"]
+        return [
+            (stage, t)
+            for stage in ACTIVE_STAGES
+            for t in by_stage.get(stage, [])
+            if my_id in self._assignee_ids(t)
+        ]
 
     def _find_task(self, task_id: int) -> tuple[dict, str]:
         for bucket in self._board():
@@ -92,15 +111,11 @@ class Workflow:
 
     # --- тулзы ---
     def next_task(self) -> dict:
-        board = {b["title"]: (b.get("tasks") or []) for b in self._board()}
+        raw = self._board()
+        board = {b["title"]: (b.get("tasks") or []) for b in raw}
         my_id = self._me()["id"]
 
-        mine = [
-            (stage, t)
-            for stage in ACTIVE_STAGES
-            for t in board.get(stage, [])
-            if my_id in self._assignee_ids(t)
-        ]
+        mine = self._my_active_tasks(raw)
         if mine:
             mine.sort(key=lambda st: -st[1].get("priority", 0))
             stage, task = mine[0]
@@ -180,6 +195,18 @@ class Workflow:
         task, stage = self._find_task(task_id)
         if stage != "Queue":
             raise WorkflowError(f"task is in '{stage}', you can only claim from Queue")
+        # optional single-WIP gate (opt-in via enforce_single_wip). Off -> no extra
+        # board fetch, behavior unchanged. On -> refuse a new task while an active one
+        # exists; the discipline answer is "finish it or return_task it first".
+        if self.enforce_single_wip:
+            active = self._my_active_tasks()
+            if active:
+                names = ", ".join(f"#{t['id']}" for _stage, t in active)
+                raise WorkflowError(
+                    f"you already have an active task ({names}) — finish it (advance to "
+                    f"Review) or return_task it before claiming another (single-WIP limit "
+                    f"is on: enforce_single_wip)"
+                )
         existing = task.get("assignees") or []
         me = self._me()
         # self-heal: партиальный клейм (assign прошёл, move — нет) или человек руками
