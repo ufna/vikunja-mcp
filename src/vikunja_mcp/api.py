@@ -146,7 +146,16 @@ class VikunjaAPI:
         size = info.get("max_items_per_page") if isinstance(info, dict) else None
         return size if isinstance(size, int) and size > 0 else self._PAGE_SIZE_FALLBACK
 
-    def view_tasks(self, project_id: int, view_id: int) -> list[dict]:
+    def view_tasks(
+        self, project_id: int, view_id: int, require_titles: set[str] | None = None
+    ) -> list[dict]:
+        # require_titles (#43): the set of bucket TITLES whose "full page" should keep the
+        # pagination loop going. None (default) = every bucket counts -> exhaustive read, kept
+        # for _find_task/claim/setup which must see the complete board (incl. a Done task).
+        # When given, only those buckets drive paging: an unbounded Done/Backlog that still
+        # returns full pages no longer forces extra fetches once the required buckets are
+        # exhausted. next_task passes its working stages here so it stops after them instead of
+        # rescanning the ever-growing Done on every call (the named next_task-latency fix).
         page_size = self._page_size()
         merged: dict[int, dict] = {}
         seen: dict[int, set] = {}
@@ -165,7 +174,9 @@ class VikunjaAPI:
                 dest = merged.setdefault(bid, {**bucket, "tasks": []})
                 ids = seen.setdefault(bid, set())
                 tasks = bucket.get("tasks") or []
-                if len(tasks) >= page_size:
+                if len(tasks) >= page_size and (
+                    require_titles is None or bucket.get("title") in require_titles
+                ):
                     saw_full_page = True
                 for task in tasks:
                     owner[task["id"]] = bid          # последнее вхождение выигрывает (см. дедуп ниже)

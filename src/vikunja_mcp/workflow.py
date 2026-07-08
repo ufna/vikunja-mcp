@@ -7,6 +7,11 @@ from .api import VikunjaError
 
 STAGES = ["Backlog", "Queue", "Design", "Build", "Review", "Your Call", "Done"]
 ACTIVE_STAGES = ("Design", "Build")
+# The only stages next_task ever inspects (Queue for free/stuck tasks, Design/Build for my
+# active ones, Review for bug re-review). It never reads Done/Backlog/Your Call, so its board
+# fetch passes these as view_tasks(require_titles=...) — the unboundedly-growing Done is no
+# longer paged exhaustively on every next_task, which is the #43 latency fix.
+NEXT_TASK_STAGES = frozenset({"Queue", *ACTIVE_STAGES, "Review"})
 LABEL_BLOCKED = "blocked"
 LABEL_EPIC = "epic"
 LABEL_BUG = "bug"
@@ -55,8 +60,13 @@ class Workflow:
         return self._buckets_cache[title]
 
     # --- поиск и проверки ---
-    def _board(self) -> list[dict]:
-        return self.api.view_tasks(self.project_id, self._view()["id"])
+    def _board(self, require_titles: set[str] | None = None) -> list[dict]:
+        # require_titles is forwarded to view_tasks: None (default) = full exhaustive board
+        # (for _find_task/claim which must see every bucket incl. Done); next_task passes
+        # NEXT_TASK_STAGES to skip exhaustively paging the unbounded Done (#43 latency fix).
+        return self.api.view_tasks(
+            self.project_id, self._view()["id"], require_titles=require_titles
+        )
 
     def _my_active_tasks(self, board: list[dict] | None = None) -> list[tuple[str, dict]]:
         """(stage, task) for tasks in an ACTIVE stage (Design/Build) assigned to the
@@ -127,7 +137,10 @@ class Workflow:
 
     # --- тулзы ---
     def next_task(self) -> dict:
-        raw = self._board()
+        # light board: only the stages next_task reads need be complete — don't page the
+        # unbounded Done exhaustively on every call (#43). _my_active_tasks(raw) reuses this
+        # same fetch (Design/Build are in NEXT_TASK_STAGES, so they're complete).
+        raw = self._board(require_titles=NEXT_TASK_STAGES)
         board = {b["title"]: (b.get("tasks") or []) for b in raw}
         my_id = self._me()["id"]
 

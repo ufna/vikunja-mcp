@@ -145,6 +145,61 @@ def test_view_tasks_independent_buckets_stop_separately():
     assert by_title["Doing"] == [900]
 
 
+def test_view_tasks_require_titles_skips_unbounded_bucket():
+    """#43 (next_task latency): view_tasks(require_titles=...) names which bucket TITLES' full
+    pages drive pagination. An unbounded Done bucket that keeps returning full pages must NOT
+    keep the loop going once the REQUIRED buckets are exhausted — so next_task stops after its
+    working stages instead of rescanning the whole ever-growing Done on every call."""
+    calls = []
+
+    def handler(request):
+        if request.url.path.endswith("/info"):
+            return httpx.Response(200, json={"max_items_per_page": 50})
+        page = int(request.url.params.get("page", "1"))
+        calls.append(page)
+        queue = [{"id": 1, "title": "q"}] if page == 1 else []            # exhausted on page 1
+        done = ([{"id": 100 + i, "title": f"d{i}"} for i in range(50)]    # full page (would page on)
+                if page == 1 else [{"id": 999, "title": "tail"}] if page == 2 else [])
+        return httpx.Response(200, json=[
+            {"id": 4, "title": "Queue", "tasks": queue},
+            {"id": 9, "title": "Done", "tasks": done},
+        ])
+
+    api = make_api(handler)
+    board = api.view_tasks(3, 11, require_titles={"Queue"})
+    assert calls == [1]                              # stopped: only Done had a full page, not required
+    by_title = {b["title"]: [t["id"] for t in b["tasks"]] for b in board}
+    assert by_title["Queue"] == [1]                  # required bucket complete
+    assert 999 not in by_title["Done"]               # Done NOT exhaustively paged (page-2 tail skipped)
+    assert len(by_title["Done"]) == 50               # only Done's first page came along — harmless
+
+
+def test_view_tasks_require_titles_none_still_exhausts_all():
+    """Default require_titles=None keeps the old exhaustive behavior: EVERY bucket's full page
+    drives pagination, so _find_task/claim/setup still see a complete Done/Backlog. This is the
+    contrast that keeps get_task/comment on a Done task working after the #43 latency fix."""
+    calls = []
+
+    def handler(request):
+        if request.url.path.endswith("/info"):
+            return httpx.Response(200, json={"max_items_per_page": 50})
+        page = int(request.url.params.get("page", "1"))
+        calls.append(page)
+        queue = [{"id": 1, "title": "q"}] if page == 1 else []
+        done = ([{"id": 100 + i, "title": f"d{i}"} for i in range(50)]
+                if page == 1 else [{"id": 999, "title": "tail"}] if page == 2 else [])
+        return httpx.Response(200, json=[
+            {"id": 4, "title": "Queue", "tasks": queue},
+            {"id": 9, "title": "Done", "tasks": done},
+        ])
+
+    api = make_api(handler)
+    board = api.view_tasks(3, 11)                     # no require_titles -> exhaustive (unchanged)
+    assert calls == [1, 2]                            # Done's full page DID drive paging
+    by_title = {b["title"]: [t["id"] for t in b["tasks"]] for b in board}
+    assert 999 in by_title["Done"]                   # Done fully paged to its tail
+
+
 def test_view_tasks_single_page_unchanged():
     def handler(request):
         if request.url.path.endswith("/info"):

@@ -68,6 +68,22 @@ def test_claim_surfaces_searchable_ref(env):
     assert re.fullmatch(rf"HGI-\d+ \({t['id']}\)", ref)
 
 
+def test_next_task_requests_light_board_not_paging_done(env):
+    """#43: next_task never reads Done/Backlog, so it fetches a LIGHT board — require_titles =
+    the workflow stages it actually inspects — instead of forcing view_tasks to exhaustively
+    page the unboundedly-growing Done on every call (the next_task-latency fix). The result is
+    unchanged; only the fetch is cheaper. Assert the light board is requested and Done is NOT
+    among the buckets whose full pages drive pagination."""
+    api, wf = env
+    free = api.add_task("free", "Queue", priority=1)
+    res = wf.next_task()
+    assert res["task"]["id"] == free["id"]                       # behavior unchanged
+    req = api.last_require_titles
+    assert req is not None                                       # a light board was requested…
+    assert "Done" not in req and "Backlog" not in req           # …not forcing paging of Done/Backlog
+    assert {"Queue", "Design", "Build", "Review"} <= set(req)   # the stages next_task reads
+
+
 def test_next_task_skips_assigned_and_blocked(env):
     api, wf = env
     api.add_task("taken", "Queue", assignee={"id": 9, "username": "other"})

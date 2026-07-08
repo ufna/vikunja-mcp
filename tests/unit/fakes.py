@@ -22,6 +22,7 @@ class FakeAPI:
         self.relations = []      # (task_id, other_id, kind)
         self.view_config = None  # последний configure_kanban
         self.shares = []         # (project_id, username, permission)
+        self.last_require_titles = None  # require_titles последнего view_tasks (#43, для тестов)
 
     # --- helpers для тестов ---
     def _task_identity(self):
@@ -158,7 +159,11 @@ class FakeAPI:
             raise AssertionError("нельзя удалять непустой бакет")
         self._buckets = [b for b in self._buckets if b["id"] != bucket_id]
 
-    def view_tasks(self, project_id, view_id):
+    def view_tasks(self, project_id, view_id, require_titles=None):
+        # реальный клиент постранично мёржит бакеты; фейк держит всё в памяти и всегда
+        # отдаёт полный борд, поэтому require_titles тут не влияет на результат — лишь
+        # записываем его, чтобы тест мог проверить, что next_task просит лёгкий борд (#43).
+        self.last_require_titles = require_titles
         out = []
         for b in self._buckets:
             tasks = [dict(t) for tid, t in self.tasks.items() if self.task_bucket[tid] == b["id"]]
