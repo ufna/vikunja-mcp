@@ -127,9 +127,14 @@ roll out to all repos automatically (no per-consumer bumps, no PR bots).
 Immutable `vX.Y.Z` tags remain the release history and rollback points.
 Admin one-offs (`setup`, `install-skill`) may use `@main`.
 
-Cutting a release:
+**Patch releases are automatic**: every green push to `main` triggers a CI job
+that bumps the patch version in both files, tags `vX.Y.Z`, and moves `stable`
+onto it — so `stable` always tracks the latest green `main` with no manual step.
+
+Manual steps remain for **minor/major bumps** and **rollback**:
 
 1. bump `version` in `pyproject.toml` and `__version__` in `src/vikunja_mcp/__init__.py`
+   (only for a minor/major — patches are automated)
 2. commit, wait for CI green
 3. `git tag -a vX.Y.Z -m "vX.Y.Z" && git push origin vX.Y.Z`
 4. `git branch -f stable vX.Y.Z && git push -f origin stable`  # rollout (rollback: same, older tag)

@@ -85,12 +85,22 @@ Consumers' `.mcp.json` subscribes to the moving `stable` branch with
 `--refresh-package` → every session start re-resolves it (auto-rollout,
 no per-consumer bumps). Immutable `vX.Y.Z` tags = history + rollback.
 
-Release: bump `version` in `pyproject.toml` AND `__version__` in
-`src/vikunja_mcp/__init__.py` → commit, CI green →
-`git tag -a vX.Y.Z -m "vX.Y.Z" && git push origin vX.Y.Z` →
-`git branch -f stable vX.Y.Z && git push -f origin stable`.
-`stable` moves ONLY to tagged, CI-green commits. Rollback = same command
-with an older tag.
+**Patch releases are automatic** during active development. Every green push
+to `main` fires the `release` job in `.github/workflows/ci.yml`
+(`needs: [lint-and-unit, integration]`): it runs `scripts/bump_version.py`
+(bumps the patch in BOTH `pyproject.toml` and `src/vikunja_mcp/__init__.py`),
+commits `chore: vX.Y.Z [skip ci]`, tags `vX.Y.Z`, and force-moves `stable`
+onto that version-only bump commit. The job holds `permissions: contents:
+write` (least-privilege, that job only) and a `release` concurrency group
+(serializes racing pushes); the bump commit is pushed with `GITHUB_TOKEN`,
+which by design does NOT re-trigger CI (plus `[skip ci]` as a second belt).
+So `stable` always tracks the latest green `main`, patch-bumped, hands-off.
+
+Manual procedure remains for:
+- **Rollback**: `git branch -f stable vX.Y.Z && git push -f origin stable`
+  onto an older, known-good tag. `stable` moves ONLY to tagged, CI-green commits.
+- **Minor / major bumps**: hand-edit `version`/`__version__` to `X.(Y+1).0`
+  or `(X+1).0.0` in a commit; CI resumes auto-patching from the new baseline.
 
 ## Dogfood: this repo's own tasks
 
@@ -103,7 +113,9 @@ the agent drains the queue and paces its own pauses on an empty queue instead
 of stopping.
 Each task lands as its own commit on `main`, pushed at `advance(to='review')`
 time (`… (tracker #N)`, `evidence` = the sha) — a completed task commits and
-pushes itself; only the tag + `stable` move wait for the release task. The repo
+pushes itself, and that green push auto-releases a patch (CI bumps both version
+files, tags `vX.Y.Z`, and moves `stable` — no separate release task for patches;
+see the Releases section). The repo
 is PUBLIC — this repo's own token is supplied via the repo-local
 `.vikunja-mcp.env` (sits next to `.vikunja-mcp.toml`, gitignored), never
 committed.

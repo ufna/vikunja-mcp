@@ -32,3 +32,43 @@ jobs:
       - run: uv run pytest tests/integration -q
         env:
           VIKUNJA_TEST_URL: http://localhost:3456
+
+  # Авто-релиз патч-версии: на каждый зелёный push в main бампаем патч в обоих
+  # version-файлах, коммитим этот bump, тегируем vX.Y.Z и двигаем stable на него.
+  # Инвариант: тег и stable указывают на version-only bump-коммит поверх только
+  # что позеленевшего main. Коммит, запушенный GITHUB_TOKEN, GitHub намеренно НЕ
+  # триггерит новый workflow-run (рекурсии нет); [skip ci] — второй пояс.
+  release:
+    needs: [lint-and-unit, integration]        # только когда ОБА зелёные
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write                          # least-privilege: право на push только этому job'у
+    concurrency:
+      group: release                           # сериализуем гонку двух пушей в main
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0                        # вся история — чтобы двигать ветки/теги
+          # persist-credentials по умолчанию true: GITHUB_TOKEN уже вшит для push
+      - uses: astral-sh/setup-uv@v5
+      - name: configure git identity
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+      - name: bump patch version
+        id: bump
+        # scripts/bump_version.py печатает vX.Y.Z последней строкой stdout
+        run: echo "version=$(uv run python scripts/bump_version.py | tail -n1)" >> "$GITHUB_OUTPUT"
+      - name: commit, tag, push, move stable
+        env:
+          VERSION: ${{ steps.bump.outputs.version }}
+        run: |
+          git add pyproject.toml src/vikunja_mcp/__init__.py
+          git commit -m "chore: ${VERSION} [skip ci]"
+          git tag -a "${VERSION}" -m "${VERSION}"
+          git push origin HEAD:main                 # bump-коммит -> main
+          git push origin "${VERSION}"              # неизменяемый тег
+          git branch -f stable HEAD                 # stable -> тот же bump-коммит
+          git push -f origin stable                 # rollout канала stable
