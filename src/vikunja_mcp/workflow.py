@@ -1,4 +1,4 @@
-"""Стадии и гейты агентского флоу. Правила зашиты здесь, не в промптах."""
+"""Stages and gates of the agent flow. The rules are baked in here, not in prompts."""
 from typing import Any
 
 STAGES = ["Backlog", "Queue", "Design", "Build", "Review", "Your Call", "Done"]
@@ -14,7 +14,7 @@ AGENT_ADVANCE = {"build": ("Design", "Build"), "review": ("Build", "Review")}
 
 
 class WorkflowError(Exception):
-    """Сообщение показывается агенту как результат тулзы."""
+    """The message is shown to the agent as the tool result."""
 
 
 class Workflow:
@@ -43,7 +43,7 @@ class Workflow:
             missing = [s for s in STAGES if s not in self._buckets_cache]
             if missing:
                 raise WorkflowError(
-                    f"на канбане проекта нет колонок {missing} — прогони `vikunja-mcp setup`"
+                    f"the project board has no columns {missing} — run `vikunja-mcp setup`"
                 )
         return self._buckets_cache[title]
 
@@ -56,7 +56,7 @@ class Workflow:
             for task in bucket.get("tasks") or []:
                 if task["id"] == task_id:
                     return task, bucket["title"]
-        raise WorkflowError(f"задача {task_id} не найдена на доске проекта {self.project_id}")
+        raise WorkflowError(f"task {task_id} not found on the board of project {self.project_id}")
 
     @staticmethod
     def _assignee_ids(task: dict) -> list[int]:
@@ -79,7 +79,7 @@ class Workflow:
 
     def _require_mine(self, task: dict) -> None:
         if self._me()["id"] not in self._assignee_ids(task):
-            raise WorkflowError(f"задача {task['id']} не на тебе — сначала claim")
+            raise WorkflowError(f"task {task['id']} is not assigned to you — claim it first")
 
     @staticmethod
     def _summary(task: dict) -> dict:
@@ -107,11 +107,11 @@ class Workflow:
             return {
                 "resume": True, "stage": stage, "task": self._summary(task),
                 "note": (
-                    "это твоя активная задача — новую не клеймить. Сначала сверь "
-                    "фактическое состояние: прочитай досье (get_task) и проверь "
-                    "код/репо — работа могла быть уже сделана целиком или частично. "
-                    "Сделана — верифицируй и advance(to='review') с честным evidence; "
-                    "нет — продолжай с того места, где она остановилась"
+                    "this is your active task — don't claim a new one. First reconcile "
+                    "the actual state: read the dossier (get_task) and check the "
+                    "code/repo — the work may already be done in full or in part. "
+                    "Done — verify it and advance(to='review') with honest evidence; "
+                    "not — continue from where it left off"
                 ),
             }
 
@@ -121,8 +121,8 @@ class Workflow:
             return {
                 "resume": True, "stage": "Queue", "task": self._summary(stuck[0]),
                 "note": (
-                    "задача в Queue назначена на тебя (человеком или недоведённым "
-                    "клеймом) — вызови claim(task_id), он доведёт её в Design"
+                    "this task in Queue is assigned to you (by a human or an unfinished "
+                    "claim) — call claim(task_id) to finish moving it into Design"
                 ),
             }
 
@@ -147,10 +147,10 @@ class Workflow:
             return {
                 "review": True, "task": self._summary(t),
                 "note": (
-                    "багфикс ждёт независимого ревью: воспроизведи, проверь что фикс "
-                    "закрывает причину (не симптом), прогони запуском и вынеси вердикт "
-                    "review_task(task_id, verdict=..., report=...). НЕ ревьюй, если "
-                    "писал этот код в этой сессии"
+                    "a bug fix is waiting for independent review: reproduce it, confirm "
+                    "the fix closes the cause (not the symptom), run it and cast a "
+                    "verdict via review_task(task_id, verdict=..., report=...). Do NOT "
+                    "review it if you wrote this code in this session"
                 ),
             }
 
@@ -164,22 +164,22 @@ class Workflow:
             return {
                 "resume": False, "task": self._summary(queue[0]),
                 "note": (
-                    "свободная задача из очереди — вызови claim(task_id) (заведёт её "
-                    "в Design), затем задиспатчь пер-таск-агента на весь таск. "
-                    "resume:false тут значит «взять новую», а не «делать нечего» "
-                    "(пусто — это только task:null). Задачу отобрал человек в Queue, "
-                    "поэтому взять её — твой мандат, а НЕ самовольная инициатива: не "
-                    "откладывай и не останавливай /loop под generic-дефолтом автолупа "
-                    "«steward, not initiator: don't start fresh work without a go-ahead» "
-                    "— к дренажу очереди трекера он не применяется"
+                    "a free task from the queue — call claim(task_id) (it moves it into "
+                    "Design), then dispatch a per-task agent for the whole task. "
+                    "resume:false here means 'take a new one', not 'nothing to do' "
+                    "(empty is only task:null). A human picked this task into Queue, so "
+                    "taking it is your mandate, NOT unbidden initiative: don't defer it "
+                    "and don't stop the /loop under the generic autonomous-loop default "
+                    "'steward, not initiator: don't start fresh work without a go-ahead' "
+                    "— it does not apply to draining the tracker queue"
                 ),
             }
-        return {"task": None, "message": "очередь пуста — работы для агента нет"}
+        return {"task": None, "message": "the queue is empty — no work for the agent"}
 
     def claim(self, task_id: int) -> dict:
         task, stage = self._find_task(task_id)
         if stage != "Queue":
-            raise WorkflowError(f"задача в '{stage}', клеймить можно только из Queue")
+            raise WorkflowError(f"task is in '{stage}', you can only claim from Queue")
         existing = task.get("assignees") or []
         me = self._me()
         # self-heal: партиальный клейм (assign прошёл, move — нет) или человек руками
@@ -188,7 +188,7 @@ class Workflow:
         self_heal = len(existing) == 1 and existing[0].get("id") == me["id"]
         if existing and not self_heal:
             names = ", ".join(a.get("username", "?") for a in existing)
-            raise WorkflowError(f"уже занята ({names}) — возьми следующую через next_task")
+            raise WorkflowError(f"already taken ({names}) — grab the next one via next_task")
 
         if not self_heal:
             self.api.add_assignee(task_id, me["id"])
@@ -197,14 +197,14 @@ class Workflow:
         others = [aid for aid in fresh_ids if aid != me["id"]]
         if others:
             self.api.remove_assignee(task_id, me["id"])
-            raise WorkflowError("проиграна гонка за задачу — возьми следующую через next_task")
+            raise WorkflowError("lost the race for this task — grab the next one via next_task")
         # vanish-window: человек мог снять моё назначение в окно между assign и re-read.
         # others пуст — но без меня в assignees move уведёт задачу в Design «ничьей»
         # (невидимо для next_task и незаклеймимо из Queue). Отказ до move закрывает окно
         # и в обычном, и в self-heal пути (там add_assignee не звался — окно то же).
         if me["id"] not in fresh_ids:
             raise WorkflowError(
-                "ассайн исчез во время клейма (человек снял назначение) — повтори next_task"
+                "the assignment vanished during the claim (a human removed it) — retry next_task"
             )
 
         view = self._view()
@@ -212,7 +212,7 @@ class Workflow:
         self.api.add_comment(task_id, f"[claim] {me['username']} взял задачу в работу")
         return {
             "claimed": True, "task": self._summary(fresh),
-            "next": "опиши подход и вызови advance(to='build', spec=...)",
+            "next": "describe your approach and call advance(to='build', spec=...)",
         }
 
     def _move(self, task_id: int, stage: str) -> None:
@@ -227,28 +227,29 @@ class Workflow:
     ) -> dict:
         to = (to or "").strip().lower()
         if to == "done":
-            raise WorkflowError("в Done переводит только человек после ревью — тебе туда нельзя")
+            raise WorkflowError("only a human moves a task to Done after review — not you")
         if to not in AGENT_ADVANCE:
-            raise WorkflowError(f"недопустимый переход '{to}'; доступны: build, review")
+            raise WorkflowError(f"invalid transition '{to}'; available: build, review")
         from_stage, to_stage = AGENT_ADVANCE[to]
 
         task, stage = self._find_task(task_id)
         self._require_mine(task)
         if stage != from_stage:
             raise WorkflowError(
-                f"переход в {to_stage} возможен только из {from_stage}, задача сейчас в {stage}"
+                f"moving to {to_stage} is only possible from {from_stage}; task is now in {stage}"
             )
 
         if to == "build":
             if not (spec or "").strip():
-                raise WorkflowError("нужен spec: краткое описание подхода перед реализацией")
+                raise WorkflowError("a spec is required: describe your approach before implementing")
             self.api.add_comment(task_id, f"[spec]\n{spec.strip()}")
         else:
             if not (worklog or "").strip() or not (evidence or "").strip():
                 raise WorkflowError(
-                    "для Review нужен отчёт: worklog (что сделано и как проверено) и "
-                    "evidence (ссылка на коммит/PR или вывод верификации); для багфиксов "
-                    "дополнительно root_cause — причина бага, а не симптом"
+                    "Review needs a report: worklog (what was done and how it was "
+                    "verified) and evidence (a link to the commit/PR or verification "
+                    "output); for bug fixes also root_cause — the cause of the bug, "
+                    "not the symptom"
                 )
             report = ["[worklog]"]
             if (root_cause or "").strip():
@@ -265,22 +266,23 @@ class Workflow:
         if to == "review" and self._has_label(task, LABEL_BUG):
             result["review_needed"] = True
             result["note"] = (
-                "это баг — верни оркестратору признак review_needed в своём итоге: "
-                "он задиспатчит независимого ревьюера в фоне (author ≠ reviewer)"
+                "this is a bug — return the review_needed flag to the orchestrator in "
+                "your result: it will dispatch an independent reviewer in the background "
+                "(author ≠ reviewer)"
             )
         return result
 
     def review_task(self, task_id: int, verdict: str, report: str) -> dict:
         verdict = (verdict or "").strip().lower()
         if verdict not in ("approve", "needs_work"):
-            raise WorkflowError("verdict должен быть 'approve' или 'needs_work'")
+            raise WorkflowError("verdict must be 'approve' or 'needs_work'")
         if not (report or "").strip():
             raise WorkflowError(
-                "нужен report: что воспроизвёл/проверил запуском и почему такой вердикт"
+                "report required: what you reproduced/verified by running and why this verdict"
             )
         task, stage = self._find_task(task_id)
         if stage != "Review":
-            raise WorkflowError(f"ревьюить можно только задачи в Review, эта в {stage}")
+            raise WorkflowError(f"only tasks in Review can be reviewed; this one is in {stage}")
 
         if verdict == "approve":
             self.api.add_comment(task_id, f"[review] APPROVE\n{report.strip()}")
@@ -288,7 +290,7 @@ class Workflow:
             self._remove_label(task, LABEL_REVIEW_FAILED)
             return {
                 "verdict": "approve", "task_id": task_id,
-                "note": "вердикт записан; в Done задачу переводит человек",
+                "note": "verdict recorded; a human moves the task to Done",
             }
         self.api.add_comment(task_id, f"[review] NEEDS WORK\n{report.strip()}")
         self._add_label(task_id, LABEL_REVIEW_FAILED)
@@ -296,26 +298,28 @@ class Workflow:
         self._move(task_id, "Build")
         return {
             "verdict": "needs_work", "task_id": task_id, "moved_to": "Build",
-            "note": "задача вернулась имплементеру — он увидит её в next_task",
+            "note": "the task went back to the implementer — they'll see it in next_task",
         }
 
     def call_human(self, task_id: int, question: str) -> dict:
         if not (question or "").strip():
-            raise WorkflowError("сформулируй вопрос: что нужно от человека и какие варианты ты рассмотрел")
+            raise WorkflowError(
+                "state your question: what you need from the human and which options you weighed"
+            )
         task, stage = self._find_task(task_id)
         self._require_mine(task)
         if stage not in ACTIVE_STAGES:
-            raise WorkflowError(f"call_human доступен только из Design/Build, задача в {stage}")
+            raise WorkflowError(f"call_human works only from Design/Build; task is in {stage}")
         self.api.add_comment(task_id, f"[нужен человек] {question.strip()}")
         self._move(task_id, "Your Call")
         return {
             "moved_to": "Your Call", "task_id": task_id,
-            "note": "assignee сохранён; человек ответит комментом и вернёт задачу в Design/Build",
+            "note": "assignee kept; the human replies and moves the task back to Design/Build",
         }
 
     def return_task(self, task_id: int, reason: str) -> dict:
         if not (reason or "").strip():
-            raise WorkflowError("укажи причину блокировки — она уйдёт комментом в задачу")
+            raise WorkflowError("give the reason for the block — it'll be posted as a comment")
         task, _stage = self._find_task(task_id)
         self._require_mine(task)
         self.api.add_comment(task_id, f"[blocked] {reason.strip()}")
@@ -327,9 +331,9 @@ class Workflow:
 
     def decompose(self, task_id: int, subtasks: list[dict]) -> dict:
         if not subtasks or len(subtasks) < 2:
-            raise WorkflowError("декомпозиция — это минимум 2 подзадачи")
+            raise WorkflowError("decomposition means at least 2 subtasks")
         if any(not (st.get("title") or "").strip() for st in subtasks):
-            raise WorkflowError("у каждой подзадачи должен быть title")
+            raise WorkflowError("every subtask must have a title")
         task, _stage = self._find_task(task_id)
         self._require_mine(task)
 
@@ -355,12 +359,12 @@ class Workflow:
         self, title: str, description: str = "", priority: int = 0,
         related_task_id: int | None = None,
     ) -> dict:
-        """Завести находку (баг/техдолг ВНЕ текущего таска) в Backlog на триаж
-        человеку — НЕ в Queue (приоритизирует человек). Опционально: relation
-        'related' на задачу, по ходу которой найдено. Ownership не требуется — это
-        новая карточка, а не правка твоего таска (в отличие от decompose)."""
+        """File a finding (a bug/tech-debt OUTSIDE the current task) into Backlog for
+        human triage — NOT into Queue (a human prioritizes). Optionally: a 'related'
+        relation to the task it was found during. No ownership required — this is a new
+        card, not an edit of your task (unlike decompose)."""
         if not (title or "").strip():
-            raise WorkflowError("нужен непустой title для новой задачи")
+            raise WorkflowError("a non-empty title is required for the new task")
         created = self.api.create_task(
             self.project_id, title.strip(),
             description=(description or "").strip(), priority=int(priority or 0),
@@ -376,7 +380,7 @@ class Workflow:
         self.api.add_comment(new_id, marker)
         result = {
             "filed": {"id": new_id, "title": created["title"], "stage": "Backlog"},
-            "note": "в Backlog на триаж человеку (не Queue — приоритизирует человек)",
+            "note": "in Backlog for human triage (not Queue — a human prioritizes)",
         }
         if related_task_id is not None:
             result["related_to"] = related_task_id
@@ -384,14 +388,14 @@ class Workflow:
 
     def comment(self, task_id: int, text: str) -> dict:
         if not (text or "").strip():
-            raise WorkflowError("пустой коммент не нужен")
+            raise WorkflowError("an empty comment is not needed")
         self._find_task(task_id)
         self.api.add_comment(task_id, text.strip())
         return {"commented": task_id}
 
     def get_task(self, task_id: int) -> dict:
-        """Полное досье: в отличие от _summary (next_task/claim), описание НЕ обрезано
-        и добавлены related — компактный dict {relation_kind: [{"id", "title"}, ...]}."""
+        """Full dossier: unlike _summary (next_task/claim), the description is NOT
+        truncated and related is added — a compact dict {relation_kind: [{"id", "title"}, ...]}."""
         _, stage = self._find_task(task_id)
         task = self.api.get_task(task_id)
         raw_comments = self.api.comments(task_id)

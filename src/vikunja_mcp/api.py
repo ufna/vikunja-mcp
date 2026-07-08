@@ -98,7 +98,7 @@ class VikunjaAPI:
         for v in self.views(project_id):
             if v["view_kind"] == "kanban":
                 return v
-        raise VikunjaError(404, "у проекта нет kanban-вида — прогони `vikunja-mcp setup`")
+        raise VikunjaError(404, "project has no kanban view — run `vikunja-mcp setup`")
 
     def buckets(self, project_id: int, view_id: int) -> list[dict]:
         return self._req("GET", f"/projects/{project_id}/views/{view_id}/buckets") or []

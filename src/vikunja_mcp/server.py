@@ -1,4 +1,4 @@
-"""stdio MCP-сервер. Гейты живут в Workflow; тут — тонкая обвязка и понятные ошибки."""
+"""stdio MCP server. Gates live in Workflow; this is thin wiring and clear errors."""
 import sys
 from functools import wraps
 
@@ -39,8 +39,8 @@ def _tool(fn):
             return {"error": f"Vikunja API: {e.status} {e.message}"}
         except httpx.HTTPError as e:
             return {
-                "error": f"трекер недоступен ({e.__class__.__name__}): "
-                f"проверь url в .vikunja-mcp.toml и VPN"
+                "error": f"tracker unreachable ({e.__class__.__name__}): "
+                f"check the url in .vikunja-mcp.toml and the VPN"
             }
 
     return wrapper
@@ -49,35 +49,36 @@ def _tool(fn):
 @mcp.tool()
 @_tool
 def next_task() -> dict:
-    """Что делать дальше, в порядке: (1) ТВОЯ активная задача (Design/Build, в т.ч.
-    вернувшаяся из Your Call), (2) назначенная на тебя в Queue, (3) багфикс в
-    Review, ждущий независимого ревью (label bug, вердикта ещё нет), (4) верхняя
-    СВОБОДНАЯ из Queue. Задачи, назначенные на другого, не выдаёт никогда — они
-    «для людей». Backlog и blocked не трогает. Одна задача за раз."""
+    """What to do next, in order: (1) YOUR active task (Design/Build, incl. one bounced
+    back from Your Call), (2) a task in Queue assigned to you, (3) a bug fix in Review
+    awaiting independent review (label bug, no verdict yet), (4) the top FREE task in
+    Queue. Never hands out a task assigned to someone else — those are "for humans".
+    Leaves Backlog and blocked alone. One task at a time."""
     return _wf().next_task()
 
 
 @mcp.tool()
 @_tool
 def claim(task_id: int) -> dict:
-    """Взять задачу из Queue: назначает тебя и переносит в Design. Брать можно
-    свободные или уже назначенные на тебя; назначенная на другого — «для людей»,
-    её claim не отдаст. Отказ также вне Queue и при проигранной гонке (тогда next_task)."""
+    """Take a task from Queue: assigns you and moves it to Design. You may take free
+    tasks or ones already assigned to you; one assigned to someone else is "for humans"
+    and claim won't hand it over. Also refused outside Queue and on a lost race (call
+    next_task then)."""
     return _wf().claim(task_id)
 
 
 @mcp.tool()
 @_tool
 def get_task(task_id: int) -> dict:
-    """Досье задачи: полное (не обрезанное) описание, стадия, assignees, лейблы,
-    related (связанные задачи по видам родства) и все комментарии."""
+    """Task dossier: full (untruncated) description, stage, assignees, labels, related
+    (linked tasks by relation kind) and all comments."""
     return _wf().get_task(task_id)
 
 
 @mcp.tool()
 @_tool
 def comment(task_id: int, text: str) -> dict:
-    """Заметка о ходе работы: находки, решения ('выбрал X вместо Y потому что Z')."""
+    """A progress note: findings, decisions ('picked X over Y because Z')."""
     return _wf().comment(task_id, text)
 
 
@@ -88,12 +89,12 @@ def advance(
     spec: str | None = None, worklog: str | None = None, evidence: str | None = None,
     root_cause: str | None = None,
 ) -> dict:
-    """Продвинуть СВОЮ задачу. to='build' требует spec (подход/дизайн).
-    to='review' требует ОТЧЁТ о проделанной работе: worklog (что сделано и как
-    проверено — запуском, не чтением кода) + evidence (коммит/PR/вывод проверки);
-    для багфиксов ОБЯЗАТЕЛЬНО передай root_cause — причину бага (почему возник),
-    а не симптом. Отчёт уходит комментом в задачу — его читает ревьюер.
-    Перехода в Done нет — Done ставит человек после ревью."""
+    """Advance YOUR task. to='build' requires spec (approach/design). to='review'
+    requires a WORK REPORT: worklog (what was done and how it was verified — by running,
+    not by reading code) + evidence (commit/PR/verification output); for bug fixes
+    root_cause is MANDATORY — the cause of the bug (why it happened), not the symptom.
+    The report is posted as a comment for the reviewer to read. There is no transition
+    to Done — a human moves it to Done after review."""
     return _wf().advance(
         task_id, to, spec=spec, worklog=worklog, evidence=evidence, root_cause=root_cause
     )
@@ -102,41 +103,44 @@ def advance(
 @mcp.tool()
 @_tool
 def review_task(task_id: int, verdict: str, report: str) -> dict:
-    """Независимое ревью багфикса в Review (предлагается через next_task). Ты НЕ должен
-    быть автором проверяемого кода — ревьюит отдельная сессия. Проверь по сути:
-    воспроизведи баг, убедись что фикс закрывает root cause (не симптом), прогони
-    ЗАПУСКОМ. verdict='approve' — вердикт-коммент, Done дальше ставит человек;
-    verdict='needs_work' — вердикт-коммент и задача возвращается в Build имплементеру.
-    report обязателен: что проверял, что наблюдал, почему такой вердикт."""
+    """Independent review of a bug fix in Review (offered via next_task). You must NOT be
+    the author of the code under review — a separate session reviews it. Check for real:
+    reproduce the bug, confirm the fix closes the root cause (not the symptom), run it.
+    verdict='approve' — a verdict comment, a human moves it to Done next;
+    verdict='needs_work' — a verdict comment and the task returns to Build to the
+    implementer. report is required: what you checked, what you observed, why this
+    verdict."""
     return _wf().review_task(task_id, verdict, report)
 
 
 @mcp.tool()
 @_tool
 def call_human(task_id: int, question: str) -> dict:
-    """Вопрос к человеку — ЕДИНСТВЕННЫЙ канал (не спрашивай в консоли: оркестратор
-    под /loop, человека нет у консоли — чат/AskUserQuestion/план на подтверждение
-    повиснут). Вопрос уйдёт комментом, задача — в колонку 'Your Call' (в сокращениях
-    — YC), assignee сохранится. После вызова не жди ответа: бери следующую задачу;
-    человек ответит комментом и сам вернёт карточку в Design/Build, next_task отдаст
-    её как «твою активную». Это НЕ ревью и НЕ внешняя блокировка."""
+    """A question for the human — the ONLY channel (don't ask in the console: the
+    orchestrator runs under /loop, no human is at the console — chat/AskUserQuestion/a
+    plan awaiting approval would hang). The question is posted as a comment, the task
+    moves to the 'Your Call' column (abbreviated YC), the assignee is kept. After
+    calling, don't wait for an answer: take the next task; the human replies with a
+    comment and moves the card back to Design/Build themselves, and next_task hands it
+    back as "your active" task. This is NOT review and NOT an external block."""
     return _wf().call_human(task_id, question)
 
 
 @mcp.tool()
 @_tool
 def return_task(task_id: int, reason: str) -> dict:
-    """Вернуть задачу из-за ВНЕШНЕЙ блокировки (нет доступа/зависимость/чужой сервис):
-    снимает тебя, ставит label 'blocked', уносит в Backlog на ре-триаж человеком."""
+    """Return a task because of an EXTERNAL block (no access/dependency/someone else's
+    service): unassigns you, adds label 'blocked', moves it to Backlog for human
+    re-triage."""
     return _wf().return_task(task_id, reason)
 
 
 @mcp.tool()
 @_tool
 def decompose(task_id: int, subtasks: list[dict]) -> dict:
-    """Разбить СВОЮ большую задачу (>~полдня работы) на >=2 подзадачи:
-    [{'title': ..., 'description'?: ..., 'priority'?: 0-5}]. Подзадачи встают в Queue
-    с relation на родителя; родитель уходит в Backlog с label 'epic'."""
+    """Break up YOUR large task (>~half a day of work) into >=2 subtasks:
+    [{'title': ..., 'description'?: ..., 'priority'?: 0-5}]. Subtasks go into Queue with
+    a relation to the parent; the parent moves to Backlog with label 'epic'."""
     return _wf().decompose(task_id, subtasks)
 
 
@@ -146,13 +150,14 @@ def file_task(
     title: str, description: str = "", priority: int = 0,
     related_task_id: int | None = None,
 ) -> dict:
-    """Завести НАЙДЕННУЮ ПО ХОДУ работы задачу (баг/техдолг ВНЕ твоего текущего таска)
-    в Backlog на триаж человеку. КОГДА: наткнулся на проблему, не относящуюся к текущей
-    задаче, и её некуда деть — паркуй сюда, НЕ чини молча и НЕ тащи в свой диф. Это НЕ
-    разбивка своей большой задачи — для этого decompose (кладёт подзадачи в Queue с
-    parenttask). Кладёт в Backlog (НЕ Queue — приоритизирует человек), метит комментом
-    [filed-by-agent] и, если передан related_task_id, вешает relation 'related' на
-    задачу, по ходу которой найдено. Ownership не нужен — это новая карточка."""
+    """File a task DISCOVERED mid-work (a bug/tech-debt OUTSIDE your current task) into
+    Backlog for human triage. WHEN: you hit a problem unrelated to the current task with
+    nowhere to put it — park it here, do NOT fix it silently and do NOT drag it into your
+    diff. This is NOT splitting your own large task — use decompose for that (it puts
+    subtasks in Queue with a parenttask). Files into Backlog (NOT Queue — a human
+    prioritizes), marks it with a [filed-by-agent] comment and, if related_task_id is
+    given, adds a 'related' relation to the task it was found during. No ownership needed
+    — this is a new card."""
     return _wf().file_task(
         title, description=description, priority=priority, related_task_id=related_task_id
     )

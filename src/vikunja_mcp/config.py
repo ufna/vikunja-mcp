@@ -78,19 +78,19 @@ def load_config(cwd: Path | None = None, environ: Mapping[str, str] | None = Non
 
     if not url or raw_pid is None:
         raise ConfigError(
-            f"не найден {REPO_FILE} с [tracker] url/project_id (искал от {cwd or Path.cwd()} "
-            f"вверх) и нет {ENV_URL}/{ENV_PROJECT_ID} в env"
+            f"{REPO_FILE} with [tracker] url/project_id not found (searched from "
+            f"{cwd or Path.cwd()} upward) and no {ENV_URL}/{ENV_PROJECT_ID} in env"
         )
     if not token:
         raise ConfigError(
-            f"нет токена: положи VIKUNJA_TOKEN=... в {REPO_ENV_FILE} рядом с {REPO_FILE}, "
-            f"в {USER_ENV_FILE} (chmod 600) или передай через env {ENV_TOKEN}"
+            f"no token: put VIKUNJA_TOKEN=... in {REPO_ENV_FILE} next to {REPO_FILE}, "
+            f"in {USER_ENV_FILE} (chmod 600), or pass it via env {ENV_TOKEN}"
         )
     try:
         project_id = int(raw_pid)
     except (TypeError, ValueError):
         raise ConfigError(
-            f"VIKUNJA_PROJECT_ID/project_id должен быть числом, получено {raw_pid!r}"
+            f"VIKUNJA_PROJECT_ID/project_id must be a number, got {raw_pid!r}"
         )
     return Config(
         url=str(url), token=str(token),

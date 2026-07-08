@@ -103,7 +103,7 @@ def test_env_file_keeps_hash_inside_quotes(tmp_path):
 # --- F5: bad VIKUNJA_PROJECT_ID ---
 
 def test_bad_project_id_raises_config_error(tmp_path):
-    with pytest.raises(ConfigError, match="VIKUNJA_PROJECT_ID/project_id должен быть числом"):
+    with pytest.raises(ConfigError, match="VIKUNJA_PROJECT_ID/project_id must be a number"):
         load_config(cwd=tmp_path, environ={
             "VIKUNJA_TOKEN": "tk", "VIKUNJA_URL": "http://x", "VIKUNJA_PROJECT_ID": "abc",
         })

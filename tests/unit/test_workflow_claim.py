@@ -43,8 +43,8 @@ def test_next_task_free_queue_note_overrides_steward_default(env):
     api, wf = env
     api.add_task("free", "Queue", priority=3)
     note = wf.next_task()["note"]
-    assert "мандат" in note       # взять свежую — мандат, не «самовольная инициатива»
-    assert "останавлив" in note   # ...и НЕ останавливать /loop (собственно косяк DOGE)
+    assert "mandate" in note      # взять свежую — мандат, не «самовольная инициатива»
+    assert "stop" in note         # ...и НЕ останавливать /loop (собственно косяк DOGE)
 
 
 def test_next_task_skips_assigned_and_blocked(env):
@@ -62,7 +62,7 @@ def test_next_task_prefers_my_active(env):
     res = wf.next_task()
     assert res["task"]["id"] == mine["id"] and res["resume"] is True
     assert res["stage"] == "Build"
-    assert "свер" in res["note"] and "верифицируй" in res["note"]  # resume => сначала перепроверь
+    assert "reconcile" in res["note"] and "verify" in res["note"]  # resume => сначала перепроверь
 
 
 def test_next_task_resumes_stuck_claim_in_queue(env):
@@ -152,7 +152,7 @@ def test_claim_race_lost_backs_off(env):
         original_add(task_id, 9)   # конкурент успел между assign и re-read
 
     api.add_assignee = racing_add
-    with pytest.raises(WorkflowError, match="гонк"):
+    with pytest.raises(WorkflowError, match="race"):
         wf.claim(t["id"])
     assert all(a["id"] != 2 for a in api.tasks[t["id"]]["assignees"])  # себя сняли
     assert api.stage_of(t["id"]) == "Queue"                            # не двигали
@@ -172,7 +172,7 @@ def test_claim_raises_when_assignee_vanishes_normal_path(env):
         return original_get(task_id)
 
     api.get_task = vanishing_get
-    with pytest.raises(WorkflowError, match="исчез"):
+    with pytest.raises(WorkflowError, match="vanished"):
         wf.claim(t["id"])
     assert api.stage_of(t["id"]) == "Queue"                # не уехала в Design
     assert api.tasks[t["id"]]["assignees"] == []           # без ассайни, как в реальном vanish
@@ -191,7 +191,7 @@ def test_claim_raises_when_assignee_vanishes_self_heal_path(env):
         return original_get(task_id)
 
     api.get_task = vanishing_get
-    with pytest.raises(WorkflowError, match="исчез"):
+    with pytest.raises(WorkflowError, match="vanished"):
         wf.claim(t["id"])
     assert api.stage_of(t["id"]) == "Queue"
     assert api.tasks[t["id"]]["assignees"] == []

@@ -35,7 +35,7 @@ def test_kanban_view_missing_raises_actionable_error():
         ])
 
     api = make_api(handler)
-    with pytest.raises(VikunjaError, match="kanban-вида"):
+    with pytest.raises(VikunjaError, match="kanban view"):
         api.kanban_view(3)
 
 

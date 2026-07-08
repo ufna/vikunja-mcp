@@ -36,7 +36,7 @@ def test_tool_catches_transport_errors_with_hint(monkeypatch):
     monkeypatch.setattr(server, "_wf", lambda: BoomWorkflow())
     result = server.next_task()
     assert "error" in result
-    assert "трекер недоступен" in result["error"]
+    assert "tracker unreachable" in result["error"]
     assert "ConnectError" in result["error"]
 
 

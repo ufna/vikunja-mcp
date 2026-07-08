@@ -14,13 +14,13 @@ def env():
 
 def test_advance_to_done_is_forbidden(env):
     api, wf, t = env
-    with pytest.raises(WorkflowError, match="человек"):
+    with pytest.raises(WorkflowError, match="human"):
         wf.advance(t["id"], to="done")
 
 
 def test_advance_unknown_stage(env):
     api, wf, t = env
-    with pytest.raises(WorkflowError, match="недопустимый"):
+    with pytest.raises(WorkflowError, match="invalid"):
         wf.advance(t["id"], to="review2")
 
 
@@ -73,7 +73,7 @@ def test_advance_requires_ownership(env):
 
 def test_call_human_keeps_assignee(env):
     api, wf, t = env
-    with pytest.raises(WorkflowError, match="вопрос"):
+    with pytest.raises(WorkflowError, match="question"):
         wf.call_human(t["id"], question="")
     wf.call_human(t["id"], question="какой из двух вариантов деплоя выбрать?")
     assert api.stage_of(t["id"]) == "Your Call"
@@ -83,7 +83,7 @@ def test_call_human_keeps_assignee(env):
 
 def test_return_task_unassigns_labels_and_moves_to_backlog(env):
     api, wf, t = env
-    with pytest.raises(WorkflowError, match="причин"):
+    with pytest.raises(WorkflowError, match="reason"):
         wf.return_task(t["id"], reason="")
     wf.return_task(t["id"], reason="нужен доступ к prod-базе")
     assert api.stage_of(t["id"]) == "Backlog"
