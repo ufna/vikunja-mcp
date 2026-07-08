@@ -1,4 +1,5 @@
 """Vikunja REST client. Gotchas baked in: PUT=create, POST=full-replace update -> RMW."""
+import time
 from typing import Any
 
 import httpx
@@ -25,11 +26,52 @@ class VikunjaAPI:
         )
         self._page_size_cache: int | None = None
 
+    # --- транзиентные ретраи (#86 «восстановление работы на ошибках апи») ---
+    # Раньше _req падал с ПЕРВОЙ же 429/5xx/обрыва связи, и работа агента вставала на
+    # ровном месте. Ретраим с backoff, но безопасно к семантике PUT=create/POST=replace:
+    #   - 429: сервер ОТКЛОНИЛ запрос ДО применения -> ретраим ЛЮБОЙ метод (чтим Retry-After);
+    #   - 5xx и обрыв/таймаут связи: исход неоднозначен (могло примениться) -> ретраим только
+    #     идемпотентные GET и POST (POST = полная перезапись, повтор даёт то же состояние).
+    #     PUT (create) и DELETE на этих ошибках НЕ ретраим — иначе дубль или ложная 404.
+    # Постоянные ошибки (4xx кроме 429) поднимаются сразу, как и прежде.
+    _MAX_RETRIES = 3
+    _RETRY_STATUSES = frozenset({500, 502, 503, 504})
+    _IDEMPOTENT_METHODS = frozenset({"GET", "POST"})
+    _BACKOFF_BASE = 0.5
+    _BACKOFF_CAP = 8.0
+
     def _req(self, method: str, path: str, json: Any = None, params: dict | None = None) -> Any:
-        r = self._client.request(method, path, json=json, params=params)
-        if r.status_code >= 400:
-            raise VikunjaError(r.status_code, r.text[:300])
-        return r.json() if r.content else None
+        method = method.upper()
+        for attempt in range(self._MAX_RETRIES + 1):
+            final = attempt == self._MAX_RETRIES
+            try:
+                r = self._client.request(method, path, json=json, params=params)
+            except httpx.TransportError:
+                # обрыв/таймаут: могло примениться -> ретраим только идемпотентные методы
+                if final or method not in self._IDEMPOTENT_METHODS:
+                    raise
+                time.sleep(self._backoff(attempt))
+                continue
+            if not final and self._should_retry(method, r.status_code):
+                time.sleep(self._backoff(attempt, r.headers.get("Retry-After")))
+                continue
+            if r.status_code >= 400:
+                raise VikunjaError(r.status_code, r.text[:300])
+            return r.json() if r.content else None
+        raise AssertionError("unreachable: последняя попытка всегда вернёт или поднимет")
+
+    def _should_retry(self, method: str, status: int) -> bool:
+        if status == 429:
+            return True  # отклонён до применения — безопасно ретраить любой метод
+        return status in self._RETRY_STATUSES and method in self._IDEMPOTENT_METHODS
+
+    def _backoff(self, attempt: int, retry_after: str | None = None) -> float:
+        if retry_after:
+            try:
+                return min(float(retry_after), self._BACKOFF_CAP)
+            except ValueError:
+                pass
+        return min(self._BACKOFF_BASE * (2**attempt), self._BACKOFF_CAP)
 
     # --- identity ---
     def me(self) -> dict:
