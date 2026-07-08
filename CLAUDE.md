@@ -64,7 +64,13 @@ docker rm -f vikunja-test
   prescriptive (when to call, not just what it does).
 - `src/vikunja_mcp/setup_cmd.py` — `vikunja-mcp setup` (idempotent board
   reconcile: canonical buckets + ORDER via positions, `Todo→Queue` /
-  `Doing→Build` migration, shares) and `install-skill`.
+  `Doing→Build` migration, shares) and `install-skill` (copies the packaged
+  SKILL.md for Claude Code + opencode AND auto-provisions a conditional
+  `SessionStart` hook — a dependency-free POSIX-`sh` `~/.claude/hooks/…sh`
+  registered in `~/.claude/settings.json` that, ONLY inside a tracker project
+  (`.vikunja-mcp.toml` walk-up), injects the orchestrator standing-context so a
+  bare `/loop` drains the Queue instead of the generic autonomous default;
+  idempotent merge — no matcher = fires on startup/resume/clear/compact).
 - `src/vikunja_mcp/skills/tracker/SKILL.md` — process rules for agents
   (queue discipline, orchestrator-dispatches-subagents, report format,
   independent bug review). Ships inside the wheel; root `skills` is a symlink.

@@ -162,6 +162,20 @@ expectations, `call_human` vs `return_task`) to both
 `~/.config/opencode/skills/tracker/SKILL.md` (opencode), and prints the
 `instructions` line to wire the latter into an `opencode.json`.
 
+For Claude Code it *also* auto-provisions a conditional **`SessionStart` hook**
+(a small `~/.claude/hooks/vikunja-tracker-orchestrator.sh` registered under
+`hooks.SessionStart` in `~/.claude/settings.json`) so you don't have to paste an
+orchestrator redirect into each project's `CLAUDE.md`. On every session start the
+hook walks up from the cwd for a `.vikunja-mcp.toml`; **only** inside a
+tracker-configured project it injects a short standing-context that redirects a
+bare `/loop` to the tracker orchestrator (drain the Queue: `next_task` → `claim`
+→ dispatch a per-task agent) instead of Claude Code's generic autonomous-loop
+default — outside a tracker project it emits nothing, so it never affects your
+other repos. It's dependency-free (POSIX `sh`, no `jq`), idempotent (re-running
+never duplicates the entry and preserves your other hooks and settings), and
+takes effect after you restart Claude Code. The full playbook still lives in the
+`tracker` skill; the hook just points `/loop` at it.
+
 ## Releases: the `stable` channel
 
 Consumers subscribe to the moving `stable` branch with `--refresh-package`
