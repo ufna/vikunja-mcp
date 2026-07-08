@@ -42,6 +42,45 @@ Register it with Claude Code via `.mcp.json`:
 }
 ```
 
+Or register it with [opencode](https://opencode.ai) via `opencode.json`
+(repo root, or `~/.config/opencode/opencode.json` globally; `.jsonc` also
+works). MCP servers live under a top-level `mcp` key, and a local (stdio)
+server takes the command and its arguments as one `command` array
+([docs](https://opencode.ai/docs/mcp-servers/)):
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "tracker": {
+      "type": "local",
+      "command": ["uvx", "--refresh-package", "vikunja-mcp", "--from", "git+https://github.com/ufna/vikunja-mcp@stable", "vikunja-mcp"],
+      "enabled": true
+    }
+  }
+}
+```
+
+As with `.mcp.json`, no token goes in this file — the server reads it from the
+same four config layers below (`VIKUNJA_TOKEN`, `.vikunja-mcp.env`, or the user
+env file). This repo commits exactly such an `opencode.json` at its root to
+dogfood itself against the `stable` channel.
+
+To hand an opencode agent the tracker process rules (queue discipline, stage
+gates, `call_human` vs `return_task`), run `vikunja-mcp install-skill` — it
+installs the packaged `SKILL.md` for both Claude Code and opencode and prints an
+`instructions` line to add to your `opencode.json`:
+
+```json
+{
+  "instructions": ["/home/you/.config/opencode/skills/tracker/SKILL.md"]
+}
+```
+
+opencode also auto-loads `AGENTS.md` from the repo root (falling back to
+`CLAUDE.md`), so the rules can live there instead — see
+[opencode rules](https://opencode.ai/docs/rules/).
+
 ## Configuration
 
 Config is resolved from four layers, in priority order:
@@ -110,14 +149,17 @@ default-Vikunja buckets (`Todo`/`To-Do`/`To-do` → Queue, `Doing` → Build,
 moving their tasks), removes empty non-canonical buckets (leaves non-empty
 unknown ones alone with a warning), sets Backlog as the default bucket and
 Done as the done bucket, applies any `--share` grants, and prints ready-to-
-commit `.vikunja-mcp.toml` + `.mcp.json` snippets.
+commit `.vikunja-mcp.toml` + `.mcp.json` + `opencode.json` snippets.
 
 ```bash
 vikunja-mcp install-skill
 ```
 
 Copies the packaged tracker skill (queue discipline, comment-trail
-expectations, `call_human` vs `return_task`) to `~/.claude/skills/tracker/SKILL.md`.
+expectations, `call_human` vs `return_task`) to both
+`~/.claude/skills/tracker/SKILL.md` (Claude Code) and
+`~/.config/opencode/skills/tracker/SKILL.md` (opencode), and prints the
+`instructions` line to wire the latter into an `opencode.json`.
 
 ## Releases: the `stable` channel
 

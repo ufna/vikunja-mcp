@@ -1,6 +1,6 @@
 """Tests for setup_cmd: project onboarding and reconciliation."""
 from tests.unit.fakes import FakeAPI
-from vikunja_mcp.setup_cmd import reconcile
+from vikunja_mcp.setup_cmd import _print_snippets, reconcile
 from vikunja_mcp.workflow import STAGES
 
 
@@ -65,3 +65,14 @@ def test_unknown_nonempty_bucket_is_kept():
     reconcile(api, "hgdev-infra", shares=[])
     assert "Custom" in bucket_titles(api)            # непустой посторонний бакет не трогаем
     assert api.stage_of(kept["id"]) == "Custom"
+
+
+def test_print_snippets_includes_opencode_block_without_token(capsys):
+    _print_snippets(pid=42, project_title="voice", url="https://vikunja.example.com")
+    out = capsys.readouterr().out
+    assert ".mcp.json" in out                                    # блок Claude Code на месте
+    assert "opencode.json" in out                                # + блок opencode рядом
+    assert '"type": "local"' in out                              # opencode local-сервер
+    assert '"$schema": "https://opencode.ai/config.json"' in out
+    assert "vikunja-mcp@stable" in out                           # stable-канал в обоих блоках
+    assert "tk_" not in out                                      # никакого токена в сниппетах

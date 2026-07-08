@@ -83,12 +83,21 @@ def _print_snippets(pid: int, project_title: str, url: str) -> None:
         "\nТокен туда не кладём: создай рядом .vikunja-mcp.env с VIKUNJA_TOKEN=...\n"
         "и добавь .vikunja-mcp.env в .gitignore рабочего репо — коммитить нельзя."
     )
-    print("\n--- .mcp.json (закоммить рядом; канал stable = автоматическая раскатка релизов) ---")
+    print("\n--- .mcp.json (Claude Code; закоммить рядом; канал stable = авто-раскатка релизов) ---")
     print(
         '{ "mcpServers": { "tracker": {\n'
         '    "command": "uvx",\n'
         '    "args": ["--refresh-package", "vikunja-mcp",\n'
         '             "--from", "git+https://github.com/ufna/vikunja-mcp@stable", "vikunja-mcp"]\n'
+        "} } }"
+    )
+    print("\n--- opencode.json (opencode; закоммить рядом; та же stable-раскатка, токен так же внешний) ---")
+    print(
+        '{ "$schema": "https://opencode.ai/config.json", "mcp": { "tracker": {\n'
+        '    "type": "local",\n'
+        '    "command": ["uvx", "--refresh-package", "vikunja-mcp",\n'
+        '      "--from", "git+https://github.com/ufna/vikunja-mcp@stable", "vikunja-mcp"],\n'
+        '    "enabled": true\n'
         "} } }"
     )
 
@@ -119,14 +128,30 @@ def run_setup(argv: list[str]) -> int:
     return 0
 
 
-def install_skill(dest_root=None) -> None:
+def install_skill(dest_root=None, opencode_root=None) -> None:
+    """Разложить упакованный SKILL.md туда, где его подхватят агенты:
+    Claude Code (~/.claude/skills/tracker) и opencode (~/.config/opencode/skills/tracker).
+    У opencode нет авто-дискавери произвольного файла правил — он тянет его через
+    config-ключ `instructions`, поэтому печатаем готовую строку для opencode.json."""
     import shutil
     from importlib.resources import files
     from pathlib import Path
 
     src = files("vikunja_mcp").joinpath("skills/tracker/SKILL.md")
-    root = Path(dest_root) if dest_root else Path("~/.claude").expanduser()
-    dest = root / "skills" / "tracker"
-    dest.mkdir(parents=True, exist_ok=True)
-    shutil.copyfile(str(src), dest / "SKILL.md")
-    print(f"skill installed: {dest / 'SKILL.md'}")
+
+    def _copy_to(root: Path) -> Path:
+        dest = root / "skills" / "tracker"
+        dest.mkdir(parents=True, exist_ok=True)
+        out = dest / "SKILL.md"
+        shutil.copyfile(str(src), out)
+        return out
+
+    claude_root = Path(dest_root) if dest_root else Path("~/.claude").expanduser()
+    oc_root = Path(opencode_root) if opencode_root else Path("~/.config/opencode").expanduser()
+
+    claude_skill = _copy_to(claude_root)
+    print(f"skill installed (Claude Code): {claude_skill}")
+
+    oc_skill = _copy_to(oc_root)
+    print(f"skill installed (opencode): {oc_skill}")
+    print(f'  добавь в opencode.json: "instructions": ["{oc_skill}"]')

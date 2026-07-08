@@ -1,0 +1,11 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "tracker": {
+      "type": "local",
+      "command": ["uvx", "--refresh-package", "vikunja-mcp", "--from", "git+https://github.com/ufna/vikunja-mcp@stable", "vikunja-mcp"],
+      "enabled": true
+    }
+  },
+  "instructions": ["skills/tracker/SKILL.md"]
+}
