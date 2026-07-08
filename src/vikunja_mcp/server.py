@@ -50,7 +50,7 @@ def _tool(fn):
 @_tool
 def next_task() -> dict:
     """Что делать дальше, в порядке: (1) ТВОЯ активная задача (Design/Build, в т.ч.
-    вернувшаяся из Call to Human), (2) назначенная на тебя в Queue, (3) багфикс в
+    вернувшаяся из Your Call), (2) назначенная на тебя в Queue, (3) багфикс в
     Review, ждущий независимого ревью (label bug, вердикта ещё нет), (4) верхняя
     СВОБОДНАЯ из Queue. Задачи, назначенные на другого, не выдаёт никогда — они
     «для людей». Backlog и blocked не трогает. Одна задача за раз."""
@@ -115,7 +115,8 @@ def review_task(task_id: int, verdict: str, report: str) -> dict:
 @_tool
 def call_human(task_id: int, question: str) -> dict:
     """Застрял и нужен человек (решение/вводные): вопрос уйдёт комментом, задача — в
-    колонку 'Call to Human', assignee сохранится. Это НЕ ревью и НЕ внешняя блокировка."""
+    колонку 'Your Call' (в сокращениях — YC), assignee сохранится. Это НЕ ревью и НЕ
+    внешняя блокировка."""
     return _wf().call_human(task_id, question)
 
 

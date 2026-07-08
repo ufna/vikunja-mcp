@@ -76,7 +76,7 @@ def test_call_human_keeps_assignee(env):
     with pytest.raises(WorkflowError, match="вопрос"):
         wf.call_human(t["id"], question="")
     wf.call_human(t["id"], question="какой из двух вариантов деплоя выбрать?")
-    assert api.stage_of(t["id"]) == "Call to Human"
+    assert api.stage_of(t["id"]) == "Your Call"
     assert api.tasks[t["id"]]["assignees"][0]["id"] == api.me_user["id"]
     assert any(c.startswith("[нужен человек]") for c in api.comments_text(t["id"]))
 

@@ -7,6 +7,11 @@ from vikunja_mcp.api import VikunjaAPI
 from vikunja_mcp.workflow import STAGES
 
 MIGRATION = {"Todo": "Queue", "To-Do": "Queue", "To-do": "Queue", "Doing": "Build"}
+# переименование колонок in-place (в отличие от MIGRATION — та переносит задачи между
+# РАЗНЫМИ бакетами): title бакета в Vikunja и есть идентификатор колонки, поэтому старую
+# колонку ПЕРЕИМЕНОВЫВАЕМ на месте, а не создаём новую (иначе на старой доске колонка
+# задвоится, а задачи в ней осиротеют).
+RENAMES = {"Call to Human": "Your Call"}
 PERMISSIONS = {"read": 0, "write": 1, "admin": 2}
 
 
@@ -21,6 +26,18 @@ def reconcile(api, project_title: str, shares: list[tuple[str, int]]) -> int:
 
     view = api.kanban_view(pid)
     existing = {b["title"]: b for b in api.buckets(pid, view["id"])}
+
+    # переименование старых колонок на месте (POST — full-replace title+position),
+    # до сборки canonical, чтобы новый заголовок сразу переиспользовался как каноничный.
+    # Если новая колонка уже есть (полу-мигрированная доска) — не трогаем: старую пустую
+    # снесёт снос лишних бакетов ниже, непустую он оставит с предупреждением.
+    for old_title, new_title in RENAMES.items():
+        if old_title in existing and new_title not in existing:
+            bucket = existing.pop(old_title)
+            bucket["title"] = new_title
+            api.update_bucket(pid, view["id"], bucket, position=bucket.get("position", 0))
+            existing[new_title] = bucket
+            print(f"  renamed bucket '{old_title}' -> '{new_title}'")
 
     canonical: dict[str, dict] = {}
     for title in STAGES:

@@ -10,7 +10,7 @@ tracker — NOT a CRUD wrapper. The pipeline and its gates ARE the product:
 ```
 Backlog → Queue → Design → Build → Review → [human] → Done
                      ↕        ↕
-                  Call to Human          (+ independent bug review in Review)
+                  Your Call              (+ independent bug review in Review)
 ```
 
 9 agent tools (`next_task`, `claim`, `get_task`, `comment`, `advance`,

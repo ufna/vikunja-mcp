@@ -8,15 +8,15 @@ evidence is required) live in the tools themselves, not in prompts:
 ```
 Backlog → Queue → Design → Build → Review → Done
                      ↕        ↕
-                     Call to Human
+                     Your Call
 ```
 
 - `Backlog` and `Done` are human territory (triage in, sign-off out) —
   agents never move a task into `Done` themselves.
 - `Queue → Design → Build → Review` is the agent loop: claim, spec, build,
   hand off for review.
-- `Call to Human` is a side branch reachable from `Design`/`Build` when an
-  agent needs a decision or input; the human answers and moves it back.
+- `Your Call` (abbreviated `YC`) is a side branch reachable from `Design`/`Build`
+  when an agent needs a decision or input; the human answers and moves it back.
 
 ## Install
 
@@ -84,12 +84,12 @@ appear in it.
 
 | Tool | Gate / behavior |
 | --- | --- |
-| `next_task()` | Returns your active task in Design/Build first (incl. one bounced back from Call to Human), else the top-priority free task in Queue. Never returns Backlog or `blocked`-labeled tasks. One task at a time. |
+| `next_task()` | Returns your active task in Design/Build first (incl. one bounced back from Your Call), else the top-priority free task in Queue. Never returns Backlog or `blocked`-labeled tasks. One task at a time. |
 | `claim(task_id)` | Queue → Design only. Assign-then-verify: assigns you, re-reads the task, and backs off if someone else was assigned in the same window (race lost — call `next_task` again). |
 | `get_task(task_id)` | Dossier: description, stage, assignees, labels, full comment thread. |
 | `comment(task_id, text)` | Adds a progress note to the task's comment log. |
 | `advance(task_id, to, spec=, worklog=, evidence=)` | `to="build"`: Design → Build, requires `spec`. `to="review"`: Build → Review, requires `worklog` + `evidence`. `to="done"` is always rejected — Done is human-only. Task must be assigned to you. |
-| `call_human(task_id, question)` | Design/Build → `Call to Human`. Keeps your assignment (not a review step, not an external block); posts `question` as a comment. |
+| `call_human(task_id, question)` | Design/Build → `Your Call` (aka `YC`). Keeps your assignment (not a review step, not an external block); posts `question` as a comment. |
 | `return_task(task_id, reason)` | For external blockers (no access, missing dependency, someone else's service down). Unassigns you, adds a `blocked` label, moves the task to Backlog for human re-triage. |
 | `decompose(task_id, subtasks)` | Requires ≥2 subtasks (each needs a `title`). Creates each as a new task with a `parenttask` relation to the parent and drops it in Queue. Parent is unassigned, labeled `epic`, and moved to Backlog. |
 

@@ -1,7 +1,7 @@
 """Стадии и гейты агентского флоу. Правила зашиты здесь, не в промптах."""
 from typing import Any
 
-STAGES = ["Backlog", "Queue", "Design", "Build", "Review", "Call to Human", "Done"]
+STAGES = ["Backlog", "Queue", "Design", "Build", "Review", "Your Call", "Done"]
 ACTIVE_STAGES = ("Design", "Build")
 LABEL_BLOCKED = "blocked"
 LABEL_EPIC = "epic"
@@ -295,9 +295,9 @@ class Workflow:
         if stage not in ACTIVE_STAGES:
             raise WorkflowError(f"call_human доступен только из Design/Build, задача в {stage}")
         self.api.add_comment(task_id, f"[нужен человек] {question.strip()}")
-        self._move(task_id, "Call to Human")
+        self._move(task_id, "Your Call")
         return {
-            "moved_to": "Call to Human", "task_id": task_id,
+            "moved_to": "Your Call", "task_id": task_id,
             "note": "assignee сохранён; человек ответит комментом и вернёт задачу в Design/Build",
         }
 

@@ -68,7 +68,7 @@ def test_call_human_return_and_decompose(project):
     wf1.claim(t1["id"])
     wf1.call_human(t1["id"], question="какой вариант выбрать: A или B?")
     d1 = wf1.get_task(t1["id"])
-    assert d1["stage"] == "Call to Human" and d1["assignees"] == ["agent1"]
+    assert d1["stage"] == "Your Call" and d1["assignees"] == ["agent1"]
 
     t2 = enqueue("заблокированная")
     wf1.claim(t2["id"])

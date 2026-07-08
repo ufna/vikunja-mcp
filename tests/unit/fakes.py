@@ -129,7 +129,10 @@ class FakeAPI:
         return dict(self.add_bucket(title))
 
     def update_bucket(self, project_id, view_id, bucket, position):
+        # full-replace как у реального клиента: POST шлёт title+position, поэтому
+        # заголовок берём из переданного bucket (так работает in-place переименование)
         real = next(b for b in self._buckets if b["id"] == bucket["id"])
+        real["title"] = bucket["title"]
         real["position"] = position
         return dict(real)
 

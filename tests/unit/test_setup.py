@@ -31,6 +31,23 @@ def test_existing_project_migrates_old_buckets():
     assert api.stage_of(t_review["id"]) == "Review"
 
 
+def test_call_to_human_bucket_renamed_in_place():
+    """Старая колонка 'Call to Human' переименовывается НА МЕСТЕ (тот же bucket id),
+    а не пересоздаётся: задачи в ней не осиротеют и колонка не задвоится."""
+    old_stages = ["Backlog", "Queue", "Design", "Build", "Review", "Call to Human", "Done"]
+    api = FakeAPI(buckets=old_stages)
+    parked = api.add_task("ждёт ответа человека", "Call to Human")
+    old_bucket_id = api.bucket_id("Call to Human")
+
+    reconcile(api, "hgdev-infra", shares=[])
+
+    titles = bucket_titles(api)
+    assert titles == STAGES                              # порядок канонический, 'Your Call' на месте
+    assert "Call to Human" not in titles                 # старого имени не осталось
+    assert api.stage_of(parked["id"]) == "Your Call"     # задача не потерялась
+    assert api.bucket_id("Your Call") == old_bucket_id   # тот же бакет — переименован in-place
+
+
 def test_reconcile_is_idempotent():
     api = FakeAPI(buckets=[])
     api.project = {"id": -999, "title": "nothing"}
