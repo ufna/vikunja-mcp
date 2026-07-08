@@ -47,6 +47,8 @@ def test_view_tasks_merges_paginated_buckets():
     calls = []
 
     def handler(request):
+        if request.url.path.endswith("/info"):
+            return httpx.Response(200, json={"max_items_per_page": 50})
         page = int(request.url.params.get("page", "1"))
         calls.append(page)
         if page == 1:
@@ -70,6 +72,8 @@ def test_view_tasks_dedupes_overlap_between_pages():
     страницах подряд — мёрж обязан схлопнуть дубликат по id (а не завести вторую копию),
     но НЕ ценой потери новых задач, которые пришли на той же странице рядом с повтором."""
     def handler(request):
+        if request.url.path.endswith("/info"):
+            return httpx.Response(200, json={"max_items_per_page": 50})
         page = int(request.url.params.get("page", "1"))
         if page == 1:
             tasks = [{"id": i, "title": f"t{i}"} for i in range(1, 51)]
@@ -90,6 +94,8 @@ def test_view_tasks_independent_buckets_stop_separately():
     """Один бакет с полной страницей, другой уже исчерпан на page=1 — обязаны дойти до
     исчерпания бОльшего бакета, не потеряв меньший и не зациклившись на пустом."""
     def handler(request):
+        if request.url.path.endswith("/info"):
+            return httpx.Response(200, json={"max_items_per_page": 50})
         page = int(request.url.params.get("page", "1"))
         big = [{"id": i, "title": f"t{i}"} for i in range(1, 51)] if page == 1 else (
             [{"id": i, "title": f"t{i}"} for i in range(51, 56)] if page == 2 else []
@@ -109,6 +115,8 @@ def test_view_tasks_independent_buckets_stop_separately():
 
 def test_view_tasks_single_page_unchanged():
     def handler(request):
+        if request.url.path.endswith("/info"):
+            return httpx.Response(200, json={"max_items_per_page": 50})
         assert request.url.params.get("page") == "1"
         return httpx.Response(
             200, json=[{"id": 4, "title": "Queue", "tasks": [{"id": 1, "title": "only"}]}]
@@ -117,6 +125,68 @@ def test_view_tasks_single_page_unchanged():
     api = make_api(handler)
     board = api.view_tasks(3, 11)
     assert board == [{"id": 4, "title": "Queue", "tasks": [{"id": 1, "title": "only"}]}]
+
+
+def test_view_tasks_page_size_from_info_drives_pagination():
+    """Регрессия #33: порог «полной страницы» = max_items_per_page из /info, а не хардкод 50.
+    На инстансе с max_items_per_page=20 полная страница из 20 задач ОБЯЗАНА тянуть следующую;
+    старый хардкод 50 слепо останавливал мёрж после page=1 (20 < 50) — тихая потеря доски."""
+    pages_seen = []
+
+    def handler(request):
+        if request.url.path.endswith("/info"):
+            return httpx.Response(200, json={"max_items_per_page": 20})
+        page = int(request.url.params.get("page", "1"))
+        pages_seen.append(page)
+        if page == 1:
+            tasks = [{"id": i, "title": f"t{i}"} for i in range(1, 21)]     # 20 — полная
+        elif page == 2:
+            tasks = [{"id": i, "title": f"t{i}"} for i in range(21, 41)]    # 20 — полная
+        elif page == 3:
+            tasks = [{"id": i, "title": f"t{i}"} for i in range(41, 46)]    # 5 — хвост
+        else:
+            tasks = []
+        return httpx.Response(200, json=[{"id": 4, "title": "Queue", "tasks": tasks}])
+
+    api = make_api(handler)
+    board = api.view_tasks(3, 11)
+    ids = [t["id"] for t in board[0]["tasks"]]
+    assert sorted(ids) == list(range(1, 46))        # все 45 смёржены, ничего не потеряно
+    assert 2 in pages_seen and 3 in pages_seen       # полная страница из 20 тянет следующую
+
+
+def test_view_tasks_caches_page_size_across_calls():
+    """max_items_per_page тянется из /info один раз и кэшируется — не на каждый view_tasks."""
+    info_hits = []
+
+    def handler(request):
+        if request.url.path.endswith("/info"):
+            info_hits.append(1)
+            return httpx.Response(200, json={"max_items_per_page": 50})
+        return httpx.Response(200, json=[{"id": 4, "title": "Queue", "tasks": [{"id": 1}]}])
+
+    api = make_api(handler)
+    api.view_tasks(3, 11)
+    api.view_tasks(3, 11)
+    assert len(info_hits) == 1
+
+
+def test_page_size_falls_back_when_field_missing():
+    """/info без поля max_items_per_page — резолвер откатывается на 50, а не роняется на None."""
+    def handler(request):
+        return httpx.Response(200, json={})
+
+    api = make_api(handler)
+    assert api._page_size() == 50
+
+
+def test_page_size_falls_back_when_info_errors():
+    """/info вернул 500 — резолвер глотает ошибку и откатывается на 50, view_tasks не падает."""
+    def handler(request):
+        return httpx.Response(500, json={"message": "boom"})
+
+    api = make_api(handler)
+    assert api._page_size() == 50
 
 
 def test_move_task_posts_to_bucket_endpoint():

@@ -48,7 +48,8 @@ docker rm -f vikunja-test
   read-modify-write; kanban view updates must always send
   `bucket_configuration_mode="manual"` + `position` + `title` + `view_kind`
   or the board loses its columns; board fetch paginates per bucket
-  (`_VIEW_TASKS_PAGE_SIZE`, dedupe by bucket+task id).
+  (page size read from `/info`'s `max_items_per_page`, `_PAGE_SIZE_FALLBACK`
+  when unavailable, dedupe by bucket+task id).
 - `src/vikunja_mcp/workflow.py` — the product rules: stages, gates,
   assign-then-verify claim (with self-heal), review offering (verdict vs
   worklog timestamps), comment markers `[claim] [spec] [worklog] [нужен

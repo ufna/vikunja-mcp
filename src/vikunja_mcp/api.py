@@ -21,6 +21,7 @@ class VikunjaAPI:
             headers={"Authorization": f"Bearer {token}"},
             timeout=30,
         )
+        self._page_size_cache: int | None = None
 
     def _req(self, method: str, path: str, json: Any = None, params: dict | None = None) -> Any:
         r = self._client.request(method, path, json=json, params=params)
@@ -121,15 +122,32 @@ class VikunjaAPI:
 
     # эмпирически против vikunja 2.3.0 (см. отчёт F1): GET .../views/{v}/tasks пагинирует
     # tasks[] ВНУТРИ каждого бакета независимо через params={"page": n} с фиксированным
-    # page size = max_items_per_page сервера (50 в дефолтной поставке; per_page на эту
-    # вложенную пагинацию не влияет). Страницы могут перекрываться на 1-2 задачи из-за
-    # нестабильной сортировки при равных ключах (без ORDER BY тайбрейкера) — наблюдался
-    # дубль, ни разу не пропуск. Мёржим по (bucket_id, task_id), останавливаемся когда ни
-    # один бакет не отдал полную страницу (значит дальше для всех пусто) ИЛИ страница не
-    # принесла ни одной новой задачи (защита от зацикливания на нестабильной сортировке).
-    _VIEW_TASKS_PAGE_SIZE = 50
+    # page size = max_items_per_page сервера (per_page на эту вложенную пагинацию не влияет).
+    # Порог «полной страницы» читаем из /info (_page_size, кэш на клиенте); 50 — лишь fallback:
+    # на инстансе с max_items_per_page<50 хардкод 50 молча обрезал бы доску после page=1.
+    # Страницы могут перекрываться на 1-2 задачи из-за нестабильной сортировки при равных
+    # ключах (без ORDER BY тайбрейкера) — наблюдался дубль, ни разу не пропуск. Мёржим по
+    # (bucket_id, task_id), останавливаемся когда ни один бакет не отдал полную страницу
+    # (значит дальше для всех пусто) ИЛИ страница не принесла ни одной новой задачи (защита
+    # от зацикливания на нестабильной сортировке).
+    _PAGE_SIZE_FALLBACK = 50
+
+    def _page_size(self) -> int:
+        if self._page_size_cache is None:
+            self._page_size_cache = self._fetch_page_size()
+        return self._page_size_cache
+
+    def _fetch_page_size(self) -> int:
+        # /info — публичный, неаутентифицированный эндпоинт; Bearer на нём безвреден.
+        try:
+            info = self._req("GET", "/info")
+        except (VikunjaError, httpx.HTTPError):
+            return self._PAGE_SIZE_FALLBACK
+        size = info.get("max_items_per_page") if isinstance(info, dict) else None
+        return size if isinstance(size, int) and size > 0 else self._PAGE_SIZE_FALLBACK
 
     def view_tasks(self, project_id: int, view_id: int) -> list[dict]:
+        page_size = self._page_size()
         merged: dict[int, dict] = {}
         seen: dict[int, set] = {}
         page = 1
@@ -146,7 +164,7 @@ class VikunjaAPI:
                 dest = merged.setdefault(bid, {**bucket, "tasks": []})
                 ids = seen.setdefault(bid, set())
                 tasks = bucket.get("tasks") or []
-                if len(tasks) >= self._VIEW_TASKS_PAGE_SIZE:
+                if len(tasks) >= page_size:
                     saw_full_page = True
                 for task in tasks:
                     if task["id"] not in ids:
