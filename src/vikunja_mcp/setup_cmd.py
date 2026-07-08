@@ -62,6 +62,10 @@ def reconcile(api, project_title: str, shares: list[tuple[str, int]]) -> int:
 def _print_snippets(pid: int, project_title: str, url: str) -> None:
     print("\n--- .vikunja-mcp.toml (закоммить в корень рабочего репо) ---")
     print(f'[tracker]\nurl = "{url}"\nproject_id = {pid}\nproject = "{project_title}"')
+    print(
+        "\nТокен туда не кладём: создай рядом .vikunja-mcp.env с VIKUNJA_TOKEN=...\n"
+        "и добавь .vikunja-mcp.env в .gitignore рабочего репо — коммитить нельзя."
+    )
     print("\n--- .mcp.json (закоммить рядом; канал stable = автоматическая раскатка релизов) ---")
     print(
         '{ "mcpServers": { "tracker": {\n'

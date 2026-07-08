@@ -1,4 +1,5 @@
-"""Config resolution: env > repo .vikunja-mcp.toml (walk-up) > ~/.config/vikunja-mcp/env."""
+"""Config resolution: env > repo .vikunja-mcp.env (repo-local, beside toml) >
+repo .vikunja-mcp.toml (walk-up) > ~/.config/vikunja-mcp/env."""
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
@@ -8,6 +9,7 @@ ENV_URL = "VIKUNJA_URL"
 ENV_TOKEN = "VIKUNJA_TOKEN"
 ENV_PROJECT_ID = "VIKUNJA_PROJECT_ID"
 REPO_FILE = ".vikunja-mcp.toml"
+REPO_ENV_FILE = ".vikunja-mcp.env"
 USER_ENV_FILE = Path("~/.config/vikunja-mcp/env").expanduser()
 
 
@@ -57,13 +59,22 @@ def load_config(cwd: Path | None = None, environ: Mapping[str, str] | None = Non
     user = _parse_env_file(USER_ENV_FILE)
 
     repo: dict = {}
+    repo_env: dict[str, str] = {}
     toml_path = _find_repo_toml(cwd or Path.cwd())
     if toml_path is not None:
         repo = tomllib.loads(toml_path.read_text()).get("tracker", {})
+        # repo-local .env лежит СТРОГО рядом с найденным toml — отдельного walk-up
+        # для него нет, это одна и та же директория (предсказуемо, без сюрпризов)
+        repo_env = _parse_env_file(toml_path.parent / REPO_ENV_FILE)
 
-    url = env.get(ENV_URL) or repo.get("url") or user.get(ENV_URL)
-    token = env.get(ENV_TOKEN) or user.get(ENV_TOKEN)
-    raw_pid = env.get(ENV_PROJECT_ID) or repo.get("project_id") or user.get(ENV_PROJECT_ID)
+    url = env.get(ENV_URL) or repo_env.get(ENV_URL) or repo.get("url") or user.get(ENV_URL)
+    token = env.get(ENV_TOKEN) or repo_env.get(ENV_TOKEN) or user.get(ENV_TOKEN)
+    raw_pid = (
+        env.get(ENV_PROJECT_ID)
+        or repo_env.get(ENV_PROJECT_ID)
+        or repo.get("project_id")
+        or user.get(ENV_PROJECT_ID)
+    )
 
     if not url or raw_pid is None:
         raise ConfigError(
@@ -72,8 +83,8 @@ def load_config(cwd: Path | None = None, environ: Mapping[str, str] | None = Non
         )
     if not token:
         raise ConfigError(
-            f"нет токена: положи VIKUNJA_TOKEN=... в {USER_ENV_FILE} (chmod 600) "
-            f"или передай через env {ENV_TOKEN}"
+            f"нет токена: положи VIKUNJA_TOKEN=... в {REPO_ENV_FILE} рядом с {REPO_FILE}, "
+            f"в {USER_ENV_FILE} (chmod 600) или передай через env {ENV_TOKEN}"
         )
     try:
         project_id = int(raw_pid)

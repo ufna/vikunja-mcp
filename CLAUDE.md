@@ -39,8 +39,9 @@ docker rm -f vikunja-test
 
 ## Architecture
 
-- `src/vikunja_mcp/config.py` — 3-layer config: env (`VIKUNJA_URL/TOKEN/PROJECT_ID`)
-  > repo `.vikunja-mcp.toml` (walk-up from cwd) > `~/.config/vikunja-mcp/env`.
+- `src/vikunja_mcp/config.py` — 4-layer config: env (`VIKUNJA_URL/TOKEN/PROJECT_ID`)
+  > repo-local `.vikunja-mcp.env` (same dir as the toml, found by the same walk-up,
+  gitignored) > repo `.vikunja-mcp.toml` (walk-up from cwd) > `~/.config/vikunja-mcp/env`.
   Token is NEVER read from the repo toml (so it can't be committed and used).
 - `src/vikunja_mcp/api.py` — REST client. **Vikunja gotchas are codified here:
   PUT = create, POST = FULL-REPLACE update** → every update is
@@ -94,8 +95,9 @@ This project tracks itself in the same tracker (project `vikunja-mcp`,
 id 10 — see `.vikunja-mcp.toml`). Follow the tracker flow for real work
 here: `next_task` → claim → spec → dispatch a fresh sub-agent per task →
 structured report → Review (bugs get independent agent review). The repo is
-PUBLIC — the agent token is per-machine (`~/.config/vikunja-mcp/env*`),
-never committed.
+PUBLIC — this repo's own token is supplied via the repo-local
+`.vikunja-mcp.env` (sits next to `.vikunja-mcp.toml`, gitignored), never
+committed.
 
 ## Live instance notes
 

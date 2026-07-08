@@ -107,3 +107,87 @@ def test_bad_project_id_raises_config_error(tmp_path):
         load_config(cwd=tmp_path, environ={
             "VIKUNJA_TOKEN": "tk", "VIKUNJA_URL": "http://x", "VIKUNJA_PROJECT_ID": "abc",
         })
+
+
+# --- #39: repo-local .vikunja-mcp.env layer (env > repo-env > repo toml > user file) ---
+
+def _write_repo_env(path, **kv):
+    lines = "\n".join(f"{k}={v}" for k, v in kv.items())
+    path.joinpath(".vikunja-mcp.env").write_text(lines + "\n")
+
+
+def test_repo_env_supplies_token_when_user_file_empty(tmp_path):
+    _write_toml(tmp_path)
+    _write_repo_env(tmp_path, VIKUNJA_TOKEN="tk_repo_env")
+    cfg = load_config(cwd=tmp_path, environ={})
+    assert cfg.token == "tk_repo_env"
+
+
+def test_env_beats_repo_env(tmp_path):
+    _write_toml(tmp_path)
+    _write_repo_env(tmp_path, VIKUNJA_TOKEN="tk_repo_env")
+    cfg = load_config(cwd=tmp_path, environ={"VIKUNJA_TOKEN": "tk_env"})
+    assert cfg.token == "tk_env"
+
+
+def test_repo_env_beats_user_file(tmp_path, monkeypatch):
+    _write_toml(tmp_path)
+    _write_repo_env(tmp_path, VIKUNJA_TOKEN="tk_repo_env")
+    user_file = tmp_path / "userenv"
+    user_file.write_text("VIKUNJA_TOKEN=tk_user\n")
+    monkeypatch.setattr("vikunja_mcp.config.USER_ENV_FILE", user_file)
+    cfg = load_config(cwd=tmp_path, environ={})
+    assert cfg.token == "tk_repo_env"
+
+
+def test_repo_env_found_via_walkup_from_subdirectory(tmp_path):
+    """Один walk-up (тот же, что ищет toml) — repo-env лежит рядом с найденным toml."""
+    _write_toml(tmp_path)
+    _write_repo_env(tmp_path, VIKUNJA_TOKEN="tk_repo_env")
+    deep = tmp_path / "roles" / "vikunja"
+    deep.mkdir(parents=True)
+    cfg = load_config(cwd=deep, environ={})
+    assert cfg.token == "tk_repo_env"
+    assert cfg.project_id == 3
+
+
+def test_repo_env_quotes_and_trailing_comment(tmp_path):
+    """Переиспользует _parse_env_file — те же правила кавычек/# что и у user env file."""
+    _write_toml(tmp_path)
+    tmp_path.joinpath(".vikunja-mcp.env").write_text(
+        'VIKUNJA_TOKEN="tk quoted # not a comment"\n'
+    )
+    cfg = load_config(cwd=tmp_path, environ={})
+    assert cfg.token == "tk quoted # not a comment"
+
+
+def test_repo_env_url_and_project_id_override_toml(tmp_path):
+    _write_toml(tmp_path, project_id=3, url="https://tracker.zz.hgdev.com")
+    _write_repo_env(
+        tmp_path,
+        VIKUNJA_URL="https://tracker.override.example",
+        VIKUNJA_PROJECT_ID="99",
+        VIKUNJA_TOKEN="tk",
+    )
+    cfg = load_config(cwd=tmp_path, environ={})
+    assert cfg.url == "https://tracker.override.example"
+    assert cfg.project_id == 99
+
+
+def test_repo_env_must_be_beside_toml_not_elsewhere(tmp_path):
+    """Не отдельный walk-up: .vikunja-mcp.env в cwd, но не рядом с найденным toml, — игнорируется."""
+    _write_toml(tmp_path)
+    deep = tmp_path / "roles" / "vikunja"
+    deep.mkdir(parents=True)
+    _write_repo_env(deep, VIKUNJA_TOKEN="tk_wrong_place")
+    with pytest.raises(ConfigError, match="VIKUNJA_TOKEN"):
+        load_config(cwd=deep, environ={})
+
+
+def test_no_repo_env_file_behavior_unchanged(tmp_path, monkeypatch):
+    _write_toml(tmp_path)
+    user_file = tmp_path / "userenv"
+    user_file.write_text("VIKUNJA_TOKEN=tk_from_file\n")
+    monkeypatch.setattr("vikunja_mcp.config.USER_ENV_FILE", user_file)
+    cfg = load_config(cwd=tmp_path, environ={})
+    assert cfg.token == "tk_from_file"

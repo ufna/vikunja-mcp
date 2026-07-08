@@ -39,12 +39,17 @@ Register it with Claude Code via `.mcp.json`:
 
 ## Configuration
 
-Config is resolved from three layers, in priority order:
+Config is resolved from four layers, in priority order:
 
 1. **Environment variables** — `VIKUNJA_URL`, `VIKUNJA_TOKEN`, `VIKUNJA_PROJECT_ID`
-2. **Repo file** `.vikunja-mcp.toml` (found by walking up from the cwd) —
+2. **Repo-local env file** `.vikunja-mcp.env` (`KEY=VALUE` lines, same
+   directory as `.vikunja-mcp.toml`, found by the same walk-up) —
+   per-project token for machines that work across multiple repos, without
+   touching the user env file. **Never commit it** — add it to the
+   consuming repo's `.gitignore`
+3. **Repo file** `.vikunja-mcp.toml` (found by walking up from the cwd) —
    `url` and `project_id`, safe to commit (no secret)
-3. **User env file** `~/.config/vikunja-mcp/env` (`KEY=VALUE` lines,
+4. **User env file** `~/.config/vikunja-mcp/env` (`KEY=VALUE` lines,
    `chmod 600`) — the usual place for `VIKUNJA_TOKEN`
 
 ```toml
@@ -56,15 +61,24 @@ project = "My Project"   # informational label; not used for lookup
 ```
 
 ```
+# .vikunja-mcp.env (same directory as .vikunja-mcp.toml — gitignore it, never commit)
+VIKUNJA_TOKEN=tk_xxxxxxxxxxxx
+```
+
+```
 # ~/.config/vikunja-mcp/env (chmod 600, keep out of git)
 VIKUNJA_URL=https://vikunja.example.com
 VIKUNJA_TOKEN=tk_xxxxxxxxxxxx
 VIKUNJA_PROJECT_ID=12
 ```
 
-Note: the token is *never* read from the repo toml — only from
-`VIKUNJA_TOKEN` (env) or the user env file — so `.vikunja-mcp.toml` has
-nothing secret in it and is safe to commit.
+Note: the token is *never* read from `.vikunja-mcp.toml` — only from
+`VIKUNJA_TOKEN` (env), `.vikunja-mcp.env`, or the user env file — so
+`.vikunja-mcp.toml` has nothing secret in it and is safe to commit.
+`.vikunja-mcp.env` uses the same `KEY=VALUE` parsing rules as the user env
+file (quoted values, trailing `# comment` stripping on unquoted ones), and
+all three keys (`VIKUNJA_URL`/`VIKUNJA_TOKEN`/`VIKUNJA_PROJECT_ID`) may
+appear in it.
 
 ## Tools
 
