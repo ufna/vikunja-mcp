@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "tracker": {
+      "command": "uvx",
+      "args": ["--refresh-package", "vikunja-mcp", "--from", "git+https://github.com/ufna/vikunja-mcp@stable", "vikunja-mcp"]
+    }
+  }
+}

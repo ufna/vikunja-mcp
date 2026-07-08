@@ -1,0 +1,4 @@
+[tracker]
+url = "https://tracker.zz.hgdev.com"
+project_id = 10
+project = "vikunja-mcp"
