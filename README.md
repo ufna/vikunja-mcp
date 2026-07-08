@@ -136,6 +136,7 @@ appear in it.
 | `call_human(task_id, question)` | Design/Build → `Your Call` (aka `YC`). Keeps your assignment (not a review step, not an external block); posts `question` as a comment. |
 | `return_task(task_id, reason)` | For external blockers (no access, missing dependency, someone else's service down). Unassigns you, adds a `blocked` label, moves the task to Backlog for human re-triage. |
 | `decompose(task_id, subtasks)` | Requires ≥2 subtasks (each needs a `title`). Creates each as a new task with a `parenttask` relation to the parent and drops it in Queue. Parent is unassigned, labeled `epic`, and moved to Backlog. |
+| `file_task(title, description=, priority=, related_task_id=)` | Files an out-of-scope finding (a bug or bit of tech-debt spotted mid-work) into **Backlog** for human triage — not Queue. Stamps a `[filed-by-agent]` comment marker and, when `related_task_id` is given, links it to the originating task with a `related` relation. Distinct from `decompose`, which splits your *own* oversized task into Queue subtasks. |
 
 ## Project setup
 

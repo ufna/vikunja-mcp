@@ -13,9 +13,9 @@ Backlog → Queue → Design → Build → Review → [human] → Done
                   Your Call              (+ independent bug review in Review)
 ```
 
-9 agent tools (`next_task`, `claim`, `get_task`, `comment`, `advance`,
-`call_human`, `return_task`, `decompose`, `review_task`); agents can never
-move a task to Done — that transition is human-only by design. Gates are
+10 agent tools (`next_task`, `claim`, `get_task`, `comment`, `advance`,
+`call_human`, `return_task`, `decompose`, `file_task`, `review_task`); agents
+can never move a task to Done — that transition is human-only by design. Gates are
 guardrails for agents; the real security boundary is the scoped API token.
 
 ## Commands

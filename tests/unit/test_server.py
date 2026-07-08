@@ -11,6 +11,7 @@ def test_exposes_exactly_the_workflow_tools():
     assert names == {
         "next_task", "claim", "get_task", "comment",
         "advance", "call_human", "return_task", "decompose", "review_task",
+        "file_task",
     }
 
 

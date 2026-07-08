@@ -351,6 +351,37 @@ class Workflow:
         self._move(task_id, "Backlog")
         return {"created": created, "parent": {"id": task_id, "moved_to": "Backlog", "labeled": LABEL_EPIC}}
 
+    def file_task(
+        self, title: str, description: str = "", priority: int = 0,
+        related_task_id: int | None = None,
+    ) -> dict:
+        """Завести находку (баг/техдолг ВНЕ текущего таска) в Backlog на триаж
+        человеку — НЕ в Queue (приоритизирует человек). Опционально: relation
+        'related' на задачу, по ходу которой найдено. Ownership не требуется — это
+        новая карточка, а не правка твоего таска (в отличие от decompose)."""
+        if not (title or "").strip():
+            raise WorkflowError("нужен непустой title для новой задачи")
+        created = self.api.create_task(
+            self.project_id, title.strip(),
+            description=(description or "").strip(), priority=int(priority or 0),
+        )
+        new_id = created["id"]
+        # явно в Backlog: не полагаемся на то, что default-бакет проекта == Backlog
+        self._move(new_id, "Backlog")
+        if related_task_id is not None:
+            self.api.add_relation(new_id, related_task_id, "related")
+        marker = "[filed-by-agent] заведено агентом для триажа человеком"
+        if related_task_id is not None:
+            marker += f" (по ходу работы над #{related_task_id})"
+        self.api.add_comment(new_id, marker)
+        result = {
+            "filed": {"id": new_id, "title": created["title"], "stage": "Backlog"},
+            "note": "в Backlog на триаж человеку (не Queue — приоритизирует человек)",
+        }
+        if related_task_id is not None:
+            result["related_to"] = related_task_id
+        return result
+
     def comment(self, task_id: int, text: str) -> dict:
         if not (text or "").strip():
             raise WorkflowError("пустой коммент не нужен")

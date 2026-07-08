@@ -140,6 +140,24 @@ def decompose(task_id: int, subtasks: list[dict]) -> dict:
     return _wf().decompose(task_id, subtasks)
 
 
+@mcp.tool()
+@_tool
+def file_task(
+    title: str, description: str = "", priority: int = 0,
+    related_task_id: int | None = None,
+) -> dict:
+    """Завести НАЙДЕННУЮ ПО ХОДУ работы задачу (баг/техдолг ВНЕ твоего текущего таска)
+    в Backlog на триаж человеку. КОГДА: наткнулся на проблему, не относящуюся к текущей
+    задаче, и её некуда деть — паркуй сюда, НЕ чини молча и НЕ тащи в свой диф. Это НЕ
+    разбивка своей большой задачи — для этого decompose (кладёт подзадачи в Queue с
+    parenttask). Кладёт в Backlog (НЕ Queue — приоритизирует человек), метит комментом
+    [filed-by-agent] и, если передан related_task_id, вешает relation 'related' на
+    задачу, по ходу которой найдено. Ownership не нужен — это новая карточка."""
+    return _wf().file_task(
+        title, description=description, priority=priority, related_task_id=related_task_id
+    )
+
+
 def main(argv: list[str] | None = None) -> None:
     args = sys.argv[1:] if argv is None else argv
     if args and args[0] == "--version":

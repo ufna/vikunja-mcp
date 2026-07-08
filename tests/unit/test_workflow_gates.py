@@ -110,6 +110,38 @@ def test_decompose_creates_children_in_queue_parent_epic(env):
     assert any(c.startswith("[decompose]") for c in api.comments_text(t["id"]))
 
 
+def test_file_task_files_finding_into_backlog_with_marker_and_relation(env):
+    api, wf, t = env
+    # пустой title — отказ
+    with pytest.raises(WorkflowError, match="title"):
+        wf.file_task(title="   ")
+    # находка по ходу работы над t: паркуем в Backlog и связываем с t
+    res = wf.file_task(
+        title="race in claim self-heal window",
+        description="заметил по ходу работы",
+        priority=2,
+        related_task_id=t["id"],
+    )
+    new_id = res["filed"]["id"]
+    assert new_id != t["id"]
+    assert api.stage_of(new_id) == "Backlog"          # Backlog, НЕ Queue — приоритизирует человек
+    assert res["filed"]["stage"] == "Backlog"
+    assert api.tasks[new_id]["priority"] == 2
+    assert any(c.startswith("[filed-by-agent]") for c in api.comments_text(new_id))
+    assert (new_id, t["id"], "related") in api.relations
+    assert res["related_to"] == t["id"]
+
+
+def test_file_task_without_relation_has_no_link(env):
+    api, wf, t = env
+    res = wf.file_task(title="techdebt: refactor config walk-up")
+    new_id = res["filed"]["id"]
+    assert api.stage_of(new_id) == "Backlog"
+    assert not any(subj == new_id for subj, _other, _kind in api.relations)
+    assert "related_to" not in res
+    assert any(c.startswith("[filed-by-agent]") for c in api.comments_text(new_id))
+
+
 def test_comment_and_get_task(env):
     api, wf, t = env
     with pytest.raises(WorkflowError):
