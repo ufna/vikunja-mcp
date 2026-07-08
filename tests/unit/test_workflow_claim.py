@@ -39,6 +39,7 @@ def test_next_task_prefers_my_active(env):
     res = wf.next_task()
     assert res["task"]["id"] == mine["id"] and res["resume"] is True
     assert res["stage"] == "Build"
+    assert "свер" in res["note"] and "верифицируй" in res["note"]  # resume => сначала перепроверь
 
 
 def test_next_task_resumes_stuck_claim_in_queue(env):

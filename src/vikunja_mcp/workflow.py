@@ -92,7 +92,13 @@ class Workflow:
             stage, task = mine[0]
             return {
                 "resume": True, "stage": stage, "task": self._summary(task),
-                "note": "это твоя активная задача — продолжай её, новую не клеймить",
+                "note": (
+                    "это твоя активная задача — новую не клеймить. Сначала сверь "
+                    "фактическое состояние: прочитай досье (get_task) и проверь "
+                    "код/репо — работа могла быть уже сделана целиком или частично. "
+                    "Сделана — верифицируй и advance(to='review') с честным evidence; "
+                    "нет — продолжай с того места, где она остановилась"
+                ),
             }
 
         stuck = [t for t in board.get("Queue", []) if my_id in self._assignee_ids(t)]
