@@ -161,7 +161,15 @@ class Workflow:
         ]
         if queue:
             queue.sort(key=lambda t: -t.get("priority", 0))
-            return {"resume": False, "task": self._summary(queue[0])}
+            return {
+                "resume": False, "task": self._summary(queue[0]),
+                "note": (
+                    "свободная задача из очереди — вызови claim(task_id) (заведёт её "
+                    "в Design), затем задиспатчь пер-таск-агента на весь таск. "
+                    "resume:false тут значит «взять новую», а не «делать нечего» "
+                    "(пусто — это только task:null)"
+                ),
+            }
         return {"task": None, "message": "очередь пуста — работы для агента нет"}
 
     def claim(self, task_id: int) -> dict:

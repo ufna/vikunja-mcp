@@ -24,6 +24,17 @@ def test_next_task_orders_queue_by_priority(env):
     assert res["task"]["id"] == top["id"] and res["resume"] is False
 
 
+def test_next_task_free_queue_task_carries_claim_note(env):
+    """Свободная задача из Queue отдаётся с note: без него resume:false молчал и
+    читался оркестратором как «делать нечего» — он стопался вместо claim→dispatch."""
+    api, wf = env
+    free = api.add_task("free", "Queue", priority=3)
+    res = wf.next_task()
+    assert res["task"]["id"] == free["id"]
+    assert res["resume"] is False
+    assert res["note"] and "claim" in res["note"]  # инструкция thin-pump потоку, не молчание
+
+
 def test_next_task_skips_assigned_and_blocked(env):
     api, wf = env
     api.add_task("taken", "Queue", assignee={"id": 9, "username": "other"})
