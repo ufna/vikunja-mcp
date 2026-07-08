@@ -40,5 +40,7 @@ def test_tool_catches_transport_errors_with_hint(monkeypatch):
 
 
 def test_version_flag(capsys):
+    from vikunja_mcp import __version__
+
     server.main(argv=["--version"])
-    assert "0.1.0" in capsys.readouterr().out
+    assert __version__ in capsys.readouterr().out
