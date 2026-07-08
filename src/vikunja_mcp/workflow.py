@@ -4,6 +4,7 @@ from typing import Any
 import httpx
 
 from .api import VikunjaError
+from .formatting import html_to_text
 
 STAGES = ["Backlog", "Queue", "Design", "Build", "Review", "Your Call", "Done"]
 ACTIVE_STAGES = ("Design", "Build")
@@ -176,14 +177,16 @@ class Workflow:
             # вердикт актуален, только если он свежее последнего отчёта: после цикла
             # needs_work -> доработка -> Review задача должна снова попасть к ревьюеру
             comments = self.api.comments(t["id"])
+            # comments are stored as HTML (#85); render back to plain text before matching
+            # the leading marker, else "[review]" hides behind a "<p>" wrapper.
             last_review = max(
                 (c.get("created") or "" for c in comments
-                 if (c.get("comment") or "").startswith("[review]")),
+                 if html_to_text(c.get("comment") or "").startswith("[review]")),
                 default=None,
             )
             last_worklog = max(
                 (c.get("created") or "" for c in comments
-                 if (c.get("comment") or "").startswith("[worklog]")),
+                 if html_to_text(c.get("comment") or "").startswith("[worklog]")),
                 default="",
             )
             if last_review is not None and last_review >= last_worklog:
@@ -484,8 +487,11 @@ class Workflow:
             "assignees": [a.get("username", "?") for a in task.get("assignees") or []],
             "labels": [lb.get("title") for lb in task.get("labels") or []],
             "related": related,
+            # comments are stored as HTML (#85); render back to plain text so the agent
+            # reads clean multiline text (the human reads the formatted HTML in the UI).
             "comments": [
-                {"author": c.get("author", {}).get("username", "?"), "text": c.get("comment", "")}
+                {"author": c.get("author", {}).get("username", "?"),
+                 "text": html_to_text(c.get("comment", ""))}
                 for c in raw_comments
             ],
         }

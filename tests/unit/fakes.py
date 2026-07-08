@@ -1,6 +1,8 @@
 """In-memory дублёр VikunjaAPI для unit-тестов workflow/setup."""
 import itertools
 
+from vikunja_mcp.formatting import html_to_text, text_to_html
+
 
 class FakeAPI:
     def __init__(self, me_id=2, me_username="agent-infra", buckets=None):
@@ -58,7 +60,10 @@ class FakeAPI:
         return next(b["title"] for b in self._buckets if b["id"] == bid)
 
     def comments_text(self, task_id):
-        return [c["comment"] for c in self._comments.get(task_id, [])]
+        # comments are STORED as HTML (mirrors the real client, #85); this helper renders
+        # them back to the plain text a human/agent reads, so marker/content assertions
+        # stay meaningful. Use `comments(task_id)` for the raw stored HTML.
+        return [html_to_text(c["comment"]) for c in self._comments.get(task_id, [])]
 
     # --- поверхность VikunjaAPI ---
     def me(self):
@@ -95,9 +100,10 @@ class FakeAPI:
         return list(self._comments.get(task_id, []))
 
     def add_comment(self, task_id, text):
-        # created монотонно растёт и лексикографически сортируем — как ISO у реального API
+        # created монотонно растёт и лексикографически сортируем — как ISO у реального API.
+        # Храним HTML 1:1 с реальным клиентом (#85): агентский текст -> text_to_html.
         entry = {
-            "comment": text, "author": dict(self.me_user),
+            "comment": text_to_html(text), "author": dict(self.me_user),
             "created": f"2026-07-08T00:00:00.{next(self._ids):06d}Z",
         }
         self._comments.setdefault(task_id, []).append(entry)

@@ -2,6 +2,7 @@ import pytest
 
 from tests.unit.fakes import FakeAPI
 from vikunja_mcp.api import VikunjaError
+from vikunja_mcp.formatting import html_to_text
 from vikunja_mcp.workflow import STAGES, Workflow, WorkflowError
 
 
@@ -205,6 +206,37 @@ def test_comment_and_get_task(env):
     assert dossier["stage"] == "Design"
     assert dossier["comments"][-1]["text"] == "нашёл гочу в API"
     assert dossier["assignees"] == ["agent-infra"]
+
+
+def test_comments_stored_as_html_and_rendered_back_multiline(env):
+    """#85: a multiline agent comment is STORED as escaped, structured HTML (so the
+    Vikunja UI shows line breaks) yet get_task renders it back to clean multiline text
+    (so the agent doesn't read tag soup), with markers and '<' both intact."""
+    api, wf, t = env
+    wf.comment(t["id"], text="строка 1\nстрока 2\n\nтег <id> и a < b")
+    # raw stored form is HTML with paragraph + line-break structure and escaped '<'
+    raw = api.comments(t["id"])[-1]["comment"]
+    assert raw.count("<p>") == 2 and "<br>" in raw
+    assert "&lt;id&gt;" in raw and "&lt; b" in raw
+    # but the agent-facing dossier is plain multiline text, '<id>' unescaped, no tags
+    text = wf.get_task(t["id"])["comments"][-1]["text"]
+    assert text == "строка 1\nстрока 2\n\nтег <id> и a < b"
+
+
+def test_worklog_comment_is_html_but_markers_still_detected(env):
+    """The [worklog] report is stored as HTML, yet next_task's marker greps (and the
+    comments_text helper) still see the leading marker."""
+    api, wf, t = env
+    api.tasks[t["id"]]["labels"].append({"id": 999, "title": "bug"})
+    wf.advance(t["id"], to="build", spec="s")
+    wf.advance(t["id"], to="review", worklog="починил", evidence="commit c0ffee")
+    raw = next(c["comment"] for c in api.comments(t["id"])
+               if "[worklog]" in html_to_text(c["comment"]))
+    assert raw.startswith("<p>[worklog]")          # stored as HTML
+    # an independent reviewer is still offered this bug fix -> marker detection works
+    reviewer = type(wf)(api, project_id=3)
+    reviewer._me_cache = {"id": 77, "username": "agent-reviewer"}
+    assert reviewer.next_task().get("review") is True
 
 
 def test_get_task_returns_untruncated_description_and_related(env):

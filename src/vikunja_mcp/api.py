@@ -3,6 +3,8 @@ from typing import Any
 
 import httpx
 
+from .formatting import text_to_html
+
 
 class VikunjaError(Exception):
     def __init__(self, status: int, message: str):
@@ -55,7 +57,13 @@ class VikunjaAPI:
         return self._req("GET", f"/tasks/{task_id}/comments") or []
 
     def add_comment(self, task_id: int, text: str) -> dict:
-        return self._req("PUT", f"/tasks/{task_id}/comments", json={"comment": text})
+        # Vikunja's comment field is HTML (#85): agents author plain text with newlines,
+        # so convert to structure-preserving, HTML-escaped HTML at this single chokepoint
+        # — every agent comment body (comment/spec/worklog/review/call_human/claim/...)
+        # passes through here.
+        return self._req(
+            "PUT", f"/tasks/{task_id}/comments", json={"comment": text_to_html(text)}
+        )
 
     # --- assignees ---
     def add_assignee(self, task_id: int, user_id: int) -> None:

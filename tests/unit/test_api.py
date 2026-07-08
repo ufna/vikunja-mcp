@@ -85,3 +85,22 @@ def test_comments_and_assignees_endpoints():
         ("DELETE", "/api/v1/tasks/7/assignees/2"),
         ("PUT", "/api/v1/tasks/7/relations"),
     ]
+
+
+def test_add_comment_sends_html_not_raw_plain_text():
+    # #85: the comment field is HTML — add_comment must convert agent plain text to
+    # structure-preserving, escaped HTML on the wire, not ship raw newlines/'<'.
+    sent = {}
+
+    def handler(request):
+        sent["body"] = json.loads(request.content)
+        return httpx.Response(200, json={})
+
+    api = make_api(handler)
+    api.add_comment(7, "[worklog]\nfixed a < b bug\n\nEvidence: abc")
+    comment = sent["body"]["comment"]
+    assert comment.startswith("<p>[worklog]")   # marker intact at the front
+    assert "<br>" in comment                     # single newline -> line break
+    assert comment.count("<p>") == 2             # blank line -> new paragraph
+    assert "&lt; b" in comment                   # literal '<' escaped, markup safe
+    assert "\n" not in comment                   # no raw newline leaked into the field
