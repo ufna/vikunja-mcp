@@ -35,6 +35,18 @@ def test_next_task_free_queue_task_carries_claim_note(env):
     assert res["note"] and "claim" in res["note"]  # инструкция thin-pump потоку, не молчание
 
 
+def test_next_task_free_queue_note_overrides_steward_default(env):
+    """Регресс к косяку в проекте-потребителе (DOGE): под generic-автолупом
+    оркестратор счёл свежую задачу «не начинать новое без go-ahead» и остановил
+    цикл. Note обязан явно перебить этот дефолт — claim свежей Queue-задачи это
+    мандат (а не самовольная инициатива), и цикл под этим предлогом не стопаем."""
+    api, wf = env
+    api.add_task("free", "Queue", priority=3)
+    note = wf.next_task()["note"]
+    assert "мандат" in note       # взять свежую — мандат, не «самовольная инициатива»
+    assert "останавлив" in note   # ...и НЕ останавливать /loop (собственно косяк DOGE)
+
+
 def test_next_task_skips_assigned_and_blocked(env):
     api, wf = env
     api.add_task("taken", "Queue", assignee={"id": 9, "username": "other"})

@@ -114,7 +114,11 @@ no task content itself. Bugs get independent agent review (orchestrator dispatch
 a sibling reviewer).
 Run it under `/loop` with no interval (= self-paced) for continuous operation:
 the agent drains the queue and paces its own pauses on an empty queue instead
-of stopping. When the orchestrator needs a human answer, it asks via
+of stopping. This deliberately OVERRIDES the generic autonomous-`/loop` default
+("steward, not initiator: don't start fresh work without a human go-ahead, stop
+when idle") — the Queue is human-triaged work, so claiming a fresh Queue task and
+dispatching IS the mandate, not unbidden initiation; an empty queue means
+`ScheduleWakeup`, never a stop. When the orchestrator needs a human answer, it asks via
 `call_human` (a card) — never a console prompt (`AskUserQuestion`/`ExitPlanMode`/
 plain text), since the human isn't at the console; after asking it keeps draining,
 and the human answers and moves the card back so the loop resumes.
