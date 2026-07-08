@@ -21,7 +21,7 @@ Backlog → Queue → Design → Build → Review → Done
 ## Install
 
 ```bash
-uvx --from git+https://github.com/ufna/vikunja-mcp@main vikunja-mcp
+uvx --from git+https://github.com/ufna/vikunja-mcp@v0.1.0 vikunja-mcp
 ```
 
 Register it with Claude Code via `.mcp.json`:
@@ -31,7 +31,7 @@ Register it with Claude Code via `.mcp.json`:
   "mcpServers": {
     "tracker": {
       "command": "uvx",
-      "args": ["--from", "git+https://github.com/ufna/vikunja-mcp@main", "vikunja-mcp"]
+      "args": ["--from", "git+https://github.com/ufna/vikunja-mcp@v0.1.0", "vikunja-mcp"]
     }
   }
 }
@@ -99,6 +99,19 @@ vikunja-mcp install-skill
 
 Copies the packaged tracker skill (queue discipline, comment-trail
 expectations, `call_human` vs `return_task`) to `~/.claude/skills/tracker/SKILL.md`.
+
+## Releases
+
+Consumers pin a release tag in `.mcp.json` (deterministic updates: bump the
+tag in the consuming repo, developers pick it up via `git pull`). Admin
+one-offs (`setup`, `install-skill`) may use `@main`.
+
+Cutting a release:
+
+1. bump `version` in `pyproject.toml` and `__version__` in `src/vikunja_mcp/__init__.py`
+2. commit, wait for CI green
+3. `git tag -a vX.Y.Z -m "vX.Y.Z" && git push origin vX.Y.Z`
+4. bump the tag in consumers' `.mcp.json` (hgdev-infra, dogiators/front, ...)
 
 ## Development
 

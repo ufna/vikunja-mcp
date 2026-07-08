@@ -62,11 +62,14 @@ def reconcile(api, project_title: str, shares: list[tuple[str, int]]) -> int:
 def _print_snippets(pid: int, project_title: str, url: str) -> None:
     print("\n--- .vikunja-mcp.toml (закоммить в корень рабочего репо) ---")
     print(f'[tracker]\nurl = "{url}"\nproject_id = {pid}\nproject = "{project_title}"')
+    from vikunja_mcp import __version__
+
     print("\n--- .mcp.json (закоммить рядом) ---")
     print(
         '{ "mcpServers": { "tracker": {\n'
         '    "command": "uvx",\n'
-        '    "args": ["--from", "git+https://github.com/ufna/vikunja-mcp@main", "vikunja-mcp"]\n'
+        f'    "args": ["--from", "git+https://github.com/ufna/vikunja-mcp@v{__version__}", '
+        '"vikunja-mcp"]\n'
         "} } }"
     )
 
