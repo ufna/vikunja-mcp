@@ -5,6 +5,7 @@ STAGES = ["Backlog", "Queue", "Design", "Build", "Review", "Call to Human", "Don
 ACTIVE_STAGES = ("Design", "Build")
 LABEL_BLOCKED = "blocked"
 LABEL_EPIC = "epic"
+LABEL_BUG = "bug"
 
 # advance: to -> (откуда, куда)
 AGENT_ADVANCE = {"build": ("Design", "Build"), "review": ("Build", "Review")}
@@ -106,9 +107,31 @@ class Workflow:
             stuck.sort(key=lambda t: -t.get("priority", 0))
             return {
                 "resume": True, "stage": "Queue", "task": self._summary(stuck[0]),
-                "note": "клейм не доведён — вызови claim(task_id) повторно",
+                "note": (
+                    "задача в Queue назначена на тебя (человеком или недоведённым "
+                    "клеймом) — вызови claim(task_id), он доведёт её в Design"
+                ),
             }
 
+        for t in sorted(board.get("Review", []), key=lambda t: -t.get("priority", 0)):
+            if not self._has_label(t, LABEL_BUG) or my_id in self._assignee_ids(t):
+                continue
+            if any(
+                (c.get("comment") or "").startswith("[review]")
+                for c in self.api.comments(t["id"])
+            ):
+                continue
+            return {
+                "review": True, "task": self._summary(t),
+                "note": (
+                    "багфикс ждёт независимого ревью: воспроизведи, проверь что фикс "
+                    "закрывает причину (не симптом), прогони запуском и вынеси вердикт "
+                    "review_task(task_id, verdict=..., report=...). НЕ ревьюй, если "
+                    "писал этот код в этой сессии"
+                ),
+            }
+
+        # Queue-контракт: свободные берём, назначенные на другого НЕ трогаем — это «для людей»
         queue = [
             t for t in board.get("Queue", [])
             if not self._assignee_ids(t) and not self._has_label(t, LABEL_BLOCKED)
@@ -191,6 +214,31 @@ class Workflow:
             self.api.add_comment(task_id, "\n".join(report))
         self._move(task_id, to_stage)
         return {"moved_to": to_stage, "task_id": task_id}
+
+    def review_task(self, task_id: int, verdict: str, report: str) -> dict:
+        verdict = (verdict or "").strip().lower()
+        if verdict not in ("approve", "needs_work"):
+            raise WorkflowError("verdict должен быть 'approve' или 'needs_work'")
+        if not (report or "").strip():
+            raise WorkflowError(
+                "нужен report: что воспроизвёл/проверил запуском и почему такой вердикт"
+            )
+        task, stage = self._find_task(task_id)
+        if stage != "Review":
+            raise WorkflowError(f"ревьюить можно только задачи в Review, эта в {stage}")
+
+        if verdict == "approve":
+            self.api.add_comment(task_id, f"[review] APPROVE\n{report.strip()}")
+            return {
+                "verdict": "approve", "task_id": task_id,
+                "note": "вердикт записан; в Done задачу переводит человек",
+            }
+        self.api.add_comment(task_id, f"[review] NEEDS WORK\n{report.strip()}")
+        self._move(task_id, "Build")
+        return {
+            "verdict": "needs_work", "task_id": task_id, "moved_to": "Build",
+            "note": "задача вернулась имплементеру — он увидит её в next_task",
+        }
 
     def call_human(self, task_id: int, question: str) -> dict:
         if not (question or "").strip():

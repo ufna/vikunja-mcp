@@ -141,3 +141,54 @@ def test_get_task_related_defaults_to_empty_dict_without_relations(env):
     api, wf, t = env
     dossier = wf.get_task(t["id"])
     assert dossier["related"] == {}
+
+
+def test_review_flow_for_bug_labels(env):
+    api, wf, t = env
+    # довели багфикс до Review
+    api.tasks[t["id"]]["labels"].append({"id": 999, "title": "bug"})
+    wf.advance(t["id"], to="build", spec="s")
+    wf.advance(t["id"], to="review", worklog="w", evidence="e")
+
+    # имплементеру (assignee) ревью НЕ предлагается
+    assert "review" not in wf.next_task()
+
+    # свободному агенту — предлагается
+    api2 = api  # тот же борд, другой "я"
+    reviewer = type(wf)(api2, project_id=3)
+    reviewer._me_cache = {"id": 77, "username": "agent-reviewer"}
+    offered = reviewer.next_task()
+    assert offered.get("review") is True and offered["task"]["id"] == t["id"]
+
+    # пустой report / кривой verdict / не-Review задача — отказ
+    import pytest as _pytest
+    with _pytest.raises(WorkflowError):
+        reviewer.review_task(t["id"], verdict="approve", report="  ")
+    with _pytest.raises(WorkflowError):
+        reviewer.review_task(t["id"], verdict="lgtm", report="r")
+
+    # needs_work: вердикт-коммент + возврат в Build, assignee сохранён
+    reviewer.review_task(t["id"], verdict="needs_work", report="фикс лечит симптом")
+    assert api.stage_of(t["id"]) == "Build"
+    assert api.tasks[t["id"]]["assignees"][0]["id"] == api.me_user["id"]
+    assert any(c.startswith("[review] NEEDS WORK") for c in api.comments_text(t["id"]))
+
+    # после вердикта задача больше не предлагается на ревью (вернулась в Build);
+    # доводим снова и апрувим
+    wf.advance(t["id"], to="review", worklog="w2", evidence="e2")
+    reviewer.review_task(t["id"], verdict="approve", report="воспроизвёл, фикс по причине")
+    assert api.stage_of(t["id"]) == "Review"
+    assert any(c.startswith("[review] APPROVE") for c in api.comments_text(t["id"]))
+    # задача с [review]-вердиктом исчезает из review-выдачи... но после нового
+    # worklog старый вердикт остался — v1: повторное ревью по запросу человека
+    assert "review" not in reviewer.next_task() or reviewer.next_task()["task"]["id"] != t["id"]
+
+
+def test_review_not_offered_without_bug_label(env):
+    api, wf, t = env
+    wf.advance(t["id"], to="build", spec="s")
+    wf.advance(t["id"], to="review", worklog="w", evidence="e")
+    reviewer = type(wf)(api, project_id=3)
+    reviewer._me_cache = {"id": 77, "username": "agent-reviewer"}
+    res = reviewer.next_task()
+    assert "review" not in res

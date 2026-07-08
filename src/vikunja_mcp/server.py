@@ -49,17 +49,20 @@ def _tool(fn):
 @mcp.tool()
 @_tool
 def next_task() -> dict:
-    """Что делать дальше: сначала возвращает ТВОЮ активную задачу (Design/Build,
-    в т.ч. вернувшуюся из Call to Human), иначе — верхнюю свободную из Queue.
-    Backlog и blocked не выдаёт. Одна задача за раз."""
+    """Что делать дальше, в порядке: (1) ТВОЯ активная задача (Design/Build, в т.ч.
+    вернувшаяся из Call to Human), (2) назначенная на тебя в Queue, (3) багфикс в
+    Review, ждущий независимого ревью (label bug, вердикта ещё нет), (4) верхняя
+    СВОБОДНАЯ из Queue. Задачи, назначенные на другого, не выдаёт никогда — они
+    «для людей». Backlog и blocked не трогает. Одна задача за раз."""
     return _wf().next_task()
 
 
 @mcp.tool()
 @_tool
 def claim(task_id: int) -> dict:
-    """Взять задачу из Queue: назначает тебя и переносит в Design.
-    Откажет, если задача не в Queue, занята или проиграна гонка (тогда next_task)."""
+    """Взять задачу из Queue: назначает тебя и переносит в Design. Брать можно
+    свободные или уже назначенные на тебя; назначенная на другого — «для людей»,
+    её claim не отдаст. Отказ также вне Queue и при проигранной гонке (тогда next_task)."""
     return _wf().claim(task_id)
 
 
@@ -94,6 +97,18 @@ def advance(
     return _wf().advance(
         task_id, to, spec=spec, worklog=worklog, evidence=evidence, root_cause=root_cause
     )
+
+
+@mcp.tool()
+@_tool
+def review_task(task_id: int, verdict: str, report: str) -> dict:
+    """Независимое ревью багфикса в Review (предлагается через next_task). Ты НЕ должен
+    быть автором проверяемого кода — ревьюит отдельная сессия. Проверь по сути:
+    воспроизведи баг, убедись что фикс закрывает root cause (не симптом), прогони
+    ЗАПУСКОМ. verdict='approve' — вердикт-коммент, Done дальше ставит человек;
+    verdict='needs_work' — вердикт-коммент и задача возвращается в Build имплементеру.
+    report обязателен: что проверял, что наблюдал, почему такой вердикт."""
+    return _wf().review_task(task_id, verdict, report)
 
 
 @mcp.tool()

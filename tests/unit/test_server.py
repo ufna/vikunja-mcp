@@ -5,12 +5,12 @@ import httpx
 from vikunja_mcp import server
 
 
-def test_exposes_exactly_eight_workflow_tools():
+def test_exposes_exactly_the_workflow_tools():
     tools = asyncio.run(server.mcp.list_tools())
     names = {t.name for t in tools}
     assert names == {
         "next_task", "claim", "get_task", "comment",
-        "advance", "call_human", "return_task", "decompose",
+        "advance", "call_human", "return_task", "decompose", "review_task",
     }
 
 
