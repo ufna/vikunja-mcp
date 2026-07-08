@@ -31,7 +31,7 @@ Register it with Claude Code via `.mcp.json`:
   "mcpServers": {
     "tracker": {
       "command": "uvx",
-      "args": ["--from", "git+https://github.com/ufna/vikunja-mcp@v0.1.0", "vikunja-mcp"]
+      "args": ["--refresh-package", "vikunja-mcp", "--from", "git+https://github.com/ufna/vikunja-mcp@stable", "vikunja-mcp"]
     }
   }
 }
@@ -100,18 +100,20 @@ vikunja-mcp install-skill
 Copies the packaged tracker skill (queue discipline, comment-trail
 expectations, `call_human` vs `return_task`) to `~/.claude/skills/tracker/SKILL.md`.
 
-## Releases
+## Releases: the `stable` channel
 
-Consumers pin a release tag in `.mcp.json` (deterministic updates: bump the
-tag in the consuming repo, developers pick it up via `git pull`). Admin
-one-offs (`setup`, `install-skill`) may use `@main`.
+Consumers subscribe to the moving `stable` branch with `--refresh-package`
+in `.mcp.json` — every MCP server start re-resolves the channel, so releases
+roll out to all repos automatically (no per-consumer bumps, no PR bots).
+Immutable `vX.Y.Z` tags remain the release history and rollback points.
+Admin one-offs (`setup`, `install-skill`) may use `@main`.
 
 Cutting a release:
 
 1. bump `version` in `pyproject.toml` and `__version__` in `src/vikunja_mcp/__init__.py`
 2. commit, wait for CI green
 3. `git tag -a vX.Y.Z -m "vX.Y.Z" && git push origin vX.Y.Z`
-4. bump the tag in consumers' `.mcp.json` (hgdev-infra, dogiators/front, ...)
+4. `git branch -f stable vX.Y.Z && git push -f origin stable`  # rollout (rollback: same, older tag)
 
 ## Development
 
