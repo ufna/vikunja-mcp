@@ -83,11 +83,17 @@ def comment(task_id: int, text: str) -> dict:
 def advance(
     task_id: int, to: str,
     spec: str | None = None, worklog: str | None = None, evidence: str | None = None,
+    root_cause: str | None = None,
 ) -> dict:
-    """Продвинуть СВОЮ задачу: to='build' требует spec (подход/дизайн);
-    to='review' требует worklog + evidence (коммит/PR/вывод верификации).
+    """Продвинуть СВОЮ задачу. to='build' требует spec (подход/дизайн).
+    to='review' требует ОТЧЁТ о проделанной работе: worklog (что сделано и как
+    проверено — запуском, не чтением кода) + evidence (коммит/PR/вывод проверки);
+    для багфиксов ОБЯЗАТЕЛЬНО передай root_cause — причину бага (почему возник),
+    а не симптом. Отчёт уходит комментом в задачу — его читает ревьюер.
     Перехода в Done нет — Done ставит человек после ревью."""
-    return _wf().advance(task_id, to, spec=spec, worklog=worklog, evidence=evidence)
+    return _wf().advance(
+        task_id, to, spec=spec, worklog=worklog, evidence=evidence, root_cause=root_cause
+    )
 
 
 @mcp.tool()

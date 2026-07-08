@@ -44,6 +44,20 @@ def test_advance_review_requires_worklog_and_evidence(env):
     assert "[worklog]" in joined and "commit abc123" in joined
 
 
+def test_advance_review_report_includes_root_cause(env):
+    api, wf, t = env
+    wf.advance(t["id"], to="build", spec="s")
+    wf.advance(
+        t["id"], to="review",
+        worklog="починил рендер титула", evidence="commit deadbeef",
+        root_cause="стейт лобби не подписан на смену экипировки",
+    )
+    report = next(c for c in api.comments_text(t["id"]) if c.startswith("[worklog]"))
+    assert "Причина: стейт лобби не подписан" in report
+    assert "Сделано: починил рендер титула" in report
+    assert "Evidence: commit deadbeef" in report
+
+
 def test_advance_wrong_source_stage(env):
     api, wf, t = env
     with pytest.raises(WorkflowError, match="Build"):

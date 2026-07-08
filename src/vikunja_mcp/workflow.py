@@ -156,6 +156,7 @@ class Workflow:
     def advance(
         self, task_id: int, to: str,
         spec: str | None = None, worklog: str | None = None, evidence: str | None = None,
+        root_cause: str | None = None,
     ) -> dict:
         to = (to or "").strip().lower()
         if to == "done":
@@ -178,12 +179,16 @@ class Workflow:
         else:
             if not (worklog or "").strip() or not (evidence or "").strip():
                 raise WorkflowError(
-                    "для Review нужны worklog (что сделано) и evidence "
-                    "(ссылка на коммит/PR или вывод верификации)"
+                    "для Review нужен отчёт: worklog (что сделано и как проверено) и "
+                    "evidence (ссылка на коммит/PR или вывод верификации); для багфиксов "
+                    "дополнительно root_cause — причина бага, а не симптом"
                 )
-            self.api.add_comment(
-                task_id, f"[worklog]\n{worklog.strip()}\n\nEvidence: {evidence.strip()}"
-            )
+            report = ["[worklog]"]
+            if (root_cause or "").strip():
+                report.append(f"Причина: {root_cause.strip()}")
+            report.append(f"Сделано: {worklog.strip()}")
+            report.append(f"\nEvidence: {evidence.strip()}")
+            self.api.add_comment(task_id, "\n".join(report))
         self._move(task_id, to_stage)
         return {"moved_to": to_stage, "task_id": task_id}
 
