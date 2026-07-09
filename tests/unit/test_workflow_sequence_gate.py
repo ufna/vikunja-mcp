@@ -702,3 +702,128 @@ def test_empty_queue_still_empty_not_cycle(env):
     res = wf.next_task()
     assert res == EMPTY
     assert "cycle" not in res
+
+
+# --- #126 (VMCP-47): next_task's LIGHT board must not conflate "absent" with "not a predecessor".
+# A predecessor parked off the light board (Backlog beyond page 1, Your Call, Done) used to be
+# invisible to next_task yet seen by claim -> next_task offered what claim refused (a livelock).
+# FakeAPI.view_tasks now truncates non-required buckets (page_size) like the real client, so this
+# is reproducible at all; the gate escalates to the full board to make absence definitive.
+
+
+def _hide_off_light_board(api):
+    """Make every NON-required bucket (Backlog/Your Call/Done) return nothing on the LIGHT board
+    next_task fetches — models a predecessor sitting beyond the light board's fetched pages (an
+    unbounded Backlog/Done, or a Your Call parked by call_human), which #43 deliberately does not
+    page. The exhaustive full board (require_titles=None, read by claim/advance) is unaffected."""
+    api.page_size = 0
+
+
+def test_next_task_backlog_head_off_light_board_gates_not_offers(env):
+    """THE #126 regression: the chain HEAD sits in Backlog (returned via return_task) BEYOND the
+    light board's window, so next_task can't see it directly. It must NOT read the tail as ungated
+    and offer it (the livelock: claim then refuses); instead it escalates to the full board, finds
+    the head, and reports the starving tail + needs_retriage. next_task and claim AGREE — both
+    refuse the tail. (Before the fix next_task offered the tail while claim raised — the split.)"""
+    api, wf = env
+    head = api.add_task("head", "Backlog", labels=("blocked",))   # returned via return_task
+    tail = api.add_task("tail", "Queue")
+    api.add_relation(tail["id"], head["id"], "follows")
+    _hide_off_light_board(api)
+    res = wf.next_task()
+    assert res["task"] is None                                    # NOT offered
+    assert res["starving"] is True
+    assert res["needs_retriage"] is True
+    assert res["waiting_count"] == 1
+    w = res["waiting"][0]
+    assert w["task"]["id"] == tail["id"]
+    blk = w["blocked_by"][0]
+    assert blk["id"] == head["id"] and blk["stage"] == "Backlog"
+    assert head["identifier"] in blk["ref"]
+    # next_task <-> claim agreement: claim refuses the same tail, naming the same head
+    with pytest.raises(WorkflowError) as exc:
+        wf.claim(tail["id"])
+    assert head["identifier"] in str(exc.value)
+    assert api.stage_of(tail["id"]) == "Queue"
+
+
+def test_next_task_escalates_to_full_board_at_most_once(env):
+    """The escalation is bounded to ONE extra fetch and only when needed: with a predecessor off
+    the light board next_task issues exactly TWO view_tasks (light + one full), never N-per-cand."""
+    api, wf = env
+    head = api.add_task("head", "Backlog")
+    tail = api.add_task("tail", "Queue")
+    api.add_relation(tail["id"], head["id"], "follows")
+    _hide_off_light_board(api)
+    wf.next_task()
+    assert api.view_tasks_calls == 2                              # one light + one escalation, memoised
+
+
+def test_next_task_no_escalation_when_predecessor_on_light_board(env):
+    """#43/#105 preserved: when the predecessor is already on the light board (a ready head at
+    Review, in NEXT_TASK_STAGES) next_task never fetches the full board — exactly ONE view_tasks."""
+    api, wf = env
+    _pred, succ = _chain(api, pred_stage="Review")
+    res = wf.next_task()
+    assert res["resume"] is False and res["task"]["id"] == succ["id"]
+    assert api.view_tasks_calls == 1                              # no escalation on the common path
+
+
+def test_next_task_your_call_predecessor_off_light_board_gates(env):
+    """A predecessor parked in Your Call by call_human is NOT ready (READY_STAGES={Review,Done})
+    AND is off the light board (#43). next_task must escalate, gate the successor (starving, but
+    NOT needs_retriage — Your Call isn't Backlog), and agree with claim's refusal."""
+    api, wf = env
+    pred, succ = _chain(api, pred_stage="Your Call")
+    _hide_off_light_board(api)
+    res = wf.next_task()
+    assert res["task"] is None
+    assert res["starving"] is True
+    assert res["needs_retriage"] is False
+    assert res["waiting"][0]["blocked_by"][0]["stage"] == "Your Call"
+    with pytest.raises(WorkflowError) as exc:
+        wf.claim(succ["id"])
+    assert pred["identifier"] in str(exc.value)
+
+
+def test_next_task_deleted_predecessor_still_not_a_blocker(env):
+    """"Genuinely deleted -> not a blocker" survives the escalation: a follows-predecessor absent
+    from BOTH the light AND the full board must NOT freeze the tail — next_task offers it and claim
+    allows it (agreement). Modelled by orphaning the predecessor (still referenced by the relation,
+    but on no bucket) — exactly the found-is-None-after-escalation branch the fix must keep open."""
+    api, wf = env
+    pred, succ = _chain(api, pred_stage="Backlog")
+    del api.task_bucket[pred["id"]]                               # orphaned: relation dangles, on no board
+    res = wf.next_task()
+    assert res["resume"] is False
+    assert res["task"]["id"] == succ["id"]                        # offered, not gated
+    assert wf.claim(succ["id"])["claimed"] is True               # claim agrees: claimable
+    assert api.stage_of(succ["id"]) == "Design"
+
+
+def test_next_task_and_claim_agree_when_off_board_predecessor_ready(env):
+    """Agreement in the "ready" direction too: a predecessor in Done (off the light board) is READY,
+    so escalation classifies it as not-a-blocker and next_task offers the successor — exactly as
+    claim allows it. Proves escalation reads the real STAGE, not just presence/absence."""
+    api, wf = env
+    _pred, succ = _chain(api, pred_stage="Done")
+    _hide_off_light_board(api)
+    res = wf.next_task()
+    assert res["resume"] is False and res["task"]["id"] == succ["id"]
+    assert api.view_tasks_calls == 2                              # escalated to learn the Done stage
+    assert wf.claim(succ["id"])["claimed"] is True
+
+
+def test_next_task_offers_free_task_despite_off_board_gated_candidate(env):
+    """A genuinely claimable free task must still be returned even when a HIGHER-priority candidate
+    is gated by an off-light-board predecessor — the off-board gate must not hide real work. Before
+    the fix the higher-priority off-board candidate was wrongly offered instead of the free task."""
+    api, wf = env
+    head = api.add_task("head", "Backlog")
+    gated = api.add_task("gated", "Queue", priority=5)           # higher priority, blocked off-board
+    api.add_relation(gated["id"], head["id"], "follows")
+    free = api.add_task("free", "Queue", priority=1)
+    _hide_off_light_board(api)
+    res = wf.next_task()
+    assert res["resume"] is False
+    assert res["task"]["id"] == free["id"]

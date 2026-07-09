@@ -38,6 +38,10 @@ class FakeAPI:
         self.view_config = None  # последний configure_kanban
         self.shares = []         # (project_id, username, permission)
         self.last_require_titles = None  # require_titles последнего view_tasks (#43, для тестов)
+        self.view_tasks_calls = 0  # #126: сколько раз звали view_tasks (1 без escalation, 2 с ним)
+        # #126: как max_items_per_page реального сервера — не-required бакеты усекаются до первой
+        # страницы на лёгком борде (#43); дефолт 50 не трогает существующие тесты (<50 задач/бакет)
+        self.page_size = 50
 
     # --- helpers для тестов ---
     def _task_identity(self):
@@ -186,13 +190,22 @@ class FakeAPI:
         self._buckets = [b for b in self._buckets if b["id"] != bucket_id]
 
     def view_tasks(self, project_id, view_id, require_titles=None):
-        # реальный клиент постранично мёржит бакеты; фейк держит всё в памяти и всегда
-        # отдаёт полный борд, поэтому require_titles тут не влияет на результат — лишь
-        # записываем его, чтобы тест мог проверить, что next_task просит лёгкий борд (#43).
+        # mirror the real client (#43/#126): require_titles restricts EXHAUSTIVE paging to those
+        # buckets; every OTHER bucket returns only its first page (page_size), NOT its full history
+        # — an unbounded Done/Backlog/Your Call is not fully read on the light next_task board.
+        # require_titles=None => exhaustive board (no truncation), as claim/advance/setup read it.
+        # (Was: always the full board regardless of require_titles — which is exactly why no unit
+        # test caught the #126 livelock; task_bucket.get lets an orphaned task be off every board.)
         self.last_require_titles = require_titles
+        self.view_tasks_calls += 1
         out = []
         for b in self._buckets:
-            tasks = [dict(t) for tid, t in self.tasks.items() if self.task_bucket[tid] == b["id"]]
+            tasks = [
+                dict(t) for tid, t in self.tasks.items()
+                if self.task_bucket.get(tid) == b["id"]
+            ]
+            if require_titles is not None and b["title"] not in require_titles:
+                tasks = tasks[: self.page_size]  # non-required bucket -> only its first page
             out.append({**b, "tasks": tasks})
         return out
 

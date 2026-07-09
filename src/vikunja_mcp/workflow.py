@@ -1,4 +1,5 @@
 """Stages and gates of the agent flow. The rules are baked in here, not in prompts."""
+from collections.abc import Callable
 from typing import Any
 
 import httpx
@@ -105,7 +106,8 @@ class Workflow:
         raise WorkflowError(f"task {task_id} not found on the board of project {self.project_id}")
 
     def _unfinished_predecessors(
-        self, task_id: int, board: list[dict] | None = None
+        self, task_id: int, board: list[dict] | None = None,
+        resolve_full: Callable[[], list[dict]] | None = None,
     ) -> list[dict]:
         """Predecessors of `task_id` that are NOT yet ready (still below Review) and so must
         reach Review/Done before this task may be started. A predecessor is any task linked from
@@ -113,12 +115,26 @@ class Workflow:
         parenttask is deliberately excluded, so an old epic whose children carry only a parenttask
         link yields [] and stays claimable (the migration guard). Each entry: {id, ref, title,
         stage}, deduped by id. A task with no follows/blocked relation returns [] without arming
-        the gate. Pass a pre-fetched full board (raw _board()) to reuse one snapshot for stages."""
-        full = self._board() if board is None else board
+        the gate. Pass a pre-fetched board (raw _board()) to reuse one snapshot for stages.
+
+        resolve_full (#126): a memoised getter for the EXHAUSTIVE board, supplied by next_task,
+        which resolves stages against its LIGHT board (require_titles=NEXT_TASK_STAGES — Backlog/
+        Your Call/Done are not exhaustively paged, #43). On that light board a predecessor that is
+        simply absent is NOT provably deleted: it may sit in an unpaged Backlog/Your Call/Done
+        bucket. So before ruling "gone -> not a blocker" we consult resolve_full() — the same full
+        board claim/advance read — and treat the predecessor as gone only if it is missing there
+        too. resolve_full is memoised by the caller, so the full board is fetched AT MOST ONCE per
+        next_task (a 1->2 view_tasks escalation, and only when a predecessor is genuinely off the
+        light board — never per candidate); the common no-off-board-predecessor path never calls
+        it, preserving the #43/#105 single fetch. claim/advance pass the full board and OMIT
+        resolve_full, so their verdict is unchanged — this makes next_task agree with them by
+        construction instead of by keeping three bucket-sets in sync by hand."""
+        base = self._board() if board is None else board
         stage_by_id = {
             t["id"]: (t, bucket["title"])
-            for bucket in full for t in (bucket.get("tasks") or [])
+            for bucket in base for t in (bucket.get("tasks") or [])
         }
+        full_stage_by_id: dict[int, tuple[dict, str]] | None = None
         related = self.api.get_task(task_id).get("related_tasks") or {}
         unfinished: list[dict] = []
         seen: set[int] = set()
@@ -129,8 +145,17 @@ class Workflow:
                     continue
                 seen.add(pid)
                 found = stage_by_id.get(pid)
+                if found is None and resolve_full is not None:
+                    # light-board absence is NOT deletion — disambiguate against the exhaustive
+                    # board (fetched at most once via the memoised resolve_full) before ruling gone
+                    if full_stage_by_id is None:
+                        full_stage_by_id = {
+                            t["id"]: (t, bucket["title"])
+                            for bucket in resolve_full() for t in (bucket.get("tasks") or [])
+                        }
+                    found = full_stage_by_id.get(pid)
                 if found is None or found[1] in READY_STAGES:
-                    continue  # gone from the board, or already ready -> not a blocker
+                    continue  # genuinely gone (absent even from the full board) or already ready
                 pred_task, pred_stage = found
                 unfinished.append({
                     "id": pid, "ref": self._ref(pred_task),
@@ -306,6 +331,22 @@ class Workflow:
                 ),
             }
 
+        # #126: exhaustive-board escalation for the sequence gate, memoised to AT MOST ONE fetch
+        # per next_task. The board above is LIGHT (NEXT_TASK_STAGES omits Backlog/Your Call/Done,
+        # #43), so a predecessor absent from it is not provably gone — it may sit in an unpaged
+        # bucket. resolve_full lets _unfinished_predecessors consult the full board (the same one
+        # claim/advance read) before ruling "not a blocker", so next_task's verdict matches claim's
+        # BY CONSTRUCTION, not by keeping bucket-sets in sync by hand. Fetched lazily: when every
+        # predecessor is already on the light board (the common case — a ready head sits at Review,
+        # which IS in NEXT_TASK_STAGES) it is never called, so next_task still issues exactly one
+        # view_tasks (the #43 latency win and the #105 single-fetch measurement both hold).
+        full_board: dict[str, list[dict]] = {}
+
+        def resolve_full() -> list[dict]:
+            if "board" not in full_board:
+                full_board["board"] = self._board()  # exhaustive: all buckets, incl Backlog/YC/Done
+            return full_board["board"]
+
         # Queue-контракт: свободные берём, назначенные на другого НЕ трогаем — это «для людей».
         # epic-контейнер тоже пропускаем (по аналогии с blocked): родитель с меткой epic и живыми
         # детьми — это контейнер, а не работа, клеймить его бессмысленно (ровно баг из #94, где
@@ -329,7 +370,7 @@ class Workflow:
         # full-board gate backstops the rare Backlog-beyond-page-1 case (never a silent pass).
         gated: list[tuple[dict, list[dict]]] = []
         for t in queue:
-            blockers = self._unfinished_predecessors(t["id"], board=raw)
+            blockers = self._unfinished_predecessors(t["id"], board=raw, resolve_full=resolve_full)
             if not blockers:
                 return {
                     "resume": False, "task": self._summary(t),
@@ -357,9 +398,9 @@ class Workflow:
             # Reuse the ONE board snapshot (raw); the walk is bounded and provably terminating
             # (see _find_predecessor_cycle). A cycle anywhere on the board can NOT suppress a
             # genuinely claimable free task — the loop above already RETURNED it before here.
-            cycle = self._find_predecessor_cycle(gated, raw)
+            cycle = self._find_predecessor_cycle(gated, raw, resolve_full=resolve_full)
             if cycle is not None:
-                return self._cycle_signal(cycle, raw)
+                return self._cycle_signal(cycle, full_board.get("board", raw))
             return self._starving_tail(gated)
         return {"task": None, "message": "the queue is empty — no work for the agent"}
 
@@ -426,7 +467,8 @@ class Workflow:
         }
 
     def _find_predecessor_cycle(
-        self, gated: list[tuple[dict, list[dict]]], board: list[dict]
+        self, gated: list[tuple[dict, list[dict]]], board: list[dict],
+        resolve_full: Callable[[], list[dict]] | None = None,
     ) -> list[int] | None:
         """DFS over UNFINISHED-predecessor edges from the gated Queue candidates; return the ids
         on the first cycle found (a back-edge into the current path), else None. A cycle can only
@@ -451,7 +493,9 @@ class Workflow:
         def preds(tid: int) -> list[int]:
             if tid not in preds_cache:
                 preds_cache[tid] = [
-                    p["id"] for p in self._unfinished_predecessors(tid, board=board)
+                    p["id"] for p in self._unfinished_predecessors(
+                        tid, board=board, resolve_full=resolve_full
+                    )
                 ]
             return preds_cache[tid]
 
