@@ -12,6 +12,33 @@ from vikunja_mcp.workflow import Workflow, WorkflowError
 
 mcp = FastMCP("vikunja-tracker")
 
+# A 401/403 from Vikunja is a CREDENTIAL problem, not a transient one — but a bare
+# "Vikunja API 401" reads like a session hiccup and invites a pointless /mcp reconnect
+# or server restart. Real incident: a token missing the `projects:views_buckets` group
+# let reads + comment through but 401'd every stage transition (advance/claim/
+# review_task move kanban buckets); the agent misdiagnosed it as a "stuck credential"
+# and told the operator to restart the server — which CANNOT help, since a token's
+# scopes are fixed at mint time. Spell out the scope and the real remedy here (server.py
+# owns "clear errors") so this can't be misread again. The raw server text is appended.
+_AUTH_GUIDANCE = {
+    401: (
+        "Vikunja API 401 (unauthorized) — a token PERMISSION/SCOPE problem, not a "
+        "transient or session error. The token authenticates (reads/comment may still "
+        "work) but is not authorized for THIS endpoint. This server needs the token "
+        "permission groups `other:user` and `projects:views_buckets` — the latter gates "
+        "every stage transition (advance/claim/review_task/… move kanban buckets). A "
+        "/mcp reconnect or a full server RESTART will NOT help: a token's scopes are "
+        "fixed when it is minted. Remedy: re-mint the token with those groups and "
+        "repoint the config"
+    ),
+    403: (
+        "Vikunja API 403 (forbidden) — the token authenticates but its user lacks "
+        "permission on this project/resource (e.g. a read-only share). Not a scope or "
+        "restart problem: grant the user write access, or use an agent-owned / "
+        "admin-shared project"
+    ),
+}
+
 _workflow: Workflow | None = None
 
 
@@ -39,6 +66,9 @@ def _tool(fn):
         except (WorkflowError, ConfigError) as e:
             return {"error": str(e)}
         except VikunjaError as e:
+            guidance = _AUTH_GUIDANCE.get(e.status)
+            if guidance:
+                return {"error": f"{guidance} [server said: {e.message}]"}
             return {"error": f"Vikunja API: {e.status} {e.message}"}
         except httpx.HTTPError as e:
             return {
