@@ -18,12 +18,18 @@ PASSWORD = "integr4tion-Pass!"
 # - "projects": добавлен "views_buckets" (GET .../buckets) — без него api.buckets()
 #   (список колонок канбана) 401-ит; "views_buckets_tasks" (move) уже был в списке,
 #   но одного move недостаточно — Workflow._bucket() сначала читает список.
+# - "tasks_attachments": ["read_one"] (#139) — скачивание вложения это
+#   GET /tasks/:task/attachments/:attachment, а в /routes этот эндпоинт висит на op
+#   `read_one` (НЕ `read`; `read_all` — это листинг GET .../attachments). Без него
+#   Workflow.download_attachment 401-ит. Человек уже добавил его боевым агент-токенам
+#   (карточка #139), так что это держит скоуп-токен теста в синхроне с продом.
 AGENT_PERMS = {
     "tasks": ["read_all", "read_one", "create", "update", "position"],
     "tasks_assignees": ["create", "delete", "read_all"],
     "tasks_comments": ["create", "read_all", "read_one"],
     "tasks_labels": ["create", "read_all"],
     "tasks_relations": ["create", "delete"],
+    "tasks_attachments": ["read_one"],
     "projects": ["read_all", "read_one", "views_buckets", "views_buckets_tasks"],
     "projects_views": ["read_all", "read_one"],
     "projects_views_tasks": ["read_all"],

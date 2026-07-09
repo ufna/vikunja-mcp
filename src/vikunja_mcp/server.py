@@ -124,8 +124,21 @@ def claim(task_id: int) -> dict:
 @_tool
 def get_task(task_id: int) -> dict:
     """Task dossier: full (untruncated) description, stage, assignees, labels, related
-    (linked tasks by relation kind) and all comments."""
+    (linked tasks by relation kind), attachments (metadata only — {id, name, mime, size};
+    a card may be nothing but a screenshot, so CHECK this and download_attachment it rather
+    than guessing from an empty description) and all comments."""
     return _wf().get_task(task_id)
+
+
+@mcp.tool()
+@_tool
+def download_attachment(task_id: int, attachment_id: int) -> dict:
+    """Download a task attachment to a temp file and return its PATH — then Read the path to
+    view it (a PNG/JPG renders visually; text/PDF opens as text). The path is returned instead
+    of base64 so the file never bloats the context. attachment_id is the `id` from get_task's
+    attachments[] (not the filename). Errors are actionable: a wrong id lists the task's real
+    attachments; an oversized file is refused with its size before downloading."""
+    return _wf().download_attachment(task_id, attachment_id)
 
 
 @mcp.tool()

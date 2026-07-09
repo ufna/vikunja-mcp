@@ -88,6 +88,33 @@ def test_comments_and_assignees_endpoints():
     ]
 
 
+def test_download_attachment_returns_raw_bytes_not_json():
+    """#139: the download endpoint streams the file itself, not JSON — download_attachment
+    returns the bytes verbatim (r.json() would blow up on a binary body). `attachment_id`
+    is the attachment's own id, so the URL is /tasks/{id}/attachments/{attachment_id}."""
+    def handler(request):
+        assert request.method == "GET"
+        assert request.url.path.endswith("/tasks/5/attachments/7")
+        return httpx.Response(200, content=b"\x89PNG\r\n\x1a\nrawbytes")
+
+    api = make_api(handler)
+    data = api.download_attachment(5, 7)
+    assert data == b"\x89PNG\r\n\x1a\nrawbytes"
+    assert isinstance(data, bytes)
+
+
+def test_download_attachment_404_raises_vikunja_error():
+    def handler(request):
+        return httpx.Response(
+            404, json={"code": 4011, "message": "This task attachment does not exist."}
+        )
+
+    api = make_api(handler)
+    with pytest.raises(VikunjaError) as exc:
+        api.download_attachment(5, 999)
+    assert exc.value.status == 404
+
+
 def test_add_comment_sends_html_not_raw_plain_text():
     # #85: the comment field is HTML — add_comment must convert agent plain text to
     # structure-preserving, escaped HTML on the wire, not ship raw newlines/'<'.
@@ -185,6 +212,22 @@ def test_429_is_retried_even_for_put_create(no_sleep):
     api = make_api(handler)
     assert api.create_task(3, "t")["id"] == 9
     assert calls["n"] == 2   # 429 retried once, then created exactly once
+
+
+def test_raw_download_inherits_get_retry_on_transient_5xx(no_sleep):
+    """#139: the raw download goes through _req(raw=True), so it inherits the #86 GET
+    retry/backoff — a transient 5xx is retried, then the bytes come back."""
+    calls = {"n": 0}
+
+    def handler(request):
+        calls["n"] += 1
+        if calls["n"] < 2:
+            return httpx.Response(503, json={"message": "unavailable"})
+        return httpx.Response(200, content=b"filebytes")
+
+    api = make_api(handler)
+    assert api.download_attachment(1, 1) == b"filebytes"
+    assert calls["n"] == 2   # one transient failure retried, then success
 
 
 def test_connection_drop_retried_for_get_not_for_put(no_sleep):

@@ -1,5 +1,9 @@
 """Stages and gates of the agent flow. The rules are baked in here, not in prompts."""
+import os
+import shutil
 import sys
+import tempfile
+import time
 from collections.abc import Callable
 from typing import Any
 
@@ -36,6 +40,57 @@ PREDECESSOR_RELATION_KINDS = ("follows", "blocked")
 
 # advance: to -> (откуда, куда)
 AGENT_ADVANCE = {"build": ("Design", "Build"), "review": ("Build", "Review")}
+
+# --- вложения: временные файлы (download_attachment, #139) ---
+# Скачанные вложения кладём в один выделенный temp-каталог, КАЖДОЕ скачивание — в свой
+# mkdtemp-подкаталог, чтобы файл сохранял ТОЧНОЕ исходное имя (рендерер образов у агента
+# ключуется на расширении .png/.jpg), и два файла с одним именем из разных задач не затирали
+# друг друга. Никто не удаляет файл сразу после записи — агент читает его Read-ом секундами
+# позже, — поэтому чистка это best-effort TTL-подметание на КАЖДОМ вызове: подкаталоги старше
+# _ATTACHMENT_TTL сносятся (только что записанный всегда свежий, под нож не попадёт). Так течь
+# ограничена ~одним TTL скачиваний БЕЗ фонового потока и БЕЗ atexit (который на долгоживущем
+# stdio-сервере не срабатывает до его остановки). Размер режем ДО скачивания по метаданным.
+_ATTACHMENT_ROOT = os.path.join(tempfile.gettempdir(), "vikunja-mcp-attachments")
+_ATTACHMENT_TTL = 3600  # сек: подкаталоги скачиваний старше этого best-effort сносятся
+_MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024  # 25 МБ: щедро для скринов/доков, отсекает рантаймы
+
+
+def _sweep_old_attachments(now: float) -> None:
+    """Best-effort: снести подкаталоги скачиваний старше _ATTACHMENT_TTL. Полностью
+    защищено — чистка временных файлов не имеет права уронить вызов тулзы."""
+    try:
+        entries = os.listdir(_ATTACHMENT_ROOT)
+    except OSError:
+        return
+    for entry in entries:
+        path = os.path.join(_ATTACHMENT_ROOT, entry)
+        try:
+            if now - os.path.getmtime(path) > _ATTACHMENT_TTL:
+                shutil.rmtree(path, ignore_errors=True)
+        except OSError:
+            pass
+
+
+def _safe_attachment_name(name: str, fallback: str) -> str:
+    """Имя файла от сервера НЕ должно уводить запись за пределы temp-каталога (path
+    traversal). Оставляем только basename (нормализовав и обратные слэши — на POSIX
+    os.path.basename их не режет); пустое или всё из точек ('', '.', '..') -> fallback."""
+    base = os.path.basename((name or "").replace("\\", "/").strip().rstrip("/"))
+    if not base or set(base) <= {"."}:
+        return fallback
+    return base
+
+
+def _write_attachment_to_temp(name: str, data: bytes, fallback: str) -> str:
+    """Записать байты вложения во СВЕЖИЙ per-download подкаталог под _ATTACHMENT_ROOT,
+    сохранив исходное имя, и вернуть путь. Попутно best-effort подметает старые скачивания."""
+    os.makedirs(_ATTACHMENT_ROOT, exist_ok=True)
+    _sweep_old_attachments(time.time())
+    dest_dir = tempfile.mkdtemp(dir=_ATTACHMENT_ROOT)
+    path = os.path.join(dest_dir, _safe_attachment_name(name, fallback))
+    with open(path, "wb") as fh:
+        fh.write(data)
+    return path
 
 
 class WorkflowError(Exception):
@@ -1021,7 +1076,10 @@ class Workflow:
 
     def get_task(self, task_id: int) -> dict:
         """Full dossier: unlike _summary (next_task/claim), the description is NOT
-        truncated and related is added — a compact dict {relation_kind: [{"id", "title"}, ...]}."""
+        truncated and related is added — a compact dict {relation_kind: [{"id", "title"}, ...]}.
+        attachments lists each file's METADATA only ({id, name, mime, size}) — no bytes, so a
+        card that is nothing but a screenshot is SEEN, not guessed at; fetch the bytes with
+        download_attachment(task_id, attachment_id) using the `id` here."""
         _, stage = self._find_task(task_id)
         task = self.api.get_task(task_id)
         raw_comments = self.api.comments(task_id)
@@ -1030,6 +1088,20 @@ class Workflow:
             kind: [{"id": rt["id"], "title": rt["title"]} for rt in items]
             for kind, items in related_raw.items()
         }
+        # attachments come INSIDE the task JSON (tasks:read_one, no extra scope), each
+        # {id, task_id, file:{name,mime,size}}; the server sends None (not []) when there are
+        # none. Surface METADATA ONLY — the bytes would bloat every dossier (the point is the
+        # agent SEES "shot.png (image/png)" and chooses whether to download_attachment it). `id`
+        # is the attachment id download_attachment keys off (NOT file.id), so it is load-bearing.
+        attachments = [
+            {
+                "id": a.get("id"),
+                "name": (a.get("file") or {}).get("name"),
+                "mime": (a.get("file") or {}).get("mime"),
+                "size": (a.get("file") or {}).get("size"),
+            }
+            for a in task.get("attachments") or []
+        ]
         return {
             "id": task["id"],
             "ref": self._ref(task),
@@ -1040,6 +1112,7 @@ class Workflow:
             "assignees": [a.get("username", "?") for a in task.get("assignees") or []],
             "labels": [lb.get("title") for lb in task.get("labels") or []],
             "related": related,
+            "attachments": attachments,
             # comments are stored as HTML (#85); render back to plain text so the agent
             # reads clean multiline text (the human reads the formatted HTML in the UI).
             "comments": [
@@ -1047,4 +1120,47 @@ class Workflow:
                  "text": html_to_text(c.get("comment", ""))}
                 for c in raw_comments
             ],
+        }
+
+    def download_attachment(self, task_id: int, attachment_id: int) -> dict:
+        """Download a task attachment's bytes to a TEMP FILE and return its path (an agent then
+        Reads the path — a PNG/JPG renders visually — instead of a base64 blob that bloats the
+        context). `attachment_id` is the id from get_task's attachments[] (NOT the filename).
+        Fails in agent-actionable ways: a wrong/absent id lists the task's real attachments; an
+        oversized file (metadata size > cap) is refused BEFORE downloading, naming the size."""
+        self._find_task(task_id)  # same board membership check as get_task/comment
+        task = self.api.get_task(task_id)
+        attachments = task.get("attachments") or []
+        match = next((a for a in attachments if a.get("id") == attachment_id), None)
+        if match is None:
+            available = ", ".join(
+                f"#{a.get('id')} {(a.get('file') or {}).get('name')}" for a in attachments
+            ) or "none"
+            raise WorkflowError(
+                f"task {task_id} has no attachment #{attachment_id} — its attachments are: "
+                f"{available}. Use the `id` from get_task's attachments[]"
+            )
+        file_meta = match.get("file") or {}
+        name = file_meta.get("name") or f"attachment-{attachment_id}"
+        # size cap read from METADATA, BEFORE downloading — so a runaway file fails fast and
+        # actionably instead of pulling GBs into a temp file / the agent's context.
+        size = file_meta.get("size")
+        if isinstance(size, int) and size > _MAX_ATTACHMENT_BYTES:
+            raise WorkflowError(
+                f"attachment #{attachment_id} ({name}) is {size} bytes — over the "
+                f"{_MAX_ATTACHMENT_BYTES}-byte download cap. Fetch it directly from the tracker "
+                f"UI instead of pulling it into the agent context"
+            )
+        data = self.api.download_attachment(task_id, attachment_id)
+        path = _write_attachment_to_temp(name, data, fallback=f"attachment-{attachment_id}")
+        return {
+            "path": path,
+            "name": name,
+            "mime": file_meta.get("mime"),
+            "size": len(data),
+            "note": (
+                "Read this path to view the file — an image (PNG/JPG) renders visually, a "
+                "text/PDF opens as text. It sits in a temp dir and is cleaned up automatically; "
+                "Read it now rather than saving the path for later"
+            ),
         }

@@ -40,7 +40,10 @@ class VikunjaAPI:
     _BACKOFF_BASE = 0.5
     _BACKOFF_CAP = 8.0
 
-    def _req(self, method: str, path: str, json: Any = None, params: dict | None = None) -> Any:
+    def _req(
+        self, method: str, path: str, json: Any = None, params: dict | None = None,
+        raw: bool = False,
+    ) -> Any:
         method = method.upper()
         for attempt in range(self._MAX_RETRIES + 1):
             final = attempt == self._MAX_RETRIES
@@ -57,6 +60,11 @@ class VikunjaAPI:
                 continue
             if r.status_code >= 400:
                 raise VikunjaError(r.status_code, r.text[:300])
+            # raw=True: тело — НЕ JSON (эндпоинт скачивания вложения отдаёт сырые байты
+            # файла с content-type/content-disposition), поэтому возвращаем r.content как
+            # есть, минуя r.json() (который бы упал на бинарнике). См. download_attachment.
+            if raw:
+                return r.content
             return r.json() if r.content else None
         raise AssertionError("unreachable: последняя попытка всегда вернёт или поднимет")
 
@@ -93,6 +101,20 @@ class VikunjaAPI:
             "PUT", f"/projects/{project_id}/tasks",
             json={"title": title, "description": description, "priority": priority},
         )
+
+    # --- attachments ---
+    # Task attachments arrive INSIDE the task JSON under the existing tasks:read_one scope
+    # (task["attachments"] = [{id, task_id, file:{id,name,mime,size}, ...}], or None when the
+    # task has none — verified on real 2.3.0), so listing metadata needs no extra call. Only
+    # DOWNLOADING the bytes hits a separate endpoint and needs the tasks_attachments:read scope.
+    def download_attachment(self, task_id: int, attachment_id: int) -> bytes:
+        """Raw bytes of a task attachment. `attachment_id` is the attachment's OWN id
+        (task["attachments"][].id, surfaced by workflow.get_task), NOT the nested file.id.
+        GET /tasks/{id}/attachments/{attachment_id} streams the file itself, not JSON, so it
+        goes through _req(raw=True) — same GET retry/backoff, but the body is returned
+        verbatim. Needs the tasks_attachments:read token scope; a wrong task or attachment id
+        surfaces as VikunjaError(404)."""
+        return self._req("GET", f"/tasks/{task_id}/attachments/{attachment_id}", raw=True)
 
     # --- comments ---
     def comments(self, task_id: int) -> list[dict]:

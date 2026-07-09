@@ -1,6 +1,7 @@
 """In-memory дублёр VikunjaAPI для unit-тестов workflow/setup."""
 import itertools
 
+from vikunja_mcp.api import VikunjaError
 from vikunja_mcp.formatting import html_to_text, text_to_html
 
 # Real Vikunja 2.3.0 auto-creates the reciprocal relation on the OTHER task: write one side
@@ -32,6 +33,8 @@ class FakeAPI:
             self.add_bucket(title)
         self.tasks = {}          # id -> task dict (assignees/labels: списки dict'ов)
         self.task_bucket = {}    # task_id -> bucket_id
+        self._attachments = {}   # task_id -> [{"id", "task_id", "file": {...}}]
+        self._attachment_bytes = {}  # (task_id, attachment_id) -> bytes
         self._comments = {}      # task_id -> [{"comment", "author"}]
         self._labels = []
         self.relations = []      # (task_id, other_id, kind)
@@ -71,6 +74,23 @@ class FakeAPI:
         self.tasks[t["id"]] = t
         self.task_bucket[t["id"]] = self.bucket_id(bucket_title)
         return t
+
+    def add_attachment(self, task_id, name, mime, data=b"", size=None):
+        """Test helper: attach a file to a task, mirroring real 2.3.0's shape — each entry is
+        {id, task_id, file:{id, name, mime, size}} and the download endpoint keys off the
+        OUTER id (attachment id), not file.id. `size` overrides the metadata size (defaults to
+        len(data)) so a test can exercise the too-large guard without a giant buffer."""
+        aid = next(self._ids)
+        att = {
+            "id": aid, "task_id": task_id,
+            "file": {
+                "id": aid, "name": name, "mime": mime,
+                "size": len(data) if size is None else size,
+            },
+        }
+        self._attachments.setdefault(task_id, []).append(att)
+        self._attachment_bytes[(task_id, aid)] = data
+        return att
 
     def stage_of(self, task_id):
         bid = self.task_bucket[task_id]
@@ -117,7 +137,24 @@ class FakeAPI:
                 inverse = _INVERSE_RELATION.get(kind, kind)
                 related.setdefault(inverse, []).append(self._related_subdict(self.tasks[tid]))
         t["related_tasks"] = related
+        # attachments arrive INSIDE the task JSON (tasks:read_one), each {id, task_id,
+        # file:{name,mime,size}}. Mirror the real server EXACTLY: a task with NONE reads back
+        # `attachments: None` (not []), so workflow.get_task must tolerate the None (verified
+        # against real 2.3.0). Copy so a test mutating the dossier can't corrupt fake state.
+        atts = self._attachments.get(task_id)
+        t["attachments"] = (
+            [{**a, "file": dict(a["file"])} for a in atts] if atts else None
+        )
         return t
+
+    def download_attachment(self, task_id, attachment_id):
+        # keyed off the OUTER attachment id (task["attachments"][].id), 1:1 with the real
+        # endpoint GET /tasks/{id}/attachments/{attachment_id}; a missing pair 404s like the
+        # server (code 4011/4002) rather than KeyError-ing.
+        data = self._attachment_bytes.get((task_id, attachment_id))
+        if data is None:
+            raise VikunjaError(404, "This task attachment does not exist.")
+        return data
 
     def update_task(self, task_id, **fields):
         self.tasks[task_id].update(fields)

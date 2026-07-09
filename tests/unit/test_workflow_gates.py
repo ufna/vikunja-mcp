@@ -1,9 +1,12 @@
+import os
+import time
+
 import pytest
 
 from tests.unit.fakes import FakeAPI
 from vikunja_mcp.api import VikunjaError
 from vikunja_mcp.formatting import html_to_text
-from vikunja_mcp.workflow import STAGES, Workflow, WorkflowError
+from vikunja_mcp.workflow import _ATTACHMENT_TTL, STAGES, Workflow, WorkflowError
 
 
 @pytest.fixture
@@ -570,3 +573,100 @@ def test_fake_remove_label_idempotent_and_mirrors_client(env):
     api.remove_label(t["id"], lb["id"])
     api.remove_label(t["id"], 123456)
     assert "reviewed" not in _label_titles(api, t["id"])
+
+
+# --- вложения: get_task.attachments + download_attachment (#139) ---------------------
+
+
+@pytest.fixture
+def att_root(tmp_path, monkeypatch):
+    """Redirect downloaded-attachment temp files under pytest's tmp_path so tests don't
+    litter the real system temp dir — prod deliberately leaves them for the TTL sweep."""
+    root = tmp_path / "att-root"
+    monkeypatch.setattr("vikunja_mcp.workflow._ATTACHMENT_ROOT", str(root))
+    return root
+
+
+def test_get_task_surfaces_attachment_metadata(env):
+    """#139 Part 1: an agent SEES a card's files ({id,name,mime,size}) instead of guessing —
+    metadata only (no bytes), read from the raw task JSON under the existing read scope."""
+    api, wf, t = env
+    data = b"\x89PNG\r\n\x1a\nfake"
+    att = api.add_attachment(t["id"], "shot.png", "image/png", data)
+    dossier = wf.get_task(t["id"])
+    assert dossier["attachments"] == [
+        {"id": att["id"], "name": "shot.png", "mime": "image/png", "size": len(data)}
+    ]
+
+
+def test_get_task_attachments_empty_list_when_none(env):
+    """No attachments -> [] (the real server sends None; the dossier normalizes it), consistent
+    with related/labels/assignees always being present even when empty."""
+    api, wf, t = env
+    assert wf.get_task(t["id"])["attachments"] == []
+
+
+def test_download_attachment_writes_temp_file_with_original_name(env, att_root):
+    """#139 Part 2: returns the PATH to a temp file that keeps the ORIGINAL filename (an image
+    renderer keys off the .png extension) and holds the EXACT bytes; size/mime reported too."""
+    api, wf, t = env
+    data = b"\x89PNG\r\n\x1a\nrealish-bytes"
+    att = api.add_attachment(t["id"], "screenshot.png", "image/png", data)
+    res = wf.download_attachment(t["id"], att["id"])
+    assert os.path.basename(res["path"]) == "screenshot.png"   # extension preserved
+    assert res["path"].startswith(str(att_root))               # under the dedicated temp root
+    assert os.path.isfile(res["path"])
+    with open(res["path"], "rb") as fh:
+        assert fh.read() == data                               # exact bytes on disk
+    assert res["name"] == "screenshot.png"
+    assert res["mime"] == "image/png"
+    assert res["size"] == len(data)
+
+
+def test_download_attachment_unknown_id_lists_available(env, att_root):
+    """A wrong attachment id fails actionably — naming the task's real attachments — not a bare
+    404 the agent can't act on."""
+    api, wf, t = env
+    api.add_attachment(t["id"], "a.png", "image/png", b"x")
+    with pytest.raises(WorkflowError, match="no attachment"):
+        wf.download_attachment(t["id"], 987654)
+
+
+def test_download_attachment_when_task_has_none(env, att_root):
+    api, wf, t = env
+    with pytest.raises(WorkflowError, match="no attachment"):
+        wf.download_attachment(t["id"], 1)
+
+
+def test_download_attachment_refuses_oversized_before_download(env, att_root):
+    """A huge file is refused via its METADATA size BEFORE any bytes are pulled — actionable,
+    not a memory blowup. Stored bytes stay tiny; only the reported metadata size is large."""
+    api, wf, t = env
+    att = api.add_attachment(
+        t["id"], "huge.bin", "application/octet-stream", b"x", size=26 * 1024 * 1024
+    )
+    with pytest.raises(WorkflowError, match="cap"):
+        wf.download_attachment(t["id"], att["id"])
+
+
+def test_download_attachment_sanitizes_traversal_filename(env, att_root):
+    """A crafted filename can't escape the temp dir — only the basename is used, so the file
+    lands INSIDE the per-download temp subdir, never at the traversal target."""
+    api, wf, t = env
+    att = api.add_attachment(t["id"], "../../../../etc/evil.png", "image/png", b"data")
+    res = wf.download_attachment(t["id"], att["id"])
+    assert os.path.basename(res["path"]) == "evil.png"   # only the basename survives
+    assert res["path"].startswith(str(att_root))         # stays under the temp root
+
+
+def test_download_attachment_sweeps_stale_temp_dirs(env, att_root):
+    """The best-effort TTL sweep reaps a PREVIOUS download's dir on the next call, bounding the
+    leak — without deleting a fresh file the agent is about to Read."""
+    api, wf, t = env
+    att = api.add_attachment(t["id"], "a.png", "image/png", b"x")
+    stale_dir = os.path.dirname(wf.download_attachment(t["id"], att["id"])["path"])
+    old = time.time() - (_ATTACHMENT_TTL + 60)
+    os.utime(stale_dir, (old, old))                      # backdate past the TTL
+    fresh = wf.download_attachment(t["id"], att["id"])["path"]
+    assert not os.path.exists(stale_dir)                 # stale reaped by the sweep
+    assert os.path.exists(fresh)                         # the just-written one kept

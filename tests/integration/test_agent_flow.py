@@ -1,5 +1,8 @@
+import io
+import os
 import uuid
 
+import httpx
 import pytest
 
 from tests.integration.conftest import BASE, mint_scoped_token
@@ -97,6 +100,38 @@ def test_call_human_return_and_decompose(project):
         assert t3["id"] in [p["id"] for p in parents]
     d3 = wf1.get_task(t3["id"])
     assert d3["stage"] == "Backlog" and "epic" in d3["labels"]
+
+
+def test_attachment_metadata_and_scoped_download(project, boss_jwt):
+    """#139 end-to-end vs real 2.3.0: the boss uploads a PNG to a task; the agent (SCOPED token,
+    tasks_attachments:read_one) SEES it in get_task's attachments (metadata only) and downloads
+    the EXACT bytes to a temp file with the original name. Guards the #125/#118 fake-agrees-with-
+    fake trap — a unit test against FakeAPI proves neither the real endpoint shape nor the scope."""
+    boss, _, enqueue, wf1, _ = project
+    t = enqueue("карточка со скриншотом")
+    png = bytes.fromhex("89504e470d0a1a0a") + b"real-png-body"
+    up = httpx.put(
+        f"{BASE}/api/v1/tasks/{t['id']}/attachments",
+        headers={"Authorization": f"Bearer {boss_jwt}"},
+        files={"files": ("shot.png", io.BytesIO(png), "image/png")},
+    )
+    up.raise_for_status()
+
+    # Part 1: the agent sees the metadata (no bytes) via the dossier
+    dossier = wf1.get_task(t["id"])
+    att = next(a for a in dossier["attachments"] if a["name"] == "shot.png")
+    assert att["mime"] == "image/png" and att["size"] == len(png)
+
+    # Part 2: the agent downloads the exact bytes to a temp file keeping the original name
+    res = wf1.download_attachment(t["id"], att["id"])
+    assert os.path.basename(res["path"]) == "shot.png"          # extension preserved
+    with open(res["path"], "rb") as fh:
+        assert fh.read() == png                                  # exact bytes over the real wire
+    assert res["size"] == len(png) and res["mime"] == "image/png"
+
+    # a wrong attachment id fails actionably (lists the real ones), not a bare 404
+    with pytest.raises(WorkflowError, match="no attachment"):
+        wf1.download_attachment(t["id"], 999999)
 
 
 def test_remove_label_round_trip(project):
