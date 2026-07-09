@@ -165,3 +165,21 @@ def test_marked_epic_still_skipped_by_next_task_and_refused_by_claim(env):
     assert wf.next_task()["task"]["id"] == free["id"]      # marked epic not offered
     with pytest.raises(WorkflowError, match="container"):
         wf.claim(epic["id"])                                # marked epic still refused
+
+
+# --- fake fidelity: the fake must hollow related sub-dicts like the real server (#125 guard) ---
+
+def test_fake_hollows_related_subdicts_like_the_real_server(env):
+    """The reason this whole rework happened: real Vikunja 2.3.0 returns tasks embedded in
+    related_tasks HOLLOWED (labels/assignees/nested related_tasks = None; only scalars survive), but
+    the fake once returned them fully — so the marker's happy-path tests were vacuously green while
+    production was dead (#125). Pin the fake honest so a future edit can't silently re-inflate it and
+    re-vacuum these tests. The integration test is the end-to-end proof against a real server; this
+    is the cheap unit guard on the fake itself."""
+    api, wf = env
+    epic, (child,) = _epic(api, ["Build"])
+    sub = ((api.get_task(child["id"]).get("related_tasks") or {}).get("parenttask") or [{}])[0]
+    assert sub.get("id") == epic["id"]        # the relation + scalar id survive (so id-reads still work)
+    assert sub.get("labels") is None          # ...but labels/assignees/relations are hollowed, as on the server
+    assert sub.get("assignees") is None
+    assert sub.get("related_tasks") is None

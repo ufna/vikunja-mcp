@@ -691,11 +691,20 @@ class Workflow:
             for bucket in board for t in (bucket.get("tasks") or [])
         }
         for parent in parents:
-            if not self._has_label(parent, LABEL_EPIC):
+            # `parent` here is a related_tasks SUB-DICT, and the real server HOLLOWS those — labels/
+            # assignees/nested related_tasks come back as None even when the task carries them (only
+            # scalars survive; verified on real 2.3.0, #118 rework). So its labels can NOT be read
+            # here — doing so silently no-op'd the marker in production while the too-generous fake
+            # stayed green (#125). Re-fetch the FULL parent and read labels (both epic and the
+            # idempotency marker) off IT. This is the same get_task the sibling read already needs,
+            # so it is ZERO extra calls in the epic case (one hoisted, not added); for a non-epic
+            # parent it costs +1 get_task, which is fine (best-effort, off next_task's hot path).
+            full_parent = self.api.get_task(parent["id"])
+            if not self._has_label(full_parent, LABEL_EPIC):
                 continue  # parent isn't an epic container — not ours to mark
-            if self._has_label(parent, LABEL_EPIC_READY):
+            if self._has_label(full_parent, LABEL_EPIC_READY):
                 continue  # already marked — idempotent (a bounced+re-advanced child won't re-fire)
-            siblings = (self.api.get_task(parent["id"]).get("related_tasks") or {}).get("subtask") or []
+            siblings = (full_parent.get("related_tasks") or {}).get("subtask") or []
             if not siblings:
                 continue
             all_ready = all(

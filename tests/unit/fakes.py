@@ -86,22 +86,36 @@ class FakeAPI:
     def me(self):
         return self.me_user
 
+    @staticmethod
+    def _related_subdict(task):
+        """Mirror real Vikunja 2.3.0: a task embedded inside another task's `related_tasks` is
+        HOLLOWED — `labels`, `assignees` and nested `related_tasks` come back as None even when the
+        task genuinely carries them; only scalars (id, title, done, identifier, index, description,
+        priority, ...) survive. A caller that needs a related task's labels/assignees/relations MUST
+        re-fetch it with get_task(id). Verified against a real container in the #118 Part 2 rework:
+        the epic marker read a related sub-dict's `labels`, which the too-generous fake returned
+        FULLY populated, so the fake agreed with the fake — 12 unit tests were green while the
+        feature was dead in production (the exact #125 failure mode). Keep this hollow to stay 1:1
+        with the server (a CLAUDE.md invariant); being MORE generous than reality is worse than
+        being less capable."""
+        return {**task, "labels": None, "assignees": None, "related_tasks": None}
+
     def get_task(self, task_id):
         t = dict(self.tasks[task_id])
-        # зеркалим реальную vikunja 2.3.0: related_tasks — дикт по kind, значения —
-        # ПОЛНЫЕ таск-дикты (наблюдалось эмпирически), выведен из relations "на лету"
-        # (не хранится отдельно на таске) -> add_relation сразу видно в get_task.
-        # Реальная 2.3.0 авто-создаёт ОБРАТНУЮ связь на другой задаче (записали
-        # "P precedes S" — на S видно "follows: P"). add_relation не трогаем (self.relations
-        # хранит ровно записанное); инверсию синтезируем ЗДЕСЬ, на чтении: если task_id —
-        # ЦЕЛЬ связи, отдаём её под инвертированным kind (_INVERSE_RELATION).
+        # related_tasks — дикт по kind, выведен из relations "на лету" (не хранится на таске) ->
+        # add_relation сразу видно в get_task. Реальная 2.3.0 авто-создаёт ОБРАТНУЮ связь на другой
+        # задаче (записали "P precedes S" — на S видно "follows: P"); add_relation не трогаем
+        # (self.relations хранит ровно записанное), инверсию синтезируем ЗДЕСЬ, на чтении: если
+        # task_id — ЦЕЛЬ связи, отдаём её под инвертированным kind (_INVERSE_RELATION). Значения —
+        # НЕ полные дикты, а HOLLOW-копии (labels/assignees/nested related_tasks = None), точно как
+        # у сервера (см. _related_subdict): кто читает labels связанной задачи, обязан её дофетчить.
         related: dict[str, list[dict]] = {}
         for tid, other_id, kind in self.relations:
             if tid == task_id and other_id in self.tasks:
-                related.setdefault(kind, []).append(dict(self.tasks[other_id]))
+                related.setdefault(kind, []).append(self._related_subdict(self.tasks[other_id]))
             elif other_id == task_id and tid in self.tasks:
                 inverse = _INVERSE_RELATION.get(kind, kind)
-                related.setdefault(inverse, []).append(dict(self.tasks[tid]))
+                related.setdefault(inverse, []).append(self._related_subdict(self.tasks[tid]))
         t["related_tasks"] = related
         return t
 
