@@ -1,6 +1,6 @@
 [project]
 name = "vikunja-mcp"
-version = "0.2.27"
+version = "0.2.28"
 description = "Workflow-level MCP server for Vikunja: queue -> claim -> design -> build -> review with enforced gates"
 readme = "README.md"
 license = { text = "MIT" }
