@@ -302,3 +302,138 @@ def test_next_task_bug_review_beats_gated_queue(env):
     res = wf.next_task()
     assert res.get("review") is True
     assert res["task"]["id"] == bug["id"]
+
+
+# --- C3 (#103): advance→review latch + rework-first mine ordering ---
+
+
+def test_advance_review_latched_by_unfinished_predecessor(env):
+    """Predecessor below Review (Build) -> advance(successor, 'review') refused; message names
+    the predecessor and its stage, the successor is NOT moved, and NO worklog was posted (the
+    latch fires before the report is written)."""
+    api, wf = env
+    pred = api.add_task("pred", "Build")
+    succ = api.add_task("succ", "Build", assignee=api.me_user)
+    api.add_relation(succ["id"], pred["id"], "follows")
+    with pytest.raises(WorkflowError) as exc:
+        wf.advance(succ["id"], to="review", worklog="done", evidence="sha")
+    msg = str(exc.value)
+    assert pred["identifier"] in msg
+    assert "Build" in msg
+    assert api.stage_of(succ["id"]) == "Build"
+    assert not any(c.startswith("[worklog]") for c in api.comments_text(succ["id"]))
+
+
+def test_advance_review_allowed_when_predecessor_at_review(env):
+    """Predecessor at Review is 'ready' -> the successor may advance to Review."""
+    api, wf = env
+    pred = api.add_task("pred", "Review")
+    succ = api.add_task("succ", "Build", assignee=api.me_user)
+    api.add_relation(succ["id"], pred["id"], "follows")
+    res = wf.advance(succ["id"], to="review", worklog="done", evidence="sha")
+    assert res["moved_to"] == "Review"
+    assert api.stage_of(succ["id"]) == "Review"
+
+
+def test_advance_review_allowed_when_predecessor_done(env):
+    api, wf = env
+    pred = api.add_task("pred", "Done")
+    succ = api.add_task("succ", "Build", assignee=api.me_user)
+    api.add_relation(succ["id"], pred["id"], "follows")
+    assert wf.advance(succ["id"], to="review", worklog="d", evidence="s")["moved_to"] == "Review"
+
+
+def test_advance_review_not_latched_by_parenttask_only(env):
+    """Migration guard on the latch: a parenttask-only link (old epic child) never latches
+    advance->review."""
+    api, wf = env
+    parent = api.add_task("epic", "Backlog", labels=("epic",))
+    child = api.add_task("child", "Build", assignee=api.me_user)
+    api.add_relation(child["id"], parent["id"], "parenttask")
+    assert wf.advance(child["id"], to="review", worklog="d", evidence="s")["moved_to"] == "Review"
+
+
+def test_advance_review_latched_by_blocked_relation(env):
+    """`blocked` predecessor below Review latches advance->review too (parity with follows)."""
+    api, wf = env
+    pred = api.add_task("pred", "Design")
+    succ = api.add_task("succ", "Build", assignee=api.me_user)
+    api.add_relation(succ["id"], pred["id"], "blocked")
+    with pytest.raises(WorkflowError) as exc:
+        wf.advance(succ["id"], to="review", worklog="d", evidence="s")
+    assert pred["identifier"] in str(exc.value)
+    assert api.stage_of(succ["id"]) == "Build"
+
+
+def test_advance_to_build_unaffected_by_sequence_latch(env):
+    """The latch applies ONLY to to='review': to='build' advances even with an unfinished
+    predecessor below Review — you may keep working the successor, you just can't land it."""
+    api, wf = env
+    pred = api.add_task("pred", "Build")
+    succ = api.add_task("succ", "Design", assignee=api.me_user)
+    api.add_relation(succ["id"], pred["id"], "follows")
+    res = wf.advance(succ["id"], to="build", spec="approach")
+    assert res["moved_to"] == "Build"
+    assert api.stage_of(succ["id"]) == "Build"
+
+
+def test_mine_orders_predecessor_before_successor_over_priority(env):
+    """rework-first: with two of MY active tasks in a chain, the predecessor is handed back
+    first EVEN THOUGH the successor has strictly higher priority (proves the chain rule
+    OVERRIDES -priority — it is not passing because priority happens to agree)."""
+    api, wf = env
+    pred = api.add_task("pred low prio", "Build", assignee=api.me_user, priority=1)
+    succ = api.add_task("succ high prio", "Design", assignee=api.me_user, priority=5)
+    api.add_relation(succ["id"], pred["id"], "follows")
+    res = wf.next_task()
+    assert res["resume"] is True
+    assert res["task"]["id"] == pred["id"]
+
+
+def test_mine_two_unrelated_active_order_by_priority(env):
+    """No chain link between my two active tasks -> plain -priority order is preserved."""
+    api, wf = env
+    _a = api.add_task("a", "Build", assignee=api.me_user, priority=2)
+    b = api.add_task("b", "Build", assignee=api.me_user, priority=5)
+    res = wf.next_task()
+    assert res["resume"] is True
+    assert res["task"]["id"] == b["id"]
+
+
+def test_bounce_scenario_end_to_end(env):
+    """The exact case the human asked about. P reaches Review -> S unlocks and is claimed ->
+    P is bounced Review->Build -> advance(S,'review') is LATCHED, next_task hands back P
+    (predecessor) before S despite S's higher priority, P is reworked back to Review, and only
+    THEN advance(S,'review') succeeds."""
+    api, wf = env
+    p = api.add_task("P predecessor", "Build", assignee=api.me_user, priority=1)
+    s = api.add_task("S successor", "Queue", priority=5)
+    api.add_relation(s["id"], p["id"], "follows")
+    # 1. P -> Review; S unlocks
+    wf.advance(p["id"], to="review", worklog="did P", evidence="sha-p")
+    assert api.stage_of(p["id"]) == "Review"
+    # 2. claim S (predecessor ready at Review) and move it into Build
+    wf.claim(s["id"])
+    assert api.stage_of(s["id"]) == "Design"
+    wf.advance(s["id"], to="build", spec="approach S")
+    assert api.stage_of(s["id"]) == "Build"
+    # 3. P bounced Review -> Build (simulate a human/review return)
+    api.move_task(3, api.view["id"], api.bucket_id("Build"), p["id"])
+    assert api.stage_of(p["id"]) == "Build"
+    # 4. advance(S,'review') is now latched
+    with pytest.raises(WorkflowError) as exc:
+        wf.advance(s["id"], to="review", worklog="did S", evidence="sha-s")
+    assert p["identifier"] in str(exc.value)
+    assert "Build" in str(exc.value)
+    assert api.stage_of(s["id"]) == "Build"
+    # 5. next_task hands back P (predecessor) before S, despite S's higher priority
+    nxt = wf.next_task()
+    assert nxt["resume"] is True
+    assert nxt["task"]["id"] == p["id"]
+    # 6. rework P back to Review
+    wf.advance(p["id"], to="review", worklog="reworked P", evidence="sha-p2")
+    assert api.stage_of(p["id"]) == "Review"
+    # 7. now S may advance to Review
+    res = wf.advance(s["id"], to="review", worklog="did S", evidence="sha-s")
+    assert res["moved_to"] == "Review"
+    assert api.stage_of(s["id"]) == "Review"

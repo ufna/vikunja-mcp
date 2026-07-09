@@ -86,7 +86,10 @@ def next_task() -> dict:
     back from Your Call), (2) a task in Queue assigned to you, (3) a bug fix in Review
     awaiting independent review (label bug, no verdict yet), (4) the top FREE task in
     Queue. Never hands out a task assigned to someone else — those are "for humans".
-    Leaves Backlog and blocked alone. One task at a time. A free task whose predecessor
+    Leaves Backlog and blocked alone. One task at a time.
+    Among your active tasks, one that is a predecessor of another of your active tasks is
+    handed back first (finish the unblocking rework before its successor), overriding priority.
+    A free task whose predecessor
     (a follows/blocked link, e.g. an ordered-epic step) is still unfinished (below Review)
     is skipped, not offered. If the Queue is non-empty but EVERY free task is so gated, the
     result is a DISTINGUISHABLE starving-tail signal (task:null PLUS starving:true,
@@ -136,7 +139,10 @@ def advance(
     not by reading code) + evidence (commit/PR/verification output); for bug fixes
     root_cause is MANDATORY — the cause of the bug (why it happened), not the symptom.
     The report is posted as a comment for the reviewer to read. There is no transition
-    to Done — a human moves it to Done after review."""
+    to Done — a human moves it to Done after review.
+    to='review' is also LATCHED while any predecessor (a follows/blocked link, e.g. an
+    ordered-epic step) is still below Review: if a predecessor was bounced Review→Build,
+    finish its rework back to Review before this successor may advance (the refusal names it)."""
     return _wf().advance(
         task_id, to, spec=spec, worklog=worklog, evidence=evidence, root_cause=root_cause
     )

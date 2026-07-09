@@ -193,7 +193,24 @@ class Workflow:
 
         mine = self._my_active_tasks(raw)
         if mine:
-            mine.sort(key=lambda st: -st[1].get("priority", 0))
+            # rework-first ordering (option C, epic #94, mechanism 3): when I hold TWO+ active
+            # tasks from one chain, hand back the one that is a PREDECESSOR of another of my
+            # active tasks BEFORE its successor — even when the successor outranks it by priority
+            # — so I finish the unblocking rework, not the shinier successor (whose advance→review
+            # is latched anyway, mechanism 2). Both tasks being active ⇒ both below Review ⇒ the
+            # predecessor surfaces in _unfinished_predecessors; keys off follows/blocked only,
+            # never parenttask. Computed only for 2+ active tasks — the common 0/1-active path
+            # keeps a plain -priority sort and makes zero extra get_task calls.
+            rework_first: set[int] = set()
+            if len(mine) > 1:
+                active_ids = {t["id"] for _s, t in mine}
+                for _s, t in mine:
+                    for pred in self._unfinished_predecessors(t["id"], board=raw):
+                        if pred["id"] in active_ids:
+                            rework_first.add(pred["id"])
+            mine.sort(key=lambda st: (
+                0 if st[1]["id"] in rework_first else 1, -st[1].get("priority", 0)
+            ))
             stage, task = mine[0]
             return {
                 "resume": True, "stage": stage, "task": self._summary(task),
@@ -426,7 +443,8 @@ class Workflow:
             raise WorkflowError(f"invalid transition '{to}'; available: build, review")
         from_stage, to_stage = AGENT_ADVANCE[to]
 
-        task, stage = self._find_task(task_id)
+        board = self._board()
+        task, stage = self._find_task(task_id, board=board)
         self._require_mine(task)
         if stage != from_stage:
             raise WorkflowError(
@@ -438,6 +456,25 @@ class Workflow:
                 raise WorkflowError("a spec is required: describe your approach before implementing")
             self.api.add_comment(task_id, f"[spec]\n{spec.strip()}")
         else:
+            # hard sequence gate (option C, epic #94, mechanism 2): the advance→review LATCH on
+            # an in-flight successor — the case the human asked about. Refuse to land THIS task in
+            # Review while any of its predecessors is below Review: a predecessor P that had
+            # reached Review (so this successor got claimed) but was then bounced Review→Build
+            # must be reworked back to Review before this one may advance. Applies ONLY to
+            # to='review' (to='build' and every other transition are untouched); keys off
+            # follows/blocked only, never parenttask (migration guard); reuses the full board
+            # already fetched (must be full, not light — a predecessor may sit in Your Call/Done).
+            # Known residual gap accepted by design: if THIS task was ALREADY in Review when P
+            # bounced, the latch doesn't apply retroactively — the human-only Done move backstops.
+            blockers = self._unfinished_predecessors(task_id, board=board)
+            if blockers:
+                joined = "; ".join(f"{b['ref']} in '{b['stage']}'" for b in blockers)
+                raise WorkflowError(
+                    f"can't move {self._ref(task)} to Review yet — its predecessor is being "
+                    f"reworked below Review: {joined}. Finish that predecessor's rework and get "
+                    f"it back to Review first, then advance this one (a predecessor is 'ready' "
+                    f"only at Review or Done)."
+                )
             if not (worklog or "").strip() or not (evidence or "").strip():
                 raise WorkflowError(
                     "Review needs a report: worklog (what was done and how it was "
