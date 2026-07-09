@@ -6,7 +6,14 @@ import pytest
 from tests.unit.fakes import FakeAPI
 from vikunja_mcp.api import VikunjaError
 from vikunja_mcp.formatting import html_to_text
-from vikunja_mcp.workflow import _ATTACHMENT_TTL, STAGES, Workflow, WorkflowError
+from vikunja_mcp.workflow import (
+    _ATTACHMENT_TTL,
+    _MAX_ATTACHMENT_NAME_BYTES,
+    STAGES,
+    Workflow,
+    WorkflowError,
+    _safe_attachment_name,
+)
 
 
 @pytest.fixture
@@ -773,3 +780,138 @@ def test_attach_file_unknown_task_is_actionable(env, tmp_path):
     src.write_bytes(b"png")
     with pytest.raises(WorkflowError, match="not found"):
         wf.attach_file(987654, str(src))
+
+
+# --- вложения: hardening (#146) — sanitize имени, post-read caps, id-confusion --------
+
+
+def test_safe_attachment_name_strips_nul_and_controls():
+    """A server-controlled attachment name can carry a NUL/C0-control/DEL byte (which makes open()
+    raise ValueError) or run past the filesystem's ~255-byte limit (open() -> OSError); the sanitizer
+    neutralizes both while keeping the traversal-stripping (basename only) and the extension."""
+    dirty = _safe_attachment_name("he\x00l\x01lo\x7f\n.png", "fallback.bin")
+    assert not any(c in dirty for c in "\x00\x01\x7f\n")     # control bytes gone
+    assert _safe_attachment_name("shot.png", "fallback.bin") == "shot.png"   # normal untouched
+    assert _safe_attachment_name("../../etc/evil.png", "fallback.bin") == "evil.png"  # traversal
+    assert _safe_attachment_name("\x00", "fallback.bin") == "fallback.bin"   # empty after strip
+    long = _safe_attachment_name("a" * 300 + ".png", "fallback.bin")
+    assert len(long.encode("utf-8")) <= _MAX_ATTACHMENT_NAME_BYTES            # within the budget
+    assert long.endswith(".png")                             # extension preserved
+
+
+def test_download_attachment_server_name_with_nul_does_not_crash(env, att_root):
+    """A server attachment name carrying a NUL byte must NOT crash the download — open() raises
+    ValueError on a NUL in a path. The byte is stripped and the EXACT bytes still land on disk."""
+    api, wf, t = env
+    data = b"\x89PNG\r\n\x1a\nbody"
+    att = api.add_attachment(t["id"], "he\x00llo.png", "image/png", data)
+    res = wf.download_attachment(t["id"], att["id"])         # must not raise
+    base = os.path.basename(res["path"])
+    assert "\x00" not in base
+    with open(res["path"], "rb") as fh:
+        assert fh.read() == data                             # exact bytes despite the dirty name
+
+
+def test_download_attachment_server_name_over_255_bytes_is_truncated(env, att_root):
+    """A pathologically long server name (open() would OSError 'File name too long') is truncated
+    to the byte budget while keeping the extension, so the file is actually written to disk."""
+    api, wf, t = env
+    att = api.add_attachment(t["id"], "a" * 300 + ".png", "image/png", b"pngbytes")
+    res = wf.download_attachment(t["id"], att["id"])         # must not OSError
+    base = os.path.basename(res["path"])
+    assert len(base.encode("utf-8")) <= _MAX_ATTACHMENT_NAME_BYTES
+    assert base.endswith(".png")
+    assert os.path.isfile(res["path"])                       # proves open() did not fail
+
+
+def test_download_attachment_post_read_cap_catches_lying_metadata(env, att_root, monkeypatch):
+    """Second-line defense: the METADATA size is a cheap pre-check but can under-report (or be
+    missing/0). After the bytes are actually pulled, len(data) is re-checked against the cap. Here
+    metadata lies (5 < cap) yet the real payload is 50 -> refused POST-read. Without the post-read
+    check the oversized file would simply be written to a temp file and reported as fine."""
+    api, wf, t = env
+    monkeypatch.setattr("vikunja_mcp.workflow._MAX_ATTACHMENT_BYTES", 10)
+    att = api.add_attachment(
+        t["id"], "liar.bin", "application/octet-stream", data=b"x" * 50, size=5
+    )
+    with pytest.raises(WorkflowError, match="cap"):
+        wf.download_attachment(t["id"], att["id"])
+
+
+def test_attach_file_nul_in_path_is_actionable(env, tmp_path):
+    """os.path.realpath raises ValueError on a NUL byte in the path; attach_file must surface an
+    actionable WorkflowError naming the bad path, never a raw ValueError the agent can't act on."""
+    api, wf, t = env
+    with pytest.raises(WorkflowError):
+        wf.attach_file(t["id"], "/tmp/x\x00y.png")
+
+
+def test_attach_file_vanishes_between_size_and_read_is_actionable(env, tmp_path, monkeypatch):
+    """A TOCTOU window: the file passes the isfile guard, getsize runs, then the file is removed
+    before open() -> FileNotFoundError. attach_file must turn that (and any OSError from the
+    getsize/open region) into an actionable WorkflowError, not a raw traceback."""
+    api, wf, t = env
+    src = tmp_path / "shot.png"
+    src.write_bytes(b"png-bytes")
+
+    def vanishing_getsize(_path):
+        os.remove(str(src))          # simulate the race: file gone after the size check
+        return 5
+
+    monkeypatch.setattr("vikunja_mcp.workflow.os.path.getsize", vanishing_getsize)
+    with pytest.raises(WorkflowError):
+        wf.attach_file(t["id"], str(src))
+
+
+def test_attach_file_post_read_cap_catches_lying_getsize(env, tmp_path, monkeypatch):
+    """Mirror of the download post-read cap: getsize is a cheap pre-check but can lie (the file
+    grows between stat and read). After reading, len(data) is re-checked against the cap. Here
+    getsize reports 5 (passes the pre-check) but the file is really 50 -> refused POST-read, and
+    nothing is uploaded."""
+    api, wf, t = env
+    monkeypatch.setattr("vikunja_mcp.workflow._MAX_ATTACHMENT_BYTES", 10)
+    src = tmp_path / "grower.bin"
+    src.write_bytes(b"x" * 50)
+    monkeypatch.setattr("vikunja_mcp.workflow.os.path.getsize", lambda _p: 5)  # lie: 5 < cap
+    calls = {"n": 0}
+    orig = api.upload_attachment
+
+    def spy(*a, **k):
+        calls["n"] += 1
+        return orig(*a, **k)
+
+    monkeypatch.setattr(api, "upload_attachment", spy)
+    with pytest.raises(WorkflowError, match="cap"):
+        wf.attach_file(t["id"], str(src))
+    assert calls["n"] == 0                                   # refused before any upload persisted
+
+
+def test_get_task_attachment_id_is_attachment_id_not_file_id(env, att_root):
+    """get_task must surface the ATTACHMENT id (task["attachments"][].id), NOT the inner file.id.
+    On a real server the two DESYNC (the `files` table advances on any upload); download_attachment
+    keys off this id, so emitting file.id would hand the agent an id the download endpoint 404s on.
+    GREEN with correct code; mutating get_task to emit a["file"]["id"] makes it RED (proves it
+    isn't blind — the #118/#125 lesson)."""
+    api, wf, t = env
+    att = api.add_attachment(t["id"], "shot.png", "image/png", b"png", file_id=999000)
+    assert att["id"] != 999000 and att["file"]["id"] == 999000       # the desync is real
+    dossier = wf.get_task(t["id"])
+    assert dossier["attachments"][0]["id"] == att["id"]             # the attachment id...
+    assert dossier["attachments"][0]["id"] != 999000                # ...never the file id
+    res = wf.download_attachment(t["id"], att["id"])                # and it's the downloadable id
+    assert res["name"] == "shot.png"
+
+
+def test_download_attachment_keys_off_attachment_id_not_file_id(env, att_root):
+    """download_attachment keys off the ATTACHMENT id, never file.id — the two desync on a real
+    server, so a file.id-keyed fetch would pull the wrong file or 404. Downloading by the
+    attachment id yields the bytes; the file.id is NOT a valid attachment id -> actionable
+    'no attachment'. GREEN with correct code; mutating download to match a["file"]["id"] makes it
+    RED."""
+    api, wf, t = env
+    att = api.add_attachment(t["id"], "shot.png", "image/png", b"png", file_id=999000)
+    res = wf.download_attachment(t["id"], att["id"])               # by attachment id -> the bytes
+    with open(res["path"], "rb") as fh:
+        assert fh.read() == b"png"
+    with pytest.raises(WorkflowError, match="no attachment"):
+        wf.download_attachment(t["id"], 999000)                    # file.id is not an attachment id

@@ -75,16 +75,21 @@ class FakeAPI:
         self.task_bucket[t["id"]] = self.bucket_id(bucket_title)
         return t
 
-    def add_attachment(self, task_id, name, mime, data=b"", size=None):
+    def add_attachment(self, task_id, name, mime, data=b"", size=None, file_id=None):
         """Test helper: attach a file to a task, mirroring real 2.3.0's shape — each entry is
         {id, task_id, file:{id, name, mime, size}} and the download endpoint keys off the
         OUTER id (attachment id), not file.id. `size` overrides the metadata size (defaults to
-        len(data)) so a test can exercise the too-large guard without a giant buffer."""
+        len(data)) so a test can exercise the too-large guard without a giant buffer. `file_id`
+        defaults to the attachment id but can be set DISTINCT from it — the real server keeps two
+        independent id sequences (the `files` table advances on ANY upload incl. avatars/project
+        backgrounds, while `task_attachments` advances only per task attachment), so they desync;
+        a test passing file_id proves workflow keys off the attachment id, not file.id (#146). The
+        stored bytes stay keyed off the OUTER attachment id — 1:1 with the real endpoint."""
         aid = next(self._ids)
         att = {
             "id": aid, "task_id": task_id,
             "file": {
-                "id": aid, "name": name, "mime": mime,
+                "id": aid if file_id is None else file_id, "name": name, "mime": mime,
                 "size": len(data) if size is None else size,
             },
         }

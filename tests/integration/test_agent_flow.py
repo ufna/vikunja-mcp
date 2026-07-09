@@ -1,6 +1,8 @@
 import io
 import os
+import struct
 import uuid
+import zlib
 
 import httpx
 import pytest
@@ -11,6 +13,22 @@ from vikunja_mcp.setup_cmd import reconcile
 from vikunja_mcp.workflow import Workflow, WorkflowError
 
 pytestmark = pytest.mark.skipif(not BASE, reason="VIKUNJA_TEST_URL not set")
+
+
+def _decodable_png() -> bytes:
+    """A minimal but VALID (decodable) 1x1 PNG. Vikunja RESIZES an uploaded avatar, so the avatar
+    nudge in the id-desync test must be a real image the server can decode — arbitrary bytes make
+    the avatar endpoint 500 (a task attachment, by contrast, is stored verbatim and needs none)."""
+    def _chunk(tag: bytes, data: bytes) -> bytes:
+        crc = zlib.crc32(tag + data) & 0xFFFFFFFF
+        return struct.pack(">I", len(data)) + tag + data + struct.pack(">I", crc)
+
+    return (
+        b"\x89PNG\r\n\x1a\n"
+        + _chunk(b"IHDR", struct.pack(">IIBBBBB", 1, 1, 8, 2, 0, 0, 0))
+        + _chunk(b"IDAT", zlib.compress(b"\x00\xff\x00\x00"))
+        + _chunk(b"IEND", b"")
+    )
 
 
 @pytest.fixture(scope="module")
@@ -163,6 +181,70 @@ def test_attachment_upload_scoped(project, tmp_path):
     # a missing path is refused locally — no wire call, an actionable message
     with pytest.raises(WorkflowError, match="no file to attach"):
         wf1.attach_file(t["id"], str(tmp_path / "nope.png"))
+
+
+def test_download_attachment_keys_off_attachment_id_not_file_id(project, boss_jwt):
+    """#146 crown jewel vs real 2.3.0: the attachments endpoint keys off the ATTACHMENT id, never
+    the inner file.id — and on a real server the two DESYNC (the `files` table advances on ANY
+    upload: an avatar, a project background — not just task attachments), so a file.id-keyed code
+    path would fetch the WRONG file or 404. We FORCE attachment.id != file.id, then prove get_task
+    surfaces the attachment id and download keys off it, with a direct wire probe that the file.id
+    404s on the attachments endpoint. This defends the #118/#125 'the test literally cannot fail'
+    class: the test asserts its OWN desync precondition (step 3), so if the ids happened to coincide
+    it fails loudly here instead of passing blind — a FakeAPI unit test can't prove the real
+    server keys the endpoint off the attachment id and not file.id, only a real container can."""
+    boss, _, enqueue, wf1, _ = project
+    png = bytes.fromhex("89504e470d0a1a0a") + b"id-desync-probe"
+    hdr = {"Authorization": f"Bearer {boss_jwt}"}
+
+    # 1. Advance the `files` sequence WITHOUT creating a task attachment, so the NEXT task
+    #    attachment gets attachment.id != file.id. A user-avatar upload creates `file` rows only
+    #    (it stores resized copies, so the sequences desync by more than one — verified on 2.3.0).
+    #    The avatar MUST be a decodable image (Vikunja resizes it; arbitrary bytes -> 500), hence
+    #    _decodable_png(). (A project background — PUT /projects/{pid}/backgrounds/upload, field
+    #    "background" — is an equivalent nudge if this avatar route/field ever differs.)
+    av = httpx.put(
+        f"{BASE}/api/v1/user/settings/avatar/upload",
+        headers=hdr,
+        files={"avatar": ("a.png", io.BytesIO(_decodable_png()), "image/png")},
+    )
+    # a non-2xx here is tolerated: the desync is asserted for real in step 3, this is only the nudge
+
+    # 2. Upload a task attachment and capture BOTH ids straight from the real PUT envelope
+    t = enqueue("desync карточка")
+    up = httpx.put(
+        f"{BASE}/api/v1/tasks/{t['id']}/attachments",
+        headers=hdr,
+        files={"files": ("shot.png", io.BytesIO(png), "image/png")},
+    )
+    up.raise_for_status()
+    success = up.json()["success"][0]
+    attachment_id = success["id"]
+    file_id = success["file"]["id"]
+
+    # 3. The test asserts its OWN precondition — if the desync didn't take, FAIL here (never blind)
+    assert attachment_id != file_id, (
+        f"needed attachment.id != file.id to prove the keying but both are {attachment_id}; the "
+        f"avatar upload (status {av.status_code}) did not desync the id sequences — switch the "
+        f"step-1 nudge to a project-background upload"
+    )
+
+    # 4. get_task surfaces the ATTACHMENT id, never the file id
+    dossier = wf1.get_task(t["id"])
+    surfaced = next(a for a in dossier["attachments"] if a["name"] == "shot.png")
+    assert surfaced["id"] == attachment_id
+    assert surfaced["id"] != file_id
+
+    # 5. download by the ATTACHMENT id returns the EXACT bytes over the real wire
+    res = wf1.download_attachment(t["id"], attachment_id)
+    with open(res["path"], "rb") as fh:
+        assert fh.read() == png
+
+    # 6. Direct wire probe with boss auth: the attachments endpoint keys off the ATTACHMENT id, so
+    #    the file.id is a 404 (body code 4011) — proving any file.id-keyed download path is wrong.
+    probe = httpx.get(f"{BASE}/api/v1/tasks/{t['id']}/attachments/{file_id}", headers=hdr)
+    assert probe.status_code == 404
+    assert probe.json().get("code") == 4011
 
 
 def test_remove_label_round_trip(project):

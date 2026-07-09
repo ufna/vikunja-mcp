@@ -54,6 +54,9 @@ AGENT_ADVANCE = {"build": ("Design", "Build"), "review": ("Build", "Review")}
 _ATTACHMENT_ROOT = os.path.join(tempfile.gettempdir(), "vikunja-mcp-attachments")
 _ATTACHMENT_TTL = 3600  # сек: подкаталоги скачиваний старше этого best-effort сносятся
 _MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024  # 25 МБ: щедро для скринов/доков, отсекает рантаймы
+# Байтовый бюджет имени temp-файла: open() кидает OSError ("File name too long") на именах
+# ~255+ байт, а сервер-контролируемое имя вложения может быть любой длины -> режем до этого.
+_MAX_ATTACHMENT_NAME_BYTES = 200
 
 
 def _sweep_old_attachments(now: float) -> None:
@@ -72,14 +75,35 @@ def _sweep_old_attachments(now: float) -> None:
             pass
 
 
+def _truncate_preserving_ext(name: str, max_bytes: int) -> str:
+    """Урезать имя файла до max_bytes БАЙТ (не символов), сохранив расширение и НЕ разрубив
+    многобайтовый символ пополам. splitext даёт stem+ext; если само расширение уже >= max_bytes
+    — это не расширение, а длинный «хвост» с точкой, дропаем его. Иначе бюджет = max_bytes минус
+    длина ext в байтах, режем utf-8 stem'а по границе байта, decode(errors='ignore') сносит
+    повисший обрубок символа. Кодируем surrogatepass (имя могло прийти с суррогатами), декодим
+    ignore (обрубок символа/битый суррогат просто исчезает)."""
+    stem, ext = os.path.splitext(name)
+    ext_bytes = ext.encode("utf-8", "surrogatepass")
+    if len(ext_bytes) >= max_bytes:            # «расширение» само не влезает -> это не расширение
+        ext, ext_bytes = "", b""
+    budget = max_bytes - len(ext_bytes)
+    stem_bytes = stem.encode("utf-8", "surrogatepass")[:budget]
+    return stem_bytes.decode("utf-8", "ignore") + ext
+
+
 def _safe_attachment_name(name: str, fallback: str) -> str:
-    """Имя файла от сервера НЕ должно уводить запись за пределы temp-каталога (path
-    traversal). Оставляем только basename (нормализовав и обратные слэши — на POSIX
-    os.path.basename их не режет); пустое или всё из точек ('', '.', '..') -> fallback."""
+    """Имя файла от сервера НЕ должно ни уводить запись за пределы temp-каталога (path traversal),
+    ни уронить сам open(). Оставляем только basename (нормализовав и обратные слэши — на POSIX
+    os.path.basename их не режет); вырезаем управляющие байты (ord < 0x20 или == 0x7F: NUL + C0 +
+    DEL — иначе open() кидает ValueError на NUL); пустое или всё из точек ('', '.', '..') ->
+    fallback (перепроверяем ПОСЛЕ вырезания: "\\x00" схлопывается в пустоту); режем до
+    _MAX_ATTACHMENT_NAME_BYTES байт с сохранением расширения (иначе open() кидает OSError
+    'File name too long' на ~255+ байтах). Общий для download_attachment и attach_file."""
     base = os.path.basename((name or "").replace("\\", "/").strip().rstrip("/"))
+    base = "".join(ch for ch in base if ord(ch) >= 0x20 and ord(ch) != 0x7F)
     if not base or set(base) <= {"."}:
         return fallback
-    return base
+    return _truncate_preserving_ext(base, _MAX_ATTACHMENT_NAME_BYTES)
 
 
 def _write_attachment_to_temp(name: str, data: bytes, fallback: str) -> str:
@@ -1153,6 +1177,15 @@ class Workflow:
                 f"UI instead of pulling it into the agent context"
             )
         data = self.api.download_attachment(task_id, attachment_id)
+        # Second-line cap: the metadata pre-check above is cheap but can under-report (or be
+        # missing/0 — a legit 0-byte file is fine, so we do NOT refuse on that). len(data) is the
+        # real bound, so re-check the bytes we actually pulled before writing them to a temp file.
+        if len(data) > _MAX_ATTACHMENT_BYTES:
+            raise WorkflowError(
+                f"attachment #{attachment_id} ({name}) downloaded as {len(data)} bytes — over the "
+                f"{_MAX_ATTACHMENT_BYTES}-byte cap; its metadata under-reported the size. Fetch it "
+                f"directly from the tracker UI instead of pulling it into the agent context"
+            )
         path = _write_attachment_to_temp(name, data, fallback=f"attachment-{attachment_id}")
         return {
             "path": path,
@@ -1186,22 +1219,47 @@ class Workflow:
         tasks_attachments:create token scope — a 401 means the token is read-only for attachments
         and a human must add the `create` op (verified on real 2.3.0: create governs the upload)."""
         self._find_task(task_id)  # same board-membership check as comment/download_attachment
-        real = os.path.realpath(path)
+        try:
+            real = os.path.realpath(path)
+        except ValueError as exc:
+            raise WorkflowError(
+                f"can't attach {path!r}: invalid path ({exc}) — a path can't contain a NUL byte; "
+                f"pass a real local screenshot/render path"
+            ) from exc
         if not os.path.isfile(real):
             raise WorkflowError(
                 f"no file to attach at {path!r} — it doesn't exist or isn't a regular file. "
                 f"Pass the path to a screenshot/render you already produced while verifying the "
                 f"work (a directory, a broken symlink, or a missing path is refused here)"
             )
-        size = os.path.getsize(real)
-        if size > _MAX_ATTACHMENT_BYTES:
+        # getsize→open is a TOCTOU window: the file can be removed/replaced/made unreadable after
+        # the isfile guard, so an OSError from either becomes an actionable WorkflowError, never a
+        # raw traceback. The oversized WorkflowError raised BETWEEN them is not an OSError, so it
+        # propagates cleanly past this handler.
+        try:
+            size = os.path.getsize(real)
+            if size > _MAX_ATTACHMENT_BYTES:
+                raise WorkflowError(
+                    f"{path} is {size} bytes — over the {_MAX_ATTACHMENT_BYTES}-byte upload cap. "
+                    f"Attach a screenshot/thumbnail, not a large asset or a runtime artifact"
+                )
+            with open(real, "rb") as fh:
+                data = fh.read()
+        except OSError as exc:
             raise WorkflowError(
-                f"{path} is {size} bytes — over the {_MAX_ATTACHMENT_BYTES}-byte upload cap. "
-                f"Attach a screenshot/thumbnail, not a large asset or a runtime artifact"
+                f"the file at {path!r} could not be read ({exc}) — it may have been removed, "
+                f"replaced, or made unreadable after the size check; re-produce it and retry"
+            ) from exc
+        # Second-line cap mirroring download_attachment: getsize is a cheap pre-check but can lie
+        # (the file grew between stat and read), so len(data) is the real bound and the honest
+        # uploaded length reported below.
+        if len(data) > _MAX_ATTACHMENT_BYTES:
+            raise WorkflowError(
+                f"{path} read as {len(data)} bytes — over the {_MAX_ATTACHMENT_BYTES}-byte upload "
+                f"cap (its size grew after the pre-check). Attach a screenshot/thumbnail, not a "
+                f"large asset or a runtime artifact"
             )
         name = _safe_attachment_name(os.path.basename(real), fallback=f"attachment-{task_id}")
-        with open(real, "rb") as fh:
-            data = fh.read()
         mime, _ = mimetypes.guess_type(name)
         resp = self.api.upload_attachment(task_id, name, data, mime=mime)
         created = (resp or {}).get("success") or []
@@ -1212,7 +1270,7 @@ class Workflow:
             "attachment_id": new_id,
             "name": name,
             "mime": mime,
-            "size": size,
+            "size": len(data),
             "note": (
                 "the file is on the card now — a human and the reviewer can view it in the "
                 "tracker. For a visually-verifiable change, cite it in your advance(to='review') "
