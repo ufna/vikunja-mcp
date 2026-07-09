@@ -40,7 +40,10 @@ def test_board_labels_the_skill_names_match_the_workflow_constants():
     / LABEL_BLOCKED are intentionally excluded — the skill surfaces those by behaviour (review_kind,
     return_task), not by their literal label name, so asserting them would be a false pin."""
     text = _skill_text()
-    for const in (workflow.LABEL_EPIC, workflow.LABEL_REVIEWED, workflow.LABEL_REVIEW_FAILED):
+    for const in (
+        workflow.LABEL_EPIC, workflow.LABEL_EPIC_READY,
+        workflow.LABEL_REVIEWED, workflow.LABEL_REVIEW_FAILED,
+    ):
         assert const in text, f"label {const!r} is no longer named in SKILL.md"
 
 

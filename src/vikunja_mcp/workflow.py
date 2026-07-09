@@ -16,6 +16,7 @@ ACTIVE_STAGES = ("Design", "Build")
 NEXT_TASK_STAGES = frozenset({"Queue", *ACTIVE_STAGES, "Review"})
 LABEL_BLOCKED = "blocked"
 LABEL_EPIC = "epic"
+LABEL_EPIC_READY = "epic-ready"        # маркер: все дети эпика в Review/Done — контейнер собран, ждёт Done человека
 LABEL_BUG = "bug"
 LABEL_REVIEWED = "reviewed"            # прошёл независимое агентское ревью
 LABEL_REVIEW_FAILED = "review-failed"  # отбит на доработку, сейчас переделывается
@@ -663,6 +664,57 @@ class Workflow:
             self.project_id, self._view()["id"], self._bucket(stage)["id"], task_id
         )
 
+    def _mark_epic_if_children_complete(self, child: dict, board: list[dict]) -> None:
+        """Best-effort epic-complete marker (#118 Part 2). When THIS child's advance→review makes
+        EVERY child of an epic parent ready (Review or Done — READY_STAGES, the same readiness the
+        sequence gate uses; NOT a second definition), leave a VISIBLE marker on the EPIC so the
+        human sees the container is assembled and can close the set: the LABEL_EPIC_READY label
+        (at-a-glance on the board) plus an explanatory comment. It does NOT move the epic — agents
+        can't and mustn't (Part 1 made epics unclaimable; only a human moves anything to Done). This
+        is deliberately the ADDITIVE form of the cross-task write #103 rejected in its STRUCTURAL
+        form: it reaches out of the child's transition to touch a DIFFERENT card, but adds only a
+        label + comment — no stage move, no lost work, no gate effect. It MUST therefore be called
+        strictly best-effort (the caller swallows every exception): a cosmetic marker on someone
+        else's card must never strand the child's own advance, and it adds nothing to the child's
+        result. Idempotent — skips if the epic already carries LABEL_EPIC_READY, so a bounced-and-
+        re-advanced child never double-marks. Keys off the epic LABEL and the parenttask relation,
+        never structure alone. `board` is the full snapshot advance already fetched; the current
+        child moved to Review AFTER it was taken, so the child is scored as Review explicitly while
+        every other sibling is read from the snapshot."""
+        child_id = child["id"]
+        related = self.api.get_task(child_id).get("related_tasks") or {}
+        parents = related.get("parenttask") or []
+        if not parents:
+            return  # not a subtask of anything — nothing to mark
+        stage_by_id = {
+            t["id"]: bucket["title"]
+            for bucket in board for t in (bucket.get("tasks") or [])
+        }
+        for parent in parents:
+            if not self._has_label(parent, LABEL_EPIC):
+                continue  # parent isn't an epic container — not ours to mark
+            if self._has_label(parent, LABEL_EPIC_READY):
+                continue  # already marked — idempotent (a bounced+re-advanced child won't re-fire)
+            siblings = (self.api.get_task(parent["id"]).get("related_tasks") or {}).get("subtask") or []
+            if not siblings:
+                continue
+            all_ready = all(
+                ("Review" if s["id"] == child_id else stage_by_id.get(s["id"])) in READY_STAGES
+                for s in siblings
+            )
+            if not all_ready:
+                continue
+            # label FIRST (the idempotency key AND the board marker), THEN the comment: a partial
+            # failure (label lands, comment doesn't) still leaves the epic consistently "marked", so
+            # a later advance won't double-fire.
+            self._add_label(parent["id"], LABEL_EPIC_READY)
+            self.api.add_comment(
+                parent["id"],
+                f"[эпик собран] все {len(siblings)} дет(и) эпика достигли Review-или-Done — "
+                f"контейнер собран и готов к твоему Done (в Done двигает только человек). Если "
+                f"позже отобьёшь ребёнка из Review — увидишь его в Build и придержишь закрытие."
+            )
+
     def advance(
         self, task_id: int, to: str,
         spec: str | None = None, worklog: str | None = None, evidence: str | None = None,
@@ -731,6 +783,16 @@ class Workflow:
             self._clear_verdict_labels(task)
         self._move(task_id, to_stage)
         result = {"moved_to": to_stage, "task_id": task_id}
+        if to == "review":
+            # best-effort epic-complete marker (#118 Part 2): if THIS child was the LAST of an epic
+            # parent to reach Review-or-Done, mark the epic (label + comment) so the human sees it's
+            # ready to close. It writes to a DIFFERENT card, so it is wrapped so NOTHING it does can
+            # fail the child's advance or change this result's shape (it adds no keys) — see the
+            # helper's docstring. Any exception (epic lookup, comment, or label) is swallowed.
+            try:
+                self._mark_epic_if_children_complete(task, board)
+            except Exception:
+                pass  # strictly best-effort — a marker on someone else's card never fails the child
         # push-нудж (#117): ЛЮБАЯ задача, доведённая до Review, требует независимого ревью —
         # не только багфикс. Исключение — epic-контейнер (label epic): его код лежит в детях
         # (каждый отревьюен на своём advance), ревьюить нечего. Скип цепляется за метку epic,

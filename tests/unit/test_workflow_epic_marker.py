@@ -1,0 +1,167 @@
+"""Part 2 of the epic lifecycle (#118): advance→review marks a COMPLETE epic, best-effort.
+
+When the LAST child of an epic reaches Review-or-Done, the agent finishing that child leaves a
+visible marker on the EPIC — the `epic-ready` label plus an `[эпик собран]` comment — so the human
+sees the container is assembled and can close the whole set (only a human moves anything to Done;
+the epic is never moved by an agent). The marker is a deliberately ADDITIVE cross-task write (a
+label + comment on a DIFFERENT card than the one being advanced), so it is STRICTLY best-effort:
+any failure reaching the epic must NOT fail the child's advance nor change its payload. Keys off the
+epic LABEL and the parenttask relation, never structure alone. Idempotent across bounce+re-advance.
+"""
+import pytest
+
+from tests.unit.fakes import FakeAPI
+from vikunja_mcp.workflow import LABEL_EPIC_READY, STAGES, Workflow, WorkflowError
+
+
+@pytest.fixture
+def env():
+    api = FakeAPI(buckets=STAGES)
+    return api, Workflow(api, project_id=3)
+
+
+def _epic(api, child_stages):
+    """Epic parent (label epic, Backlog) with one child per stage in child_stages; children in an
+    active stage (Design/Build) are assigned to me so they're advanceable. Returns (epic, [kids])."""
+    epic = api.add_task("epic parent", "Backlog", labels=("epic",))
+    kids = []
+    for i, stage in enumerate(child_stages):
+        assignee = api.me_user if stage in ("Design", "Build") else None
+        c = api.add_task(f"child{i}", stage, assignee=assignee)
+        api.add_relation(c["id"], epic["id"], "parenttask")
+        kids.append(c)
+    return epic, kids
+
+
+def _labels(api, task_id):
+    return [lb["title"] for lb in api.tasks[task_id]["labels"]]
+
+
+def _epic_comments(api, epic_id):
+    return [c for c in api.comments_text(epic_id) if c.startswith("[эпик собран]")]
+
+
+# --- happy path: last child completes the epic ---
+
+def test_marks_epic_when_last_child_reaches_review(env):
+    api, wf = env
+    epic, (c0, c1) = _epic(api, ["Review", "Build"])
+    res = wf.advance(c1["id"], to="review", worklog="w", evidence="e")
+    assert res["moved_to"] == "Review" and res["review_needed"] is True
+    assert LABEL_EPIC_READY in _labels(api, epic["id"])
+    assert len(_epic_comments(api, epic["id"])) == 1
+    assert _labels(api, epic["id"]).count(LABEL_EPIC_READY) == 1  # exactly one, no dup on a single fire
+
+
+def test_done_sibling_counts_as_ready(env):
+    """Readiness is Review-or-Done (READY_STAGES, reused): a sibling a human already moved to Done
+    still counts, so the last child reaching Review completes the epic."""
+    api, wf = env
+    epic, (c0, c1) = _epic(api, ["Done", "Build"])
+    wf.advance(c1["id"], to="review", worklog="w", evidence="e")
+    assert LABEL_EPIC_READY in _labels(api, epic["id"])
+    assert len(_epic_comments(api, epic["id"])) == 1
+
+
+# --- must NOT fire ---
+
+def test_no_mark_when_a_sibling_still_below_review(env):
+    """Fires only when EVERY sibling is Review-or-Done. One sibling still in Build → no mark."""
+    api, wf = env
+    epic, (c0, c1, c2) = _epic(api, ["Review", "Build", "Build"])
+    wf.advance(c1["id"], to="review", worklog="w", evidence="e")  # c2 still in Build
+    assert LABEL_EPIC_READY not in _labels(api, epic["id"])
+    assert _epic_comments(api, epic["id"]) == []
+
+
+def test_no_mark_for_task_without_parenttask(env):
+    """A plain task with no parent → advance→review does nothing epic-related and never crashes."""
+    api, wf = env
+    t = api.add_task("lonesome", "Build", assignee=api.me_user)
+    res = wf.advance(t["id"], to="review", worklog="w", evidence="e")
+    assert res["moved_to"] == "Review"
+    assert not any(lb["title"] == LABEL_EPIC_READY for lb in api._labels)  # marker label never created
+
+
+def test_no_mark_when_parent_lacks_epic_label(env):
+    """An ordinary parent (no epic label) with all children ready is NOT marked — keys off the epic
+    LABEL, never the mere presence of children (mirror of the Part 1 guard)."""
+    api, wf = env
+    parent = api.add_task("ordinary parent", "Backlog")  # NO epic label
+    c0 = api.add_task("child0", "Review")
+    c1 = api.add_task("child1", "Build", assignee=api.me_user)
+    api.add_relation(c0["id"], parent["id"], "parenttask")
+    api.add_relation(c1["id"], parent["id"], "parenttask")
+    wf.advance(c1["id"], to="review", worklog="w", evidence="e")
+    assert LABEL_EPIC_READY not in _labels(api, parent["id"])
+
+
+def test_marker_not_fired_on_advance_to_build(env):
+    """The marker only fires on to='review' — advancing a child to Build never marks its epic."""
+    api, wf = env
+    epic, (c0,) = _epic(api, ["Design"])
+    wf.advance(c0["id"], to="build", spec="approach")
+    assert LABEL_EPIC_READY not in _labels(api, epic["id"])
+
+
+# --- idempotency across a bounce + re-advance ---
+
+def test_idempotent_no_double_mark_on_bounce_and_readvance(env):
+    """The marker fired once; a child bounced Review→Build and re-advanced must NOT double-comment
+    or double-label the epic (idempotency keyed on the epic-ready label)."""
+    api, wf = env
+    epic, (c0, c1) = _epic(api, ["Review", "Build"])
+    wf.advance(c1["id"], to="review", worklog="w", evidence="e")           # marks
+    api.task_bucket[c1["id"]] = api.bucket_id("Build")                     # human/reviewer bounces it
+    wf.advance(c1["id"], to="review", worklog="w2", evidence="e2")         # re-advance — must not re-fire
+    assert _labels(api, epic["id"]).count(LABEL_EPIC_READY) == 1
+    assert len(_epic_comments(api, epic["id"])) == 1
+
+
+# --- STRICTLY best-effort: an epic write/lookup failure must never fail the child ---
+
+@pytest.mark.parametrize("break_method", ["get_task", "add_comment", "add_label"])
+def test_epic_marker_failure_never_fails_the_child(env, break_method):
+    """The marker reaches out to a DIFFERENT card, so if the epic lookup, comment, or label raises,
+    the CHILD's advance→review must still succeed and return its normal payload (unchanged shape).
+    Break each epic-directed call in turn and assert the child is wholly unaffected."""
+    api, wf = env
+    epic, (c0, c1) = _epic(api, ["Review", "Build"])
+    epic_id = epic["id"]
+    orig = getattr(api, break_method)
+
+    def boom(task_id, *a, **k):
+        if task_id == epic_id:          # break only calls aimed at the epic card
+            raise RuntimeError(f"{break_method} boom on epic")
+        return orig(task_id, *a, **k)
+
+    setattr(api, break_method, boom)
+    res = wf.advance(c1["id"], to="review", worklog="did it", evidence="deadbeef")
+    # payload shape unchanged — the marker adds/removes no keys
+    assert set(res) == {"moved_to", "task_id", "review_needed", "review_kind", "note"}
+    assert res["moved_to"] == "Review" and res["task_id"] == c1["id"]
+    assert res["review_needed"] is True and res["review_kind"] == "change"
+    assert api.stage_of(c1["id"]) == "Review"   # child advanced despite the epic write failing
+
+
+def test_child_payload_shape_unchanged_on_successful_mark(env):
+    """Even on a SUCCESSFUL mark, the child's own result carries only its usual keys — the marker is
+    a pure side effect on the epic, never reported back in the child's payload."""
+    api, wf = env
+    epic, (c0, c1) = _epic(api, ["Review", "Build"])
+    res = wf.advance(c1["id"], to="review", worklog="w", evidence="e")
+    assert set(res) == {"moved_to", "task_id", "review_needed", "review_kind", "note"}
+
+
+# --- Part 1 + Part 2 compose: a marked epic stays a container ---
+
+def test_marked_epic_still_skipped_by_next_task_and_refused_by_claim(env):
+    """Adding the epic-ready marker does not make the epic claimable or offerable — it's still an
+    epic container. next_task skips it, claim refuses it; it stays reachable to the human,
+    untouched by the pump."""
+    api, wf = env
+    epic = api.add_task("marked epic", "Queue", labels=("epic", LABEL_EPIC_READY))
+    free = api.add_task("real", "Queue", priority=1)
+    assert wf.next_task()["task"]["id"] == free["id"]      # marked epic not offered
+    with pytest.raises(WorkflowError, match="container"):
+        wf.claim(epic["id"])                                # marked epic still refused
