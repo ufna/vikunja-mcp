@@ -72,6 +72,12 @@ docker rm -f vikunja-test
   (`.vikunja-mcp.toml` walk-up), injects the orchestrator standing-context so a
   bare `/loop` drains the Queue instead of the generic autonomous default;
   idempotent merge — no matcher = fires on startup/resume/clear/compact).
+  `sync_installed_artifacts` self-heals those on **MCP server start**
+  (called from `server.main`, so a moving-`stable` rollout refreshes the
+  installed SKILL.md + hook as automatically as the code): refresh-only
+  (rewrites an installed copy only when it exists and differs — never
+  provisions `~/.claude`), best-effort (never raises → never crashes the
+  stdio server, never writes stdout), opt out with `VIKUNJA_MCP_NO_SKILL_SYNC`.
 - `src/vikunja_mcp/skills/tracker/SKILL.md` — process rules for agents
   (queue discipline, orchestrator-dispatches-subagents, report format,
   independent bug review). Ships inside the wheel; root `skills` is a symlink.

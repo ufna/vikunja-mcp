@@ -3,6 +3,10 @@ name: tracker
 description: Use when working with team tasks in the Vikunja tracker via the "tracker" MCP tools (next_task/claim/advance/...) — queue discipline, stage gates, when to call_human vs return_task
 ---
 
+<!-- MANAGED — этот установленный файл авто-синхронизируется из пакета vikunja-mcp при старте
+     MCP-сервера; локальные правки будут перезаписаны. Отключить синк: VIKUNJA_MCP_NO_SKILL_SYNC=1.
+     Обновить вручную: `vikunja-mcp install-skill`. Правь ИСТОЧНИК в репозитории, не эту копию. -->
+
 # Работа с трекером (Vikunja)
 
 Пайплайн: `Backlog → Queue → Design → Build → Review → [человек] → Done`,

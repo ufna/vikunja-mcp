@@ -89,3 +89,38 @@ def test_version_flag(capsys):
 
     server.main(argv=["--version"])
     assert __version__ in capsys.readouterr().out
+
+
+def test_server_self_heals_on_start_before_the_run_loop(monkeypatch):
+    """The server refreshes installed agent artifacts on start, and BEFORE the blocking
+    stdio run loop — so a `stable` rollout reaches SKILL.md + hook as automatically as code."""
+    calls = []
+    monkeypatch.setattr(server, "_self_heal_installed_artifacts", lambda: calls.append("heal"))
+    monkeypatch.setattr(server.mcp, "run", lambda: calls.append("run"))
+
+    server.main(argv=[])                              # the plain server path (no subcommand)
+
+    assert calls == ["heal", "run"]
+
+
+def test_self_heal_swallows_errors(monkeypatch):
+    """A heal failure must never crash the stdio server — it is wholly best-effort."""
+    def boom():
+        raise RuntimeError("disk on fire")
+
+    monkeypatch.setattr("vikunja_mcp.setup_cmd.sync_installed_artifacts", boom)
+    server._self_heal_installed_artifacts()          # must not raise
+
+
+def test_self_heal_logs_to_stderr_never_stdout(monkeypatch, capsys):
+    """stdout is the MCP protocol channel; a healed-something note must go to stderr only."""
+    from pathlib import Path
+
+    monkeypatch.setattr(
+        "vikunja_mcp.setup_cmd.sync_installed_artifacts", lambda: [Path("/x/SKILL.md")]
+    )
+    server._self_heal_installed_artifacts()
+
+    captured = capsys.readouterr()
+    assert captured.out == ""                        # never pollute the stdio channel
+    assert "refreshed 1" in captured.err             # but do leave a trace on stderr

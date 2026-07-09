@@ -19,6 +19,10 @@ PERMISSIONS = {"read": 0, "write": 1, "admin": 2}
 # can be found idempotently in settings.json (match by this filename in a hook command).
 HOOK_SCRIPT_NAME = "vikunja-tracker-orchestrator.sh"
 
+# Opt-out for the on-server-start self-heal (sync_installed_artifacts). Set to a truthy value
+# (1/true/yes/on) to stop the MCP server refreshing installed agent artifacts on startup.
+SKILL_SYNC_OPT_OUT_ENV = "VIKUNJA_MCP_NO_SKILL_SYNC"
+
 # The standing context injected on every session start INSIDE a tracker project. Kept short
 # (the full playbook is the `tracker` skill); it must NAME the override of the generic loop
 # default, or a bare `/loop` never drains the queue. Mirrors CLAUDE.md's dogfood section.
@@ -169,7 +173,9 @@ def render_hook_script() -> str:
         "# vikunja-mcp MANAGED SessionStart hook — tracker-orchestrator ignition.\n"
         "# Injects the orchestrator standing-context ONLY inside a tracker-configured\n"
         "# project (walk-up for .vikunja-mcp.toml), so it never hijacks /loop elsewhere.\n"
-        "# Re-created idempotently by `vikunja-mcp install-skill`; local edits are overwritten.\n"
+        "# Auto-synced from the vikunja-mcp package on MCP server start (opt out:\n"
+        "# VIKUNJA_MCP_NO_SKILL_SYNC=1) and re-created by `vikunja-mcp install-skill`;\n"
+        "# local edits are overwritten.\n"
         'dir="${CLAUDE_PROJECT_DIR:-$PWD}"\n'
         "while :; do\n"
         '  if [ -f "$dir/.vikunja-mcp.toml" ]; then\n'
@@ -271,3 +277,74 @@ def install_skill(dest_root=None, opencode_root=None) -> None:
     oc_skill = _copy_to(oc_root)
     print(f"skill installed (opencode): {oc_skill}")
     print(f'  добавь в opencode.json: "instructions": ["{oc_skill}"]')
+
+
+def _sync_opt_out() -> bool:
+    import os
+
+    return os.environ.get(SKILL_SYNC_OPT_OUT_ENV, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _refresh_if_stale(dest, wanted: str, healed: list, executable: bool = False) -> None:
+    """Rewrite `dest` to `wanted` IFF it already exists and differs — the refresh-only,
+    never-provision rule. Wholly best-effort: any error (unwritable/odd dest) is swallowed so a
+    heal can never crash the stdio server. Appends `dest` to `healed` only when it actually
+    writes; keeps the executable bits on the hook script."""
+    import stat
+
+    try:
+        if not dest.is_file() or dest.read_text(encoding="utf-8") == wanted:
+            return                                   # missing (refresh-only) or already in sync
+        dest.write_text(wanted, encoding="utf-8")
+        if executable:
+            dest.chmod(dest.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+        healed.append(dest)
+    except Exception:
+        pass
+
+
+def sync_installed_artifacts(dest_root=None, opencode_root=None) -> list:
+    """Best-effort, on-server-start REFRESH of already-installed agent artifacts from the
+    packaged source, so a moving-`stable` rollout reaches the SKILL.md + hook as automatically as
+    the code (consumers re-resolve the server every session via `uvx --refresh-package`, but the
+    copies in ~/.claude and ~/.config/opencode used to freeze at the last manual `install-skill`).
+    Covers all three: the Claude Code SKILL.md, the opencode SKILL.md, and the SessionStart hook —
+    whose standing-context prose is embedded inline, so it goes stale the same way.
+
+    REFRESH-ONLY: a dest that does NOT already exist is skipped — the server keeps opted-in
+    copies fresh, it never provisions ~/.claude for a machine that never ran install-skill (the
+    settings.json hook registration is likewise out of scope — re-run install-skill for that).
+    Rewrites only when content differs, so it is an idempotent no-op once in sync. NEVER raises:
+    every read/write is guarded and a failed heal (unwritable/odd dest, missing package data) is a
+    silent no-op, because this runs inside the stdio server and must not crash or block it. Honors
+    the VIKUNJA_MCP_NO_SKILL_SYNC opt-out. Returns the paths rewritten (for the server's stderr
+    note and for tests)."""
+    from pathlib import Path
+
+    healed: list = []
+    if _sync_opt_out():
+        return healed
+    try:
+        from importlib.resources import files
+
+        packaged_skill = files("vikunja_mcp").joinpath("skills/tracker/SKILL.md").read_text(
+            encoding="utf-8"
+        )
+    except Exception:
+        packaged_skill = None
+    try:
+        hook_body = render_hook_script()
+    except Exception:
+        hook_body = None
+
+    claude_root = Path(dest_root) if dest_root else Path("~/.claude").expanduser()
+    oc_root = Path(opencode_root) if opencode_root else Path("~/.config/opencode").expanduser()
+
+    if packaged_skill is not None:
+        for root in (claude_root, oc_root):
+            _refresh_if_stale(root / "skills" / "tracker" / "SKILL.md", packaged_skill, healed)
+    if hook_body is not None:
+        _refresh_if_stale(
+            claude_root / "hooks" / HOOK_SCRIPT_NAME, hook_body, healed, executable=True
+        )
+    return healed

@@ -212,4 +212,24 @@ def main(argv: list[str] | None = None) -> None:
 
         install_skill()
         return
+    _self_heal_installed_artifacts()
     mcp.run()
+
+
+def _self_heal_installed_artifacts() -> None:
+    """On server start, refresh installed agent artifacts (SKILL.md + hook) from the packaged
+    source so a moving-`stable` rollout reaches them as automatically as the server code itself.
+    Wholly best-effort: a heal failure must never crash or delay the stdio server, and this must
+    never write to stdout (the MCP protocol channel) — a healed-something note goes to stderr."""
+    try:
+        from vikunja_mcp.setup_cmd import sync_installed_artifacts
+
+        healed = sync_installed_artifacts()
+        if healed:
+            print(
+                f"vikunja-mcp: refreshed {len(healed)} stale agent artifact(s) from the package: "
+                + ", ".join(str(p) for p in healed),
+                file=sys.stderr,
+            )
+    except Exception:
+        pass
