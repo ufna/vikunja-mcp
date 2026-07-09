@@ -223,7 +223,16 @@ class Workflow:
                 ),
             }
 
-        stuck = [t for t in board.get("Queue", []) if my_id in self._assignee_ids(t)]
+        # skip an epic here too: an epic container assigned to me in Queue (only ever a human's
+        # doing — decompose parks epics in Backlog with the assignee cleared) is NOT claimable
+        # (claim refuses epics below), and this stuck branch outranks the free queue, so handing
+        # it back as a "call claim to finish" instruction would LIVELOCK the pump on an
+        # unclaimable card and starve real work. Keys off the epic LABEL, never subtask structure;
+        # this is not a false-skip of "really my active work" — an epic container is never one.
+        stuck = [
+            t for t in board.get("Queue", [])
+            if my_id in self._assignee_ids(t) and not self._has_label(t, LABEL_EPIC)
+        ]
         if stuck:
             stuck.sort(key=lambda t: -t.get("priority", 0))
             return {
@@ -282,10 +291,18 @@ class Workflow:
                 ),
             }
 
-        # Queue-контракт: свободные берём, назначенные на другого НЕ трогаем — это «для людей»
+        # Queue-контракт: свободные берём, назначенные на другого НЕ трогаем — это «для людей».
+        # epic-контейнер тоже пропускаем (по аналогии с blocked): родитель с меткой epic и живыми
+        # детьми — это контейнер, а не работа, клеймить его бессмысленно (ровно баг из #94, где
+        # next_task предложил epic-родителя как свободную задачу Queue). Скип цепляется за метку
+        # epic, НИКОГДА за наличие подзадач (тот же миграционный принцип, что у гейта
+        # последовательности): у обычной задачи тоже может быть подзадача, и она обязана остаться
+        # клеймабельной.
         queue = [
             t for t in board.get("Queue", [])
-            if not self._assignee_ids(t) and not self._has_label(t, LABEL_BLOCKED)
+            if not self._assignee_ids(t)
+            and not self._has_label(t, LABEL_BLOCKED)
+            and not self._has_label(t, LABEL_EPIC)
         ]
         queue.sort(key=lambda t: -t.get("priority", 0))
         # hard sequence gate (option C, epic #94) — free-queue half: a free task whose
@@ -506,6 +523,23 @@ class Workflow:
         task, stage = self._find_task(task_id, board=board)
         if stage != "Queue":
             raise WorkflowError(f"task is in '{stage}', you can only claim from Queue")
+        # epic containers are not claimable (epic #94 / #118): a card labelled epic is a
+        # CONTAINER, not a unit of work — its evidence lives in its children, each claimed and
+        # reviewed on its own. Refuse it here (next_task already skips it, but claim must gate too:
+        # it otherwise checks only stage==Queue and would take an epic handed in directly), and
+        # point the agent at the children. Keys off the epic LABEL, never the presence of subtasks
+        # — an ordinary task may have subtasks and MUST stay claimable (the migration guard, same
+        # principle as the sequence gate).
+        if self._has_label(task, LABEL_EPIC):
+            related = self.api.get_task(task_id).get("related_tasks") or {}
+            subtasks = related.get("subtask") or []
+            kids = ", ".join(self._ref(s) for s in subtasks) or "его подзадачами"
+            raise WorkflowError(
+                f"{self._ref(task)} is an epic CONTAINER (label epic), not a unit of work — "
+                f"there is nothing to claim on the container itself. Its code/evidence lives in "
+                f"its children, each claimed and reviewed on its own; work on those instead: "
+                f"{kids}"
+            )
         # hard sequence gate (option C, epic #94): refuse to START a successor while any of its
         # predecessors is unfinished (below Review). claim otherwise checks only stage==Queue, so
         # without this the gate is trivially bypassed by claiming a successor directly. Keys off

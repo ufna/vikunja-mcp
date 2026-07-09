@@ -87,7 +87,8 @@ def next_task() -> dict:
     awaiting independent review — ANY card except an epic container, with no fresh verdict
     and not your own (review_kind names the rubric: 'bug' or 'change'), (4) the top FREE
     task in Queue. Never hands out a task assigned to someone else — those are "for humans".
-    Leaves Backlog and blocked alone. One task at a time.
+    Leaves Backlog, blocked, and epic containers (label epic — a container, not a unit of
+    work) alone. One task at a time.
     Among your active tasks, one that is a predecessor of another of your active tasks is
     handed back first (finish the unblocking rework before its successor), overriding priority.
     A free task whose predecessor
@@ -111,9 +112,11 @@ def claim(task_id: int) -> dict:
     """Take a task from Queue: assigns you and moves it to Design. You may take free
     tasks or ones already assigned to you; one assigned to someone else is "for humans"
     and claim won't hand it over. Also refused outside Queue and on a lost race (call
-    next_task then). If the single-WIP policy is enabled (enforce_single_wip in the repo
-    toml, off by default), claim also refuses while you already have an active
-    Design/Build task — finish it or return_task it first."""
+    next_task then). An epic container (label epic) is refused too — it's a container, not a
+    unit of work; its evidence lives in its children, so work on those. If the single-WIP
+    policy is enabled (enforce_single_wip in the repo toml, off by default), claim also
+    refuses while you already have an active Design/Build task — finish it or return_task
+    it first."""
     return _wf().claim(task_id)
 
 
