@@ -9,7 +9,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
-      - run: uv sync
+      # --locked: падаем громко, если uv.lock разъехался с pyproject (без флага
+      # uv молча перепишет лок в раннере и job позеленеет, пряча drift).
+      - run: uv sync --locked
       - run: uv run ruff check .
       - run: uv run pytest tests/unit -q
 
@@ -28,13 +30,14 @@ jobs:
             -e VIKUNJA_SERVICE_ENABLEREGISTRATION=true \
             vikunja/vikunja:2.3.0
           timeout 60 bash -c 'until curl -sf http://localhost:3456/api/v1/info; do sleep 1; done'
-      - run: uv sync
+      - run: uv sync --locked
       - run: uv run pytest tests/integration -q
         env:
           VIKUNJA_TEST_URL: http://localhost:3456
 
   # Авто-релиз патч-версии: на каждый зелёный push в main бампаем патч в обоих
-  # version-файлах, коммитим этот bump, тегируем vX.Y.Z и двигаем stable на него.
+  # version-файлах И в self-entry uv.lock, коммитим этот bump, тегируем vX.Y.Z и
+  # двигаем stable на него.
   # Инвариант: тег и stable указывают на version-only bump-коммит поверх только
   # что позеленевшего main. Коммит, запушенный GITHUB_TOKEN, GitHub намеренно НЕ
   # триггерит новый workflow-run (рекурсии нет); [skip ci] — второй пояс.
@@ -65,7 +68,7 @@ jobs:
         env:
           VERSION: ${{ steps.bump.outputs.version }}
         run: |
-          git add pyproject.toml src/vikunja_mcp/__init__.py
+          git add pyproject.toml src/vikunja_mcp/__init__.py uv.lock
           git commit -m "chore: ${VERSION} [skip ci]"
           git tag -a "${VERSION}" -m "${VERSION}"
           git push origin HEAD:main                 # bump-коммит -> main

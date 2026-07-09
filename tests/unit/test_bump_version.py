@@ -98,3 +98,43 @@ def test_end_to_end_read_bump_write(tmp_path):
     assert '__version__ = "0.1.10"' in init.read_text()
     assert 'version = "0.1.10"' in pyproject.read_text()
     assert 'target-version = "py311"' in pyproject.read_text()
+
+
+# --- write_lock_version: правит ТОЛЬКО self-entry uv.lock, не задевая чужие пакеты ---
+
+
+def _seed_lock(tmp_path, version):
+    """Мини-uv.lock: чужой пакет со своей version-строкой + self-entry проекта."""
+    lock = tmp_path / "uv.lock"
+    lock.write_text(
+        "[[package]]\n"
+        'name = "httpx"\n'
+        'version = "0.28.1"\n'
+        'source = { registry = "https://pypi.org/simple" }\n\n'
+        "[[package]]\n"
+        'name = "vikunja-mcp"\n'
+        f'version = "{version}"\n'
+        'source = { editable = "." }\n'
+    )
+    return lock
+
+
+def test_write_lock_version_bumps_self_entry(tmp_path):
+    lock = _seed_lock(tmp_path, "0.1.3")
+    bump_version.write_lock_version("0.1.4", lock_path=lock)
+    assert 'name = "vikunja-mcp"\nversion = "0.1.4"' in lock.read_text()
+
+
+def test_write_lock_version_leaves_other_packages_untouched(tmp_path):
+    """В реальном локе десятки version-строк — правим ровно self-entry, httpx не трогаем."""
+    lock = _seed_lock(tmp_path, "0.1.3")
+    bump_version.write_lock_version("0.1.4", lock_path=lock)
+    assert 'name = "httpx"\nversion = "0.28.1"' in lock.read_text()
+
+
+def test_write_lock_version_raises_when_no_self_entry(tmp_path):
+    """Нет self-entry -> hard-fail (как и остальные version-строки в _replace_version)."""
+    lock = tmp_path / "uv.lock"
+    lock.write_text('[[package]]\nname = "httpx"\nversion = "0.28.1"\n')
+    with pytest.raises(ValueError):
+        bump_version.write_lock_version("0.1.4", lock_path=lock)
