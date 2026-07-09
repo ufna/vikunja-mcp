@@ -83,9 +83,10 @@ def _tool(fn):
 @_tool
 def next_task() -> dict:
     """What to do next, in order: (1) YOUR active task (Design/Build, incl. one bounced
-    back from Your Call), (2) a task in Queue assigned to you, (3) a bug fix in Review
-    awaiting independent review (label bug, no verdict yet), (4) the top FREE task in
-    Queue. Never hands out a task assigned to someone else — those are "for humans".
+    back from Your Call), (2) a task in Queue assigned to you, (3) a task in Review
+    awaiting independent review — ANY card except an epic container, with no fresh verdict
+    and not your own (review_kind names the rubric: 'bug' or 'change'), (4) the top FREE
+    task in Queue. Never hands out a task assigned to someone else — those are "for humans".
     Leaves Backlog and blocked alone. One task at a time.
     Among your active tasks, one that is a predecessor of another of your active tasks is
     handed back first (finish the unblocking rework before its successor), overriding priority.
@@ -144,6 +145,9 @@ def advance(
     root_cause is MANDATORY — the cause of the bug (why it happened), not the symptom.
     The report is posted as a comment for the reviewer to read. There is no transition
     to Done — a human moves it to Done after review.
+    EVERY task reaching Review returns review_needed=True + review_kind ('bug'|'change')
+    so the orchestrator dispatches an independent reviewer — EXCEPT an epic container
+    (label epic), which has no code of its own (its evidence lives in its children).
     to='review' is also LATCHED while any predecessor (a follows/blocked link, e.g. an
     ordered-epic step) is still below Review: if a predecessor was bounced Review→Build,
     finish its rework back to Review before this successor may advance (the refusal names it)."""
@@ -155,9 +159,12 @@ def advance(
 @mcp.tool()
 @_tool
 def review_task(task_id: int, verdict: str, report: str) -> dict:
-    """Independent review of a bug fix in Review (offered via next_task). You must NOT be
-    the author of the code under review — a separate session reviews it. Check for real:
-    reproduce the bug, confirm the fix closes the root cause (not the symptom), run it.
+    """Independent review of a task in Review (offered via next_task with review_kind). You
+    must NOT be the author of the code under review — a separate session reviews it. Check
+    for real by RUNNING it, not just reading: review_kind='bug' — reproduce the bug and
+    confirm the fix closes the root cause (not the symptom); review_kind='change'
+    (feat/chore/docs/refactor) — confirm it does what the spec/description said, the tests
+    are real, it stayed in its slice, and look for obvious regressions nearby.
     verdict='approve' — a verdict comment, a human moves it to Done next;
     verdict='needs_work' — a verdict comment and the task returns to Build to the
     implementer. report is required: what you checked, what you observed, why this

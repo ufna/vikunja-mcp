@@ -321,14 +321,42 @@ def test_review_flow_for_bug_labels(env):
     assert not res.get("review"), res
 
 
-def test_review_not_offered_without_bug_label(env):
+def test_review_offered_for_non_bug_task_kind_change(env):
+    """#117: независимое ревью теперь на ВСЕ задачи, не только bug — не-баг в Review
+    предлагается свободному агенту с review_kind='change'."""
     api, wf, t = env
     wf.advance(t["id"], to="build", spec="s")
     wf.advance(t["id"], to="review", worklog="w", evidence="e")
     reviewer = type(wf)(api, project_id=3)
     reviewer._me_cache = {"id": 77, "username": "agent-reviewer"}
+    offered = reviewer.next_task()
+    assert offered.get("review") is True
+    assert offered["task"]["id"] == t["id"]
+    assert offered["review_kind"] == "change"
+
+
+def test_review_not_offered_without_worklog_report(env):
+    """#117 guard: a card in Review with no [worklog] has nothing to review — a card parked in
+    Review by hand (no work report) is NOT offered for independent review (advance→review always
+    posts a worklog, so real Review cards have one)."""
+    api, wf, t = env
+    api.add_task("parked by hand", "Review")   # no worklog, no verdict, unassigned
+    reviewer = type(wf)(api, project_id=3)
+    reviewer._me_cache = {"id": 77, "username": "agent-reviewer"}
     res = reviewer.next_task()
     assert "review" not in res
+
+
+def test_review_not_offered_for_epic_container(env):
+    """#117: epic-контейнер (нет своего кода — evidence в детях) НЕ предлагается на ревью,
+    даже неназначенный и с worklog — исключение по метке epic, а не по assignee."""
+    api, wf, t = env
+    epic = api.add_task("epic container", "Review", labels=("epic",))
+    api.add_comment(epic["id"], "[worklog] собрано")   # отчёт есть, вердикта нет
+    reviewer = type(wf)(api, project_id=3)
+    reviewer._me_cache = {"id": 77, "username": "agent-reviewer"}
+    res = reviewer.next_task()
+    assert "review" not in res      # epic отфильтрован — на ревью не выдаётся
 
 
 def test_review_reoffered_after_needs_work_rework(env):
@@ -411,19 +439,33 @@ def test_advance_review_first_submit_no_review_failed_label(env):
 
 
 def test_advance_review_bug_returns_review_needed_note(env):
-    """advance(to='review') на баге отдаёт review_needed=True + подсказку про push-ревью."""
+    """advance(to='review') на баге отдаёт review_needed=True, review_kind='bug' + подсказку."""
     api, wf, t = env
     api.tasks[t["id"]]["labels"].append({"id": 999, "title": "bug"})
     res = _to_review(wf, t["id"])
     assert res["review_needed"] is True
+    assert res["review_kind"] == "bug"
     assert res.get("note")
 
 
-def test_advance_review_non_bug_no_review_needed(env):
-    """На не-баге ничего лишнего в payload нет — только moved_to/task_id."""
+def test_advance_review_non_bug_returns_review_needed_kind_change(env):
+    """#117: не-баг (feat/chore/docs) теперь ТОЖЕ требует независимого ревью —
+    review_needed=True с review_kind='change' (root_cause не нужен)."""
     api, wf, t = env
     res = _to_review(wf, t["id"])
+    assert res["review_needed"] is True
+    assert res["review_kind"] == "change"
+    assert res.get("note")
+
+
+def test_advance_review_epic_container_no_review_needed(env):
+    """#117: epic-контейнер (нет своего кода) НЕ триггерит независимое ревью —
+    review_needed/review_kind отсутствуют, payload голый (как #94)."""
+    api, wf, t = env
+    api.tasks[t["id"]]["labels"].append({"id": 999, "title": "epic"})
+    res = _to_review(wf, t["id"])
     assert "review_needed" not in res
+    assert "review_kind" not in res
     assert res == {"moved_to": "Review", "task_id": t["id"]}
 
 

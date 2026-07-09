@@ -234,8 +234,16 @@ class Workflow:
                 ),
             }
 
+        # independent-review pull path (#117): offer ANY task in Review awaiting review —
+        # not just bug fixes — EXCEPT an epic container (label epic), whose code lives in its
+        # children (each reviewed on its own advance), so there is nothing to review here. The
+        # epic skip keys off the LABEL, never the presence of subtasks (same migration-guard
+        # principle as the sequence gate). Two guards keep the pump safe: skip a task assigned
+        # to the caller (never review your own work) and skip one whose verdict is fresher than
+        # its last report (else an already-reviewed card is handed back forever and the queue
+        # never advances — the freshness check just below).
         for t in sorted(board.get("Review", []), key=lambda t: -t.get("priority", 0)):
-            if not self._has_label(t, LABEL_BUG) or my_id in self._assignee_ids(t):
+            if self._has_label(t, LABEL_EPIC) or my_id in self._assignee_ids(t):
                 continue
             # вердикт актуален, только если он свежее последнего отчёта: после цикла
             # needs_work -> доработка -> Review задача должна снова попасть к ревьюеру
@@ -252,15 +260,25 @@ class Workflow:
                  if html_to_text(c.get("comment") or "").startswith("[worklog]")),
                 default="",
             )
+            # nothing to review until a work report exists: advance→review always posts a
+            # [worklog], so a Review card WITHOUT one was placed there by hand — not a review
+            # candidate. This also keeps the sequence gate's bare "predecessor ready at Review"
+            # tasks (and any hand-parked card) out of the widened #117 net.
+            if not last_worklog:
+                continue
             if last_review is not None and last_review >= last_worklog:
                 continue
+            review_kind = "bug" if self._has_label(t, LABEL_BUG) else "change"
             return {
-                "review": True, "task": self._summary(t),
+                "review": True, "review_kind": review_kind, "task": self._summary(t),
                 "note": (
-                    "a bug fix is waiting for independent review: reproduce it, confirm "
-                    "the fix closes the cause (not the symptom), run it and cast a "
-                    "verdict via review_task(task_id, verdict=..., report=...). Do NOT "
-                    "review it if you wrote this code in this session"
+                    "this task is waiting for independent review — run it and cast a verdict "
+                    "via review_task(task_id, verdict=..., report=...). review_kind='bug': "
+                    "reproduce it and confirm the fix closes the CAUSE (not the symptom); "
+                    "review_kind='change' (feat/chore/docs/refactor): confirm it does what "
+                    "the spec/description said, the tests are real, it stayed in its slice, "
+                    "and look for obvious regressions nearby. Do NOT review it if you wrote "
+                    "this code in this session"
                 ),
             }
 
@@ -613,14 +631,22 @@ class Workflow:
             self._remove_label(task, LABEL_REVIEW_FAILED)
         self._move(task_id, to_stage)
         result = {"moved_to": to_stage, "task_id": task_id}
-        # push-нудж: багфикс требует независимого ревью — пер-таск-агент вернёт
-        # review_needed оркестратору, тот задиспатчит ревьюера (author != reviewer)
-        if to == "review" and self._has_label(task, LABEL_BUG):
+        # push-нудж (#117): ЛЮБАЯ задача, доведённая до Review, требует независимого ревью —
+        # не только багфикс. Исключение — epic-контейнер (label epic): его код лежит в детях
+        # (каждый отревьюен на своём advance), ревьюить нечего. Скип цепляется за метку epic,
+        # НИКОГДА за наличие подзадач (тот же миграционный принцип, что у гейта
+        # последовательности). Пер-таск-агент вернёт review_needed оркестратору, тот задиспатчит
+        # свежего ревьюера (author != reviewer); review_kind задаёт рубрику: 'bug' —
+        # воспроизвести и закрыть причину; 'change' — соответствие spec, реальные тесты, слайс.
+        if to == "review" and not self._has_label(task, LABEL_EPIC):
             result["review_needed"] = True
+            result["review_kind"] = "bug" if self._has_label(task, LABEL_BUG) else "change"
             result["note"] = (
-                "this is a bug — return the review_needed flag to the orchestrator in "
-                "your result: it will dispatch an independent reviewer in the background "
-                "(author ≠ reviewer)"
+                "this task needs independent review — return the review_needed flag to the "
+                "orchestrator in your result: it will dispatch a fresh reviewer in the "
+                "background (author ≠ reviewer). review_kind tells it the rubric: 'bug' — "
+                "reproduce and confirm the cause is closed; 'change' — conforms to spec, real "
+                "tests, stayed in slice, obvious regressions nearby"
             )
         return result
 
