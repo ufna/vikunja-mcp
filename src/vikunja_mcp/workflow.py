@@ -299,6 +299,17 @@ class Workflow:
         # distinguishable from the empty queue below (the pump idles on task:null), else a
         # stalled chain sleeps forever unseen.
         if gated:
+            # cycle safety valve (option C, epic #94, C5/#105): before reporting a generic
+            # starving tail, DFS the unfinished-predecessor edges from these gated candidates.
+            # A back-edge = a predecessor CYCLE (only ever hand-created in the web UI: A follows
+            # B, B follows A) in which nothing is claimable AND which can't self-unblock, so it
+            # earns its own distinct signal instead of masquerading as an ordinary stalled tail.
+            # Reuse the ONE board snapshot (raw); the walk is bounded and provably terminating
+            # (see _find_predecessor_cycle). A cycle anywhere on the board can NOT suppress a
+            # genuinely claimable free task — the loop above already RETURNED it before here.
+            cycle = self._find_predecessor_cycle(gated, raw)
+            if cycle is not None:
+                return self._cycle_signal(cycle, raw)
             return self._starving_tail(gated)
         return {"task": None, "message": "the queue is empty — no work for the agent"}
 
@@ -314,8 +325,10 @@ class Workflow:
         `waiting` names each blocked task with the predecessor holding it. Special case: a
         predecessor sitting in Backlog is a chain HEAD sent back by return_task (label blocked,
         assignee cleared); its whole tail stalls until a human re-triages it — flagged
-        needs_retriage and spelled out in the message, never left a mystery. (Cycle detection
-        over these same gated candidates is C5/#105; this signal is its seed.)"""
+        needs_retriage and spelled out in the message, never left a mystery. (A predecessor
+        CYCLE among these same gated candidates is caught earlier, by _find_predecessor_cycle
+        (C5/#105), which returns its own distinct signal — so reaching here means the gate is
+        acyclic: an honest starving tail, not a loop.)"""
         waiting = [
             {
                 "task": self._summary(task),
@@ -359,6 +372,114 @@ class Workflow:
                 "as 'nothing to do' — surface it so a human sees the stalled chain, then "
                 "ScheduleWakeup and re-check later. When needs_retriage is set, a chain head "
                 "was returned to Backlog and a human must re-triage it before the tail resumes."
+            ),
+        }
+
+    def _find_predecessor_cycle(
+        self, gated: list[tuple[dict, list[dict]]], board: list[dict]
+    ) -> list[int] | None:
+        """DFS over UNFINISHED-predecessor edges from the gated Queue candidates; return the ids
+        on the first cycle found (a back-edge into the current path), else None. A cycle can only
+        be introduced by a human hand-editing follows/blocked relations in the web UI (an ordered
+        decompose builds a linear, acyclic chain), and when it happens every task in the loop has
+        an unfinished predecessor, so nothing is claimable — otherwise indistinguishable from a
+        plain starving tail. This runs inside next_task, the pump's own tool, on every idle tick,
+        so it MUST terminate and MUST NOT hang: the walk is ITERATIVE (no recursion limit) and
+        each node enters the path at most once (guarded by `visited`/`on_path`), so it is bounded
+        by the reachable unfinished subgraph. A malformed self-referential relation (A follows A)
+        surfaces the node as its own predecessor and is reported as a 1-cycle, never an infinite
+        loop. `visited` and `on_path` are SEPARATE sets — a node re-reached off the current path
+        (a diamond/converging DAG) is pruned, NOT mistaken for a cycle (the false-positive guard).
+        Bounded to unfinished (below-Review) predecessors — the exact edges the gate reads, never
+        the whole board. The blockers next_task already computed for the roots seed the edge
+        cache, so their get_task calls aren't repeated; deeper nodes are fetched lazily and
+        memoized (each expanded at most once). Reuses the ONE board snapshot passed in."""
+        preds_cache: dict[int, list[int]] = {
+            t["id"]: [b["id"] for b in blockers] for t, blockers in gated
+        }
+
+        def preds(tid: int) -> list[int]:
+            if tid not in preds_cache:
+                preds_cache[tid] = [
+                    p["id"] for p in self._unfinished_predecessors(tid, board=board)
+                ]
+            return preds_cache[tid]
+
+        visited: set[int] = set()  # fully explored, proven not to reach a cycle -> never re-walked
+        for root, _blockers in gated:
+            if root["id"] in visited:
+                continue
+            path: list[int] = []       # the CURRENT dfs path, in order
+            on_path: set[int] = set()  # its membership -> a hit here is a back-edge (a cycle)
+            # explicit stack of (node, iterator-over-its-unfinished-predecessors)
+            stack: list[tuple[int, Any]] = [(root["id"], iter(preds(root["id"])))]
+            path.append(root["id"])
+            on_path.add(root["id"])
+            while stack:
+                node, it = stack[-1]
+                descended = False
+                for child in it:
+                    if child in on_path:
+                        return path[path.index(child):]  # back-edge -> the loop is this slice
+                    if child in visited:
+                        continue  # already proven cycle-free -> prune, do NOT flag (diamond guard)
+                    stack.append((child, iter(preds(child))))
+                    path.append(child)
+                    on_path.add(child)
+                    descended = True
+                    break
+                if not descended:  # node's predecessors exhausted with no back-edge -> finish it
+                    stack.pop()
+                    path.pop()
+                    on_path.discard(node)
+                    visited.add(node)
+        return None
+
+    def _cycle_signal(self, cycle_ids: list[int], board: list[dict]) -> dict:
+        """The distinguishable "a predecessor CYCLE makes everything unclaimable" signal — a THIRD
+        state beside the empty queue and the plain starving tail. A cycle (A follows B, B follows
+        A — only ever hand-created in the web UI) can't self-unblock: every task in it waits on
+        another, so unlike a starving tail (which clears once a head reaches Review) ONLY a human
+        can break it, by removing one follows/blocked link. `task` stays None (nothing to claim);
+        `cycle`/`cycle_tasks` are the additive discriminators; the message and note NAME the
+        looping tasks and tell the caller to surface it to a human, NOT to read it as 'nothing to
+        do' and just sleep. Reuses the passed board snapshot to resolve each id to ref/title/stage
+        (a member gone from the board falls back to '#<id>', never crashing)."""
+        task_by_id = {
+            t["id"]: (t, bucket["title"])
+            for bucket in board for t in (bucket.get("tasks") or [])
+        }
+        nodes: list[dict] = []
+        for tid in cycle_ids:
+            found = task_by_id.get(tid)
+            if found is None:
+                nodes.append({"id": tid, "ref": f"#{tid}", "title": "?", "stage": "?"})
+            else:
+                task, stage = found
+                nodes.append(
+                    {"id": tid, "ref": self._ref(task), "title": task["title"], "stage": stage}
+                )
+        # render the loop CLOSED (A → B → A) so a 2-cycle and a self-loop both read unambiguously
+        loop = " → ".join([n["ref"] for n in nodes] + [nodes[0]["ref"]])
+        detail = "; ".join(f"{n['ref']} in '{n['stage']}'" for n in nodes)
+        message = (
+            f"ЦИКЛ предшественников — {loop}: {len(nodes)} задач(и) взаимно ждут друг друга "
+            f"(follows/blocked-связи образуют петлю), поэтому НИЧЕГО в цикле не клеймабельно и "
+            f"цепочка НЕ разблокируется сама. Это НЕ пустая очередь и НЕ обычное голодание "
+            f"хвоста: разорвать цикл может только человек, убрав одну follows/blocked-связь в "
+            f"вебе. Задачи в цикле: {detail}"
+        )
+        return {
+            "task": None,
+            "cycle": True,
+            "cycle_tasks": nodes,
+            "message": message,
+            "note": (
+                "a predecessor CYCLE (hand-edited follows/blocked relations form a loop) makes "
+                "every task in it unclaimable and it can NOT self-unblock — distinct from a plain "
+                "starving tail. Do NOT treat this as 'nothing to do' and just ScheduleWakeup: "
+                "surface it to a human (call_human) to break the cycle by removing one "
+                "follows/blocked link in the web UI. Nothing in the loop moves until they do."
             ),
         }
 

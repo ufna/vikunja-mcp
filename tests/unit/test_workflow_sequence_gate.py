@@ -554,3 +554,151 @@ def test_decompose_ordered_single_child_rejected_no_relation(env):
     with pytest.raises(WorkflowError, match="2"):
         wf.decompose(parent["id"], subtasks=[{"title": "only"}], ordered=True)
     assert not any(kind == "precedes" for _t, _o, kind in api.relations)
+
+
+# --- C5 (#105): predecessor-cycle detection + distinguishable diagnostic signal ---
+#
+# A cycle can only be introduced by a human hand-editing follows/blocked relations in the web UI
+# (an ordered decompose builds a linear, acyclic chain). When it happens every task in the loop
+# has an unfinished predecessor, so nothing is claimable — and without this it would masquerade
+# as a plain starving tail (or, worse, silence). next_task must emit a DISTINCT cycle signal.
+
+
+def test_two_cycle_reported_as_cycle_naming_both_tasks(env):
+    """A 2-cycle (A follows B, B follows A) -> the distinguishable CYCLE signal: task None,
+    cycle True, cycle_tasks naming BOTH, message says 'цикл' and both refs. It must NOT read as a
+    starving tail (no `starving` key) nor as an empty queue."""
+    api, wf = env
+    a = api.add_task("A", "Queue")
+    b = api.add_task("B", "Queue")
+    api.add_relation(a["id"], b["id"], "follows")   # A follows B -> B is A's predecessor
+    api.add_relation(b["id"], a["id"], "follows")   # B follows A -> A is B's predecessor
+    res = wf.next_task()
+    assert res["task"] is None
+    assert res["cycle"] is True
+    assert "starving" not in res                     # distinguishable from the starving tail
+    assert res != EMPTY and res["message"] != EMPTY["message"]
+    assert {n["id"] for n in res["cycle_tasks"]} == {a["id"], b["id"]}
+    assert a["identifier"] in res["message"] and b["identifier"] in res["message"]
+    assert "цикл" in res["message"].lower()
+
+
+def test_three_cycle_reported_naming_all_three(env):
+    """A 3-cycle (A→B→C→A via follows) is detected and all three tasks are named."""
+    api, wf = env
+    a = api.add_task("A", "Queue")
+    b = api.add_task("B", "Queue")
+    c = api.add_task("C", "Queue")
+    api.add_relation(a["id"], b["id"], "follows")   # A follows B
+    api.add_relation(b["id"], c["id"], "follows")   # B follows C
+    api.add_relation(c["id"], a["id"], "follows")   # C follows A
+    res = wf.next_task()
+    assert res["cycle"] is True
+    assert {n["id"] for n in res["cycle_tasks"]} == {a["id"], b["id"], c["id"]}
+    for t in (a, b, c):
+        assert t["identifier"] in res["message"]
+
+
+def test_self_loop_detected_no_crash_no_hang(env):
+    """THE malformed-relation guard: a self-referential 'A follows A' makes A its own unfinished
+    predecessor. It must be reported as a 1-cycle — never crash, never loop forever. Reaching the
+    assertions at all proves the traversal terminated."""
+    api, wf = env
+    a = api.add_task("A", "Queue")
+    api.add_relation(a["id"], a["id"], "follows")   # A follows A
+    res = wf.next_task()
+    assert res["cycle"] is True
+    assert [n["id"] for n in res["cycle_tasks"]] == [a["id"]]
+    assert a["identifier"] in res["message"]
+
+
+def test_blocked_relation_cycle_detected(env):
+    """`blocked` is a predecessor kind like `follows`: a 2-cycle built from blocked links is
+    caught too (parity with follows)."""
+    api, wf = env
+    a = api.add_task("A", "Queue")
+    b = api.add_task("B", "Queue")
+    api.add_relation(a["id"], b["id"], "blocked")   # A blocked-by B
+    api.add_relation(b["id"], a["id"], "blocked")   # B blocked-by A
+    res = wf.next_task()
+    assert res["cycle"] is True
+    assert {n["id"] for n in res["cycle_tasks"]} == {a["id"], b["id"]}
+
+
+def test_deep_acyclic_chain_not_flagged_as_cycle(env):
+    """THE false-positive guard: a long acyclic chain (head in Build, a deep Queue tail all gated)
+    must read as a starving tail, NEVER a cycle. N deliberately EXCEEDS Python's default recursion
+    limit (1000) so a naive recursive DFS would stack-overflow here — the iterative walk must not
+    (this runs inside the pump's own tool)."""
+    api, wf = env
+    head = api.add_task("head", "Build")            # in-flight, below Review -> the tail is gated
+    n = 1100
+    chain = [api.add_task(f"s{i}", "Queue") for i in range(n)]
+    # s0 follows s1 follows ... follows s[n-1] follows head — every Queue task gated, fully acyclic
+    for i in range(n - 1):
+        api.add_relation(chain[i]["id"], chain[i + 1]["id"], "follows")
+    api.add_relation(chain[n - 1]["id"], head["id"], "follows")
+    res = wf.next_task()
+    assert res["task"] is None
+    assert res.get("cycle") is None                 # NOT a cycle
+    assert "cycle" not in res
+    assert res["starving"] is True                  # an honest starving tail
+
+
+def test_converging_dag_not_flagged_as_cycle(env):
+    """THE diamond guard that separates `visited` from `on_path`: D (in Build) is a shared
+    predecessor reached by two paths from A (A→B→D and A→C→D). When D is re-reached OFF the current
+    path it must be PRUNED via `visited`, not mistaken for a back-edge. A single-set DFS would
+    false-positive here."""
+    api, wf = env
+    d = api.add_task("D", "Build")
+    b = api.add_task("B", "Queue")
+    c = api.add_task("C", "Queue")
+    a = api.add_task("A", "Queue")
+    api.add_relation(b["id"], d["id"], "follows")   # B follows D
+    api.add_relation(c["id"], d["id"], "follows")   # C follows D
+    api.add_relation(a["id"], b["id"], "follows")   # A follows B
+    api.add_relation(a["id"], c["id"], "follows")   # A follows C
+    res = wf.next_task()
+    assert res["task"] is None
+    assert res.get("cycle") is None
+    assert res["starving"] is True
+
+
+def test_cycle_elsewhere_does_not_suppress_a_claimable_free_task(env):
+    """THE isolation guarantee: a 2-cycle among X,Y (HIGHER priority) must NOT hide an unrelated,
+    genuinely claimable free task (lower priority) elsewhere in Queue. next_task returns the free
+    task — the free-queue loop returns it before cycle detection ever runs — so a cycle anywhere
+    on the board never wedges the pump."""
+    api, wf = env
+    x = api.add_task("X", "Queue", priority=5)
+    y = api.add_task("Y", "Queue", priority=5)
+    api.add_relation(x["id"], y["id"], "follows")
+    api.add_relation(y["id"], x["id"], "follows")
+    free = api.add_task("free", "Queue", priority=1)   # unrelated, ungated, LOWER priority
+    res = wf.next_task()
+    assert res["resume"] is False
+    assert res["task"]["id"] == free["id"]
+    assert "cycle" not in res
+
+
+def test_acyclic_gated_tail_still_reported_as_starving_not_cycle(env):
+    """The ordinary starving tail (gated but acyclic) is unchanged: a lone Queue successor blocked
+    by a Build predecessor is a starving tail, explicitly NOT a cycle."""
+    api, wf = env
+    pred = api.add_task("pred", "Build")
+    succ = api.add_task("succ", "Queue")
+    api.add_relation(succ["id"], pred["id"], "follows")
+    res = wf.next_task()
+    assert res["starving"] is True
+    assert res.get("cycle") is None
+    assert "cycle" not in res
+
+
+def test_empty_queue_still_empty_not_cycle(env):
+    """Sanity: with nothing gated the empty-queue signal is untouched — the cycle path never fires
+    (byte-for-byte the #102 empty result, no cycle discriminators)."""
+    api, wf = env
+    res = wf.next_task()
+    assert res == EMPTY
+    assert "cycle" not in res
