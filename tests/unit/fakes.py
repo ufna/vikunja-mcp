@@ -156,6 +156,19 @@ class FakeAPI:
             raise VikunjaError(404, "This task attachment does not exist.")
         return data
 
+    def upload_attachment(self, task_id, filename, data, mime=None):
+        # 1:1 with the real endpoint PUT /tasks/{id}/attachments (#137): stores the file (so a
+        # later get_task surfaces it — round-trip fidelity) and returns the SAME envelope the real
+        # 2.3.0 server sends — {"errors": None, "success": [attachment]} — where the attachment has
+        # the shape workflow.get_task reads ({id, task_id, file:{id,name,mime,size}}). The created_
+        # by/created scalars the server also returns are omitted, exactly as this fake models them
+        # nowhere else (get_task's attachment view never reads them). Reuses add_attachment so the
+        # stored shape stays identical to a test-seeded one.
+        att = self.add_attachment(
+            task_id, filename, mime or "application/octet-stream", data=data
+        )
+        return {"errors": None, "success": [att]}
+
     def update_task(self, task_id, **fields):
         self.tasks[task_id].update(fields)
         return dict(self.tasks[task_id])

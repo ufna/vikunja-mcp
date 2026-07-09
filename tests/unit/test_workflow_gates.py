@@ -670,3 +670,106 @@ def test_download_attachment_sweeps_stale_temp_dirs(env, att_root):
     fresh = wf.download_attachment(t["id"], att["id"])["path"]
     assert not os.path.exists(stale_dir)                 # stale reaped by the sweep
     assert os.path.exists(fresh)                         # the just-written one kept
+
+
+# --- вложения: attach_file (upload, #137) --------------------------------------------
+
+
+def test_attach_file_uploads_and_round_trips_into_get_task(env, tmp_path):
+    """#137: attach_file uploads a LOCAL file; it lands on the card and get_task then surfaces its
+    metadata (round-trip). The basename is the name, size/mime are reported, and a new
+    attachment_id comes back — so an agent can cite it as evidence."""
+    api, wf, t = env
+    data = b"\x89PNG\r\n\x1a\nfinished-ui"
+    src = tmp_path / "shot.png"
+    src.write_bytes(data)
+    res = wf.attach_file(t["id"], str(src))
+    assert res["attached"] is True
+    assert res["name"] == "shot.png"
+    assert res["size"] == len(data)
+    assert res["mime"] == "image/png"                    # guessed from the extension
+    assert res["attachment_id"] is not None
+    dossier = wf.get_task(t["id"])
+    assert dossier["attachments"] == [
+        {"id": res["attachment_id"], "name": "shot.png", "mime": "image/png", "size": len(data)}
+    ]
+
+
+def test_attach_file_missing_path_is_actionable(env, tmp_path):
+    api, wf, t = env
+    with pytest.raises(WorkflowError, match="no file to attach"):
+        wf.attach_file(t["id"], str(tmp_path / "nope.png"))
+
+
+def test_attach_file_directory_is_refused(env, tmp_path):
+    """A directory is not a regular file -> refused by the isfile guard (never uploaded as junk),
+    just like a missing path."""
+    api, wf, t = env
+    with pytest.raises(WorkflowError, match="no file to attach"):
+        wf.attach_file(t["id"], str(tmp_path))
+
+
+def test_attach_file_refuses_oversized_before_reading(env, tmp_path, monkeypatch):
+    """A file over the cap is refused via getsize BEFORE its bytes are read AND before any upload
+    — actionable, no huge buffer, no wasted wire call."""
+    api, wf, t = env
+    monkeypatch.setattr("vikunja_mcp.workflow._MAX_ATTACHMENT_BYTES", 10)
+    calls = {"n": 0}
+    orig = api.upload_attachment
+
+    def spy(*a, **k):
+        calls["n"] += 1
+        return orig(*a, **k)
+
+    monkeypatch.setattr(api, "upload_attachment", spy)
+    src = tmp_path / "big.bin"
+    src.write_bytes(b"x" * 50)
+    with pytest.raises(WorkflowError, match="cap"):
+        wf.attach_file(t["id"], str(src))
+    assert calls["n"] == 0                               # refused before any upload
+
+
+def test_attach_file_uses_basename_not_full_path(env, tmp_path):
+    """The attachment name is the basename, never the caller's full local path (which would leak
+    the local dir layout and confuse an extension-keyed renderer)."""
+    api, wf, t = env
+    nested = tmp_path / "deep" / "dir"
+    nested.mkdir(parents=True)
+    src = nested / "evidence.png"
+    src.write_bytes(b"data")
+    res = wf.attach_file(t["id"], str(src))
+    assert res["name"] == "evidence.png"
+
+
+def test_attach_file_follows_symlink_to_a_real_file(env, tmp_path):
+    """A symlink pointing at a REAL file is resolved (realpath) and uploaded — a screenshot dir can
+    legitimately be symlinked; only the target's basename is used for the name."""
+    api, wf, t = env
+    target = tmp_path / "real.png"
+    target.write_bytes(b"pngbytes")
+    link = tmp_path / "link.png"
+    link.symlink_to(target)
+    res = wf.attach_file(t["id"], str(link))
+    assert res["attached"] is True and res["size"] == len(b"pngbytes")
+
+
+def test_attach_file_needs_no_ownership_so_a_reviewer_can_attach(tmp_path):
+    """Unlike advance/call_human, attach_file does NOT require the task be yours: a reviewer
+    attaching a screenshot to SOMEONE ELSE's task in Review must work — only board membership is
+    checked, symmetric with download_attachment."""
+    api = FakeAPI(buckets=STAGES)
+    wf = Workflow(api, project_id=3)
+    other = {"id": 999, "username": "someone-else"}
+    t = api.add_task("не моя", "Review", assignee=other)      # assigned to another user
+    src = tmp_path / "shot.png"
+    src.write_bytes(b"png")
+    res = wf.attach_file(t["id"], str(src))                   # must not raise "not assigned to you"
+    assert res["attached"] is True
+
+
+def test_attach_file_unknown_task_is_actionable(env, tmp_path):
+    api, wf, t = env
+    src = tmp_path / "shot.png"
+    src.write_bytes(b"png")
+    with pytest.raises(WorkflowError, match="not found"):
+        wf.attach_file(987654, str(src))

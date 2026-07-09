@@ -1,4 +1,5 @@
 """Stages and gates of the agent flow. The rules are baked in here, not in prompts."""
+import mimetypes
 import os
 import shutil
 import sys
@@ -1162,5 +1163,59 @@ class Workflow:
                 "Read this path to view the file — an image (PNG/JPG) renders visually, a "
                 "text/PDF opens as text. It sits in a temp dir and is cleaned up automatically; "
                 "Read it now rather than saving the path for later"
+            ),
+        }
+
+    def attach_file(self, task_id: int, path: str) -> dict:
+        """Upload a LOCAL file — typically a SCREENSHOT of finished, visually-verifiable work — as
+        an attachment on the task, so a human and the independent reviewer SEE the result instead
+        of taking 'done' on faith. The UPLOAD twin of download_attachment; deliberately a STANDALONE
+        tool, NOT an argument to advance: a failed upload is its own actionable error, never a
+        half-finished stage transition (the #118/#134/#135 lesson — keep cross-cutting side effects
+        out of advance), and both the implementer (own task) and the reviewer (a task in Review)
+        can attach. No ownership is required (same as download_attachment) — only board membership.
+
+        Validated BEFORE any bytes hit the wire: `path` must resolve (realpath, so a symlink to a
+        real file is followed) to an existing REGULAR file — a symlink to a dir/socket, a missing
+        path, or a directory is refused with an actionable message — within the _MAX_ATTACHMENT_BYTES
+        cap (checked via getsize, so a runaway file fails fast, never loaded). The path is NOT
+        confined to the workspace: screenshots routinely land in a temp/Downloads dir outside the
+        repo (a browser tool, an OS screenshot), so confining it would break the primary use case;
+        the size cap + regular-file check are the guardrails. The basename becomes the attachment
+        name (never the full path) and the MIME is guessed from the extension. Needs the
+        tasks_attachments:create token scope — a 401 means the token is read-only for attachments
+        and a human must add the `create` op (verified on real 2.3.0: create governs the upload)."""
+        self._find_task(task_id)  # same board-membership check as comment/download_attachment
+        real = os.path.realpath(path)
+        if not os.path.isfile(real):
+            raise WorkflowError(
+                f"no file to attach at {path!r} — it doesn't exist or isn't a regular file. "
+                f"Pass the path to a screenshot/render you already produced while verifying the "
+                f"work (a directory, a broken symlink, or a missing path is refused here)"
+            )
+        size = os.path.getsize(real)
+        if size > _MAX_ATTACHMENT_BYTES:
+            raise WorkflowError(
+                f"{path} is {size} bytes — over the {_MAX_ATTACHMENT_BYTES}-byte upload cap. "
+                f"Attach a screenshot/thumbnail, not a large asset or a runtime artifact"
+            )
+        name = _safe_attachment_name(os.path.basename(real), fallback=f"attachment-{task_id}")
+        with open(real, "rb") as fh:
+            data = fh.read()
+        mime, _ = mimetypes.guess_type(name)
+        resp = self.api.upload_attachment(task_id, name, data, mime=mime)
+        created = (resp or {}).get("success") or []
+        new_id = created[0].get("id") if created and isinstance(created[0], dict) else None
+        return {
+            "attached": True,
+            "task_id": task_id,
+            "attachment_id": new_id,
+            "name": name,
+            "mime": mime,
+            "size": size,
+            "note": (
+                "the file is on the card now — a human and the reviewer can view it in the "
+                "tracker. For a visually-verifiable change, cite it in your advance(to='review') "
+                "worklog as evidence alongside the commit sha"
             ),
         }

@@ -42,13 +42,18 @@ class VikunjaAPI:
 
     def _req(
         self, method: str, path: str, json: Any = None, params: dict | None = None,
-        raw: bool = False,
+        raw: bool = False, files: Any = None,
     ) -> Any:
+        # files (#137): a MULTIPART form upload (e.g. attach a screenshot) — httpx encodes it as
+        # multipart/form-data instead of a JSON body, so it and `json` are mutually exclusive (the
+        # upload path always passes json=None). Callers pass file CONTENT as bytes, not a file
+        # handle, so a 429 retry below re-encodes the SAME body cleanly (a consumed stream would
+        # re-send empty). Only PUT uploads use it, and PUT=create is not retried on 5xx (no dup).
         method = method.upper()
         for attempt in range(self._MAX_RETRIES + 1):
             final = attempt == self._MAX_RETRIES
             try:
-                r = self._client.request(method, path, json=json, params=params)
+                r = self._client.request(method, path, json=json, params=params, files=files)
             except httpx.TransportError:
                 # обрыв/таймаут: могло примениться -> ретраим только идемпотентные методы
                 if final or method not in self._IDEMPOTENT_METHODS:
@@ -115,6 +120,21 @@ class VikunjaAPI:
         verbatim. Needs the tasks_attachments:read token scope; a wrong task or attachment id
         surfaces as VikunjaError(404)."""
         return self._req("GET", f"/tasks/{task_id}/attachments/{attachment_id}", raw=True)
+
+    def upload_attachment(
+        self, task_id: int, filename: str, data: bytes, mime: str | None = None
+    ) -> dict:
+        """Upload bytes as a task attachment (e.g. a screenshot of finished work). The endpoint is
+        PUT /tasks/{id}/attachments and takes a MULTIPART form — file field `files` — NOT a JSON
+        body, so it goes through _req(files=...): the upload-side twin of download_attachment's
+        raw=True on the response side (api.py's JSON helpers don't fit either end). Verified on
+        real 2.3.0: the governing scope is `tasks_attachments:create` (401 without it), the method
+        is PUT (POST -> 405), and the response is
+        {"errors": ..., "success": [{id, task_id, file:{id,name,mime,size,...}, ...}]}. `data` is
+        bytes (not a stream) so a 429 retry re-encodes the same body; PUT=create is not retried on
+        5xx, so an ambiguous failure can't duplicate the upload."""
+        file_part = (filename, data, mime) if mime else (filename, data)
+        return self._req("PUT", f"/tasks/{task_id}/attachments", files={"files": file_part})
 
     # --- comments ---
     def comments(self, task_id: int) -> list[dict]:

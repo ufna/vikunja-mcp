@@ -230,6 +230,66 @@ def test_raw_download_inherits_get_retry_on_transient_5xx(no_sleep):
     assert calls["n"] == 2   # one transient failure retried, then success
 
 
+def test_upload_attachment_sends_multipart_put_not_json():
+    """#137: an upload goes out as multipart/form-data (field `files`) via PUT — api.py's JSON
+    body helper doesn't fit, so _req(files=...) is used. Verified on real 2.3.0: PUT (POST->405),
+    response {"errors":..., "success":[...]}; the filename and raw bytes ride in the multipart."""
+    seen = {}
+
+    def handler(request):
+        seen["method"] = request.method
+        seen["path"] = request.url.path
+        seen["ctype"] = request.headers.get("content-type", "")
+        seen["body"] = request.content
+        return httpx.Response(
+            200, json={"errors": None, "success": [{"id": 3, "file": {"name": "shot.png"}}]}
+        )
+
+    api = make_api(handler)
+    resp = api.upload_attachment(9, "shot.png", b"\x89PNGdata", mime="image/png")
+    assert seen["method"] == "PUT"
+    assert seen["path"].endswith("/tasks/9/attachments")
+    assert seen["ctype"].startswith("multipart/form-data")   # not application/json
+    assert b"shot.png" in seen["body"] and b"\x89PNGdata" in seen["body"]
+    assert resp["success"][0]["id"] == 3
+
+
+def test_upload_attachment_put_is_not_retried_on_5xx(no_sleep):
+    """PUT=create: an ambiguous 5xx may have stored the file server-side, so retrying would
+    duplicate the attachment -> not retried (same rule as create_task)."""
+    calls = {"n": 0}
+
+    def handler(request):
+        calls["n"] += 1
+        return httpx.Response(502, json={"message": "bad gateway"})
+
+    api = make_api(handler)
+    with pytest.raises(VikunjaError) as exc:
+        api.upload_attachment(1, "a.png", b"x", mime="image/png")
+    assert exc.value.status == 502
+    assert calls["n"] == 1   # non-idempotent upload not retried on an ambiguous 5xx
+
+
+def test_upload_attachment_429_retried_with_body_reencoded(no_sleep):
+    """429 = rejected before applying -> safe to retry even a create; because the body is passed as
+    BYTES (not a consumed stream), the retry re-encodes the SAME multipart, not an empty one."""
+    calls = {"n": 0}
+    bodies = []
+
+    def handler(request):
+        calls["n"] += 1
+        bodies.append(request.content)
+        if calls["n"] < 2:
+            return httpx.Response(429, json={"message": "slow down"})
+        return httpx.Response(200, json={"errors": None, "success": [{"id": 7}]})
+
+    api = make_api(handler)
+    out = api.upload_attachment(1, "a.png", b"payload", mime="image/png")
+    assert out["success"][0]["id"] == 7
+    assert calls["n"] == 2                                    # retried exactly once
+    assert b"payload" in bodies[0] and b"payload" in bodies[1]   # same body re-sent, never empty
+
+
 def test_connection_drop_retried_for_get_not_for_put(no_sleep):
     # "Connection closed mid-response": retry the idempotent GET, never the PUT create.
     calls = {"GET": 0, "PUT": 0}

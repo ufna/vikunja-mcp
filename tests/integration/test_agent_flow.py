@@ -134,6 +134,37 @@ def test_attachment_metadata_and_scoped_download(project, boss_jwt):
         wf1.download_attachment(t["id"], 999999)
 
 
+def test_attachment_upload_scoped(project, tmp_path):
+    """#137 end-to-end vs real 2.3.0: the agent (SCOPED token, tasks_attachments:create) uploads a
+    LOCAL screenshot via attach_file and it lands on the card — get_task then surfaces its metadata
+    with the exact size, and the agent downloads the exact bytes back. Proves the real multipart
+    PUT endpoint AND the `create` scope, which no unit test against FakeAPI can (the #125/#118
+    fake-agrees-with-fake trap). A missing path is refused locally, before any wire call."""
+    _, _, enqueue, wf1, _ = project
+    t = enqueue("карточка визуального фикса")
+    png = bytes.fromhex("89504e470d0a1a0a") + b"agent-uploaded-shot"
+    src = tmp_path / "fix.png"
+    src.write_bytes(png)
+
+    res = wf1.attach_file(t["id"], str(src))
+    assert res["attached"] is True and res["name"] == "fix.png"
+    assert res["size"] == len(png) and res["mime"] == "image/png"
+    assert res["attachment_id"] is not None
+
+    # it round-trips: the dossier now shows the uploaded file's metadata
+    att = next(a for a in wf1.get_task(t["id"])["attachments"] if a["id"] == res["attachment_id"])
+    assert att["name"] == "fix.png" and att["size"] == len(png) and att["mime"] == "image/png"
+
+    # and the exact bytes come back down (create + read_one both in the token scope)
+    back = wf1.download_attachment(t["id"], res["attachment_id"])
+    with open(back["path"], "rb") as fh:
+        assert fh.read() == png
+
+    # a missing path is refused locally — no wire call, an actionable message
+    with pytest.raises(WorkflowError, match="no file to attach"):
+        wf1.attach_file(t["id"], str(tmp_path / "nope.png"))
+
+
 def test_remove_label_round_trip(project):
     """remove_label реально дёргает DELETE /tasks/{id}/labels/{label_id} и доска это
     отражает — метка исчезает с задачи (проверяем форму эндпоинта против 2.3.0)."""

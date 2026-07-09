@@ -143,6 +143,23 @@ def download_attachment(task_id: int, attachment_id: int) -> dict:
 
 @mcp.tool()
 @_tool
+def attach_file(task_id: int, path: str) -> dict:
+    """Attach a LOCAL file — typically a SCREENSHOT of the finished work — to a task, so a human
+    and the independent reviewer can SEE a visually-verifiable result instead of trusting 'done'.
+    WHEN: your change is visually verifiable (a UI, a rendered page/chart, a generated image, a
+    board layout) and you already have a screenshot from verifying it — attach it, then cite it in
+    your advance(to='review') worklog as evidence beside the commit sha. NOT for every task: a
+    change with no visual surface (a lockfile, a refactor, config) has nothing to show, so don't
+    force it. `path` is a local file (the screenshot you produced); its basename becomes the
+    attachment name, the MIME is inferred from the extension. This is standalone — it does NOT move
+    the task; a failed upload never affects a stage transition. Actionable errors: a missing path,
+    a directory, or an oversized file (>25MB) is refused with the reason; a 401 means the token
+    lacks the tasks_attachments:create scope and a human must add that op."""
+    return _wf().attach_file(task_id, path)
+
+
+@mcp.tool()
+@_tool
 def comment(task_id: int, text: str) -> dict:
     """A progress note: findings, decisions ('picked X over Y because Z')."""
     return _wf().comment(task_id, text)

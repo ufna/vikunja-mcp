@@ -77,6 +77,15 @@ def test_comment_markers_the_skill_cites_are_still_emitted():
         assert marker in text, f"marker {marker!r} is no longer cited in SKILL.md"
 
 
+def test_attachment_upload_rule_names_the_tool_that_backs_it():
+    """#137: the rulebook's 'attach a screenshot of visually-verifiable work' rule must name the
+    tool that performs it, and that tool must still exist in workflow.py — so renaming attach_file
+    drags the skill along (the same skill<->code net as the signal keys). The behaviour rule is
+    worthless if it points at a tool the code no longer exposes."""
+    assert "attach_file" in _workflow_src(), "workflow.py no longer defines attach_file"
+    assert "attach_file" in _skill_text(), "SKILL.md no longer names the attach_file tool"
+
+
 def test_empty_queue_wakeup_interval_is_pinned():
     """The idle-loop wakeup interval is a hand-set human decision (#80: 20→10 min = 600s) with no
     code counterpart to anchor it — it lives only in the rulebook. Pin the value so an unrelated
