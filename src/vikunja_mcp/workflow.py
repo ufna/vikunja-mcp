@@ -1,4 +1,5 @@
 """Stages and gates of the agent flow. The rules are baked in here, not in prompts."""
+import sys
 from collections.abc import Callable
 from typing import Any
 
@@ -797,11 +798,27 @@ class Workflow:
             # parent to reach Review-or-Done, mark the epic (label + comment) so the human sees it's
             # ready to close. It writes to a DIFFERENT card, so it is wrapped so NOTHING it does can
             # fail the child's advance or change this result's shape (it adds no keys) — see the
-            # helper's docstring. Any exception (epic lookup, comment, or label) is swallowed.
+            # helper's docstring. Any exception (epic lookup, comment, or label) is swallowed after a
+            # one-line stderr note (#134).
             try:
                 self._mark_epic_if_children_complete(task, board)
-            except Exception:
-                pass  # strictly best-effort — a marker on someone else's card never fails the child
+            except Exception as exc:
+                # strictly best-effort — a marker on another card never fails the child's advance, so
+                # the exception is still swallowed; but NO LONGER silently (#134). A bare
+                # `except Exception: pass` hid a marker broken by a refactor: `except Exception`
+                # catches TypeError/AttributeError (programmer errors), not just network blips, and
+                # the marker IS the human's visibility mechanism for an assembled epic, so a
+                # silently-dead indicator is worse than none. Leave one line on STDERR only (never
+                # stdout — a stray byte corrupts the MCP stdio protocol), naming the advancing child
+                # and the exception class so the failure is actionable (the epic's own id isn't
+                # reliably known here — the helper can raise before resolving a parent — and the
+                # helper is out of this card's slice; the child is one get_task from the epic). Same
+                # best-effort-with-a-stderr-trace contract as sync_installed_artifacts (#88).
+                print(
+                    f"vikunja-mcp: epic-complete marker skipped for child #{task_id}: "
+                    f"{exc.__class__.__name__}: {exc}",
+                    file=sys.stderr,
+                )
         # push-нудж (#117): ЛЮБАЯ задача, доведённая до Review, требует независимого ревью —
         # не только багфикс. Исключение — epic-контейнер (label epic): его код лежит в детях
         # (каждый отревьюен на своём advance), ревьюить нечего. Скип цепляется за метку epic,

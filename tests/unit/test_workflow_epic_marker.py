@@ -11,6 +11,7 @@ epic LABEL and the parenttask relation, never structure alone. Idempotent across
 import pytest
 
 from tests.unit.fakes import FakeAPI
+from vikunja_mcp.api import VikunjaError
 from vikunja_mcp.workflow import LABEL_EPIC_READY, STAGES, Workflow, WorkflowError
 
 
@@ -183,3 +184,61 @@ def test_fake_hollows_related_subdicts_like_the_real_server(env):
     assert sub.get("labels") is None          # ...but labels/assignees/relations are hollowed, as on the server
     assert sub.get("assignees") is None
     assert sub.get("related_tasks") is None
+
+
+# --- #134: a marker failure is swallowed but NO LONGER silent (stderr trace, never stdout) ---
+
+@pytest.mark.parametrize(
+    "exc",
+    [TypeError("marker refactor bug"), VikunjaError(500, "epic card exploded")],
+    ids=["TypeError", "VikunjaError"],
+)
+def test_marker_failure_is_swallowed_but_logged_to_stderr(env, capsys, exc):
+    """#134: `except Exception` catches programmer errors (TypeError) as well as server errors
+    (VikunjaError). Both must still be swallowed — the child's advance never fails on a cosmetic
+    marker for ANOTHER card — but no longer in total silence. Assert: the child reaches Review with
+    an unchanged payload, ONE diagnostic line lands on STDERR naming the advancing child and the
+    exception class, and NOTHING is written to stdout (the MCP stdio protocol channel)."""
+    api, wf = env
+    epic, (c0, c1) = _epic(api, ["Review", "Build"])
+    epic_id = epic["id"]
+    orig = api.get_task
+
+    def boom(task_id, *a, **k):
+        if task_id == epic_id:            # break the marker's fetch of the epic parent
+            raise exc
+        return orig(task_id, *a, **k)
+
+    api.get_task = boom
+    res = wf.advance(c1["id"], to="review", worklog="did it", evidence="deadbeef")
+
+    # child wholly unaffected: reached Review, payload shape unchanged (marker adds/removes no keys)
+    assert res["moved_to"] == "Review" and api.stage_of(c1["id"]) == "Review"
+    assert set(res) == {"moved_to", "task_id", "review_needed", "review_kind", "note"}
+
+    captured = capsys.readouterr()
+    assert captured.out == ""                        # never pollute the stdio protocol channel
+    assert f"#{c1['id']}" in captured.err            # names the advancing child (actionable anchor)
+    assert exc.__class__.__name__ in captured.err    # and the exception class, to act on
+
+
+def test_successful_mark_writes_nothing_to_stderr_or_stdout(env, capsys):
+    """#134: the stderr diagnostic is for FAILURES only. A clean marker run (marker DID fire) must
+    leave BOTH channels empty, so stderr stays a real signal and the stdio channel is never touched."""
+    api, wf = env
+    epic, (c0, c1) = _epic(api, ["Review", "Build"])
+    res = wf.advance(c1["id"], to="review", worklog="w", evidence="e")
+    assert LABEL_EPIC_READY in _labels(api, epic["id"])   # happy path actually exercised
+    assert res["moved_to"] == "Review"
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == ""
+
+
+def test_no_stdout_and_no_stderr_when_marker_is_a_noop(env, capsys):
+    """A plain task with no epic parent: the marker is a no-op, and neither channel is written."""
+    api, wf = env
+    t = api.add_task("lonesome", "Build", assignee=api.me_user)
+    wf.advance(t["id"], to="review", worklog="w", evidence="e")
+    captured = capsys.readouterr()
+    assert captured.out == "" and captured.err == ""
