@@ -86,7 +86,14 @@ def next_task() -> dict:
     back from Your Call), (2) a task in Queue assigned to you, (3) a bug fix in Review
     awaiting independent review (label bug, no verdict yet), (4) the top FREE task in
     Queue. Never hands out a task assigned to someone else — those are "for humans".
-    Leaves Backlog and blocked alone. One task at a time."""
+    Leaves Backlog and blocked alone. One task at a time. A free task whose predecessor
+    (a follows/blocked link, e.g. an ordered-epic step) is still unfinished (below Review)
+    is skipped, not offered. If the Queue is non-empty but EVERY free task is so gated, the
+    result is a DISTINGUISHABLE starving-tail signal (task:null PLUS starving:true,
+    waiting_count, waiting[], needs_retriage) — NOT the empty-queue result: don't idle on it,
+    surface the stalled chain to the human (needs_retriage means a head was sent back to
+    Backlog and must be re-triaged). A genuinely empty queue is still task:null with
+    'the queue is empty'."""
     return _wf().next_task()
 
 

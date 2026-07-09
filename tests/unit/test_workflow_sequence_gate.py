@@ -159,3 +159,146 @@ def test_unfinished_predecessor_deduped_across_kinds(env):
     api.add_relation(succ["id"], pred["id"], "blocked")
     out = wf._unfinished_predecessors(succ["id"])
     assert [p["id"] for p in out] == [pred["id"]]
+
+
+# --- C2 (#102): next_task filters gated successors + reports the starving tail ---
+
+EMPTY = {"task": None, "message": "the queue is empty — no work for the agent"}
+
+
+def test_next_task_skips_gated_offers_ungated_free(env):
+    """A gated successor (predecessor in Build) is skipped even though it has HIGHER priority;
+    a separate ungated free task is offered instead — the gate beats -priority, not the reverse."""
+    api, wf = env
+    pred = api.add_task("pred", "Build")
+    gated = api.add_task("gated", "Queue", priority=5)          # higher priority, but blocked
+    api.add_relation(gated["id"], pred["id"], "follows")
+    free = api.add_task("free", "Queue", priority=1)
+    res = wf.next_task()
+    assert res["resume"] is False
+    assert res["task"]["id"] == free["id"]                      # not the gated higher-priority one
+
+
+def test_next_task_offers_successor_when_predecessor_ready_at_review(env):
+    """A successor whose only predecessor reached Review is ungated -> offered for claim (Review
+    is 'ready' so the chain drains autonomously)."""
+    api, wf = env
+    _pred, succ = _chain(api, pred_stage="Review")
+    res = wf.next_task()
+    assert res["resume"] is False
+    assert res["task"]["id"] == succ["id"]
+
+
+def test_next_task_parenttask_only_offered_migration_guard(env):
+    """Migration guard on the queue path: an old epic's child in Queue carries ONLY a parenttask
+    link (parent in Backlog, below Review). The gate keys off follows/blocked, so the child stays
+    OFFERED — this is what keeps the live dogfood queue (#103-105 carry only parenttask) alive."""
+    api, wf = env
+    parent = api.add_task("epic", "Backlog", labels=("epic",))
+    child = api.add_task("child", "Queue", priority=3)
+    api.add_relation(child["id"], parent["id"], "parenttask")
+    res = wf.next_task()
+    assert res["resume"] is False
+    assert res["task"]["id"] == child["id"]
+
+
+def test_next_task_all_gated_returns_starving_signal_not_empty(env):
+    """Free Queue NON-empty but EVERY candidate gated -> the distinguishable starving-tail signal,
+    NOT the empty-queue result: task None, starving True, waiting_count = N, and each waiting task
+    named with the predecessor blocking it (by ref and stage)."""
+    api, wf = env
+    p1 = api.add_task("p1", "Build")
+    s1 = api.add_task("s1", "Queue", priority=2)
+    api.add_relation(s1["id"], p1["id"], "follows")
+    p2 = api.add_task("p2", "Design")
+    s2 = api.add_task("s2", "Queue", priority=1)
+    api.add_relation(s2["id"], p2["id"], "blocked")
+    res = wf.next_task()
+    assert res["task"] is None
+    assert res["starving"] is True
+    assert res["needs_retriage"] is False                      # neither blocker is in Backlog
+    assert res["waiting_count"] == 2
+    assert res != EMPTY and res["message"] != EMPTY["message"]
+    assert {w["task"]["id"] for w in res["waiting"]} == {s1["id"], s2["id"]}
+    blocker_refs = [b["ref"] for w in res["waiting"] for b in w["blocked_by"]]
+    assert any(p1["identifier"] in r for r in blocker_refs)
+    assert any(p2["identifier"] in r for r in blocker_refs)
+    assert "Build" in res["message"] and "Design" in res["message"]
+
+
+def test_next_task_genuinely_empty_queue_unchanged(env):
+    """Nothing to claim AND nothing gated -> the pre-existing empty signal, byte-for-byte, with
+    NO starving discriminators. 'nothing to do' must stay distinct from 'everything blocked'."""
+    api, wf = env
+    res = wf.next_task()
+    assert res == EMPTY
+    assert "starving" not in res and "waiting_count" not in res
+
+
+def test_next_task_only_gated_task_is_starving_not_empty(env):
+    """A single gated free task (no ungated alternative) is a starving tail, NOT an empty queue —
+    the guard against the silent stall: one blocked successor must not read as 'no work'."""
+    api, wf = env
+    _pred, succ = _chain(api, pred_stage="Build")
+    res = wf.next_task()
+    assert res["task"] is None
+    assert res["starving"] is True
+    assert res["waiting_count"] == 1
+    assert res["waiting"][0]["task"]["id"] == succ["id"]
+
+
+def test_next_task_returned_head_in_backlog_flags_retriage(env):
+    """THE special case: the chain HEAD was sent back to Backlog via return_task (label blocked,
+    assignee cleared). Its tail (a Queue successor) is the only free candidate and is gated -> a
+    starving signal that NAMES the re-triage situation (needs_retriage + message), never a mystery
+    stall. The blocker is reported with its id/ref/Backlog stage."""
+    api, wf = env
+    head = api.add_task("head", "Backlog", labels=("blocked",))   # returned via return_task
+    tail = api.add_task("tail", "Queue")
+    api.add_relation(tail["id"], head["id"], "follows")
+    res = wf.next_task()
+    assert res["task"] is None
+    assert res["starving"] is True
+    assert res["needs_retriage"] is True
+    assert res["waiting_count"] == 1
+    w = res["waiting"][0]
+    assert w["task"]["id"] == tail["id"]
+    assert w["needs_retriage"] is True
+    blk = w["blocked_by"][0]
+    assert blk["id"] == head["id"] and blk["stage"] == "Backlog"
+    assert head["identifier"] in blk["ref"]
+    assert "re-triage" in res["message"].lower() and "Backlog" in res["message"]
+
+
+def test_next_task_mine_active_beats_gated_queue(env):
+    """Precedence intact: the free-queue sequence gate is the LAST branch, so my active
+    Design/Build task still comes first even when the whole free queue is starving."""
+    api, wf = env
+    mine = api.add_task("my active", "Build", assignee=api.me_user, priority=1)
+    _pred, _succ = _chain(api, pred_stage="Build")               # a gated free successor in Queue
+    res = wf.next_task()
+    assert res["resume"] is True
+    assert res["task"]["id"] == mine["id"]
+
+
+def test_next_task_stuck_assigned_beats_gated_queue(env):
+    """Precedence intact: a Queue task assigned to me (partial/human-directed claim) is handled by
+    the stuck branch, ahead of the free-queue gate — a starving free queue can't jump it."""
+    api, wf = env
+    stuck = api.add_task("assigned to me", "Queue", assignee=api.me_user, priority=1)
+    _pred, _succ = _chain(api, pred_stage="Build")
+    res = wf.next_task()
+    assert res["resume"] is True and res["stage"] == "Queue"
+    assert res["task"]["id"] == stuck["id"]
+
+
+def test_next_task_bug_review_beats_gated_queue(env):
+    """Precedence intact: a bug fix awaiting independent review (branch 3) outranks the free-queue
+    gate (branch 4) — offered first even when the free queue is starving."""
+    api, wf = env
+    bug = api.add_task("bug fix", "Review", labels=("bug",))
+    api.add_comment(bug["id"], "[worklog] fixed")               # report awaiting review, no verdict
+    _pred, _succ = _chain(api, pred_stage="Build")               # gated free successor in Queue
+    res = wf.next_task()
+    assert res.get("review") is True
+    assert res["task"]["id"] == bug["id"]

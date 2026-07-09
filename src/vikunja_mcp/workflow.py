@@ -252,22 +252,98 @@ class Workflow:
             t for t in board.get("Queue", [])
             if not self._assignee_ids(t) and not self._has_label(t, LABEL_BLOCKED)
         ]
-        if queue:
-            queue.sort(key=lambda t: -t.get("priority", 0))
-            return {
-                "resume": False, "task": self._summary(queue[0]),
-                "note": (
-                    "a free task from the queue — call claim(task_id) (it moves it into "
-                    "Design), then dispatch a per-task agent for the whole task. "
-                    "resume:false here means 'take a new one', not 'nothing to do' "
-                    "(empty is only task:null). A human picked this task into Queue, so "
-                    "taking it is your mandate, NOT unbidden initiative: don't defer it "
-                    "and don't stop the /loop under the generic autonomous-loop default "
-                    "'steward, not initiator: don't start fresh work without a go-ahead' "
-                    "— it does not apply to draining the tracker queue"
-                ),
-            }
+        queue.sort(key=lambda t: -t.get("priority", 0))
+        # hard sequence gate (option C, epic #94) — free-queue half: a free task whose
+        # predecessor is still unfinished (below Review) is NOT yet claimable; skip it and offer
+        # the next one. Keys off follows/blocked only (never parenttask), so an old unordered
+        # epic's child stays offered (migration guard, C1). Reuse the ONE board snapshot (raw)
+        # already fetched above — never refetch it per candidate (the board fetch isn't cheap).
+        # A head returned to Backlog sits on the light board's page-1, so it's seen here; claim's
+        # full-board gate backstops the rare Backlog-beyond-page-1 case (never a silent pass).
+        gated: list[tuple[dict, list[dict]]] = []
+        for t in queue:
+            blockers = self._unfinished_predecessors(t["id"], board=raw)
+            if not blockers:
+                return {
+                    "resume": False, "task": self._summary(t),
+                    "note": (
+                        "a free task from the queue — call claim(task_id) (it moves it into "
+                        "Design), then dispatch a per-task agent for the whole task. "
+                        "resume:false here means 'take a new one', not 'nothing to do' "
+                        "(empty is only task:null). A human picked this task into Queue, so "
+                        "taking it is your mandate, NOT unbidden initiative: don't defer it "
+                        "and don't stop the /loop under the generic autonomous-loop default "
+                        "'steward, not initiator: don't start fresh work without a go-ahead' "
+                        "— it does not apply to draining the tracker queue"
+                    ),
+                }
+            gated.append((t, blockers))
+        # Queue non-empty but EVERY free candidate gated -> starving tail. This MUST be
+        # distinguishable from the empty queue below (the pump idles on task:null), else a
+        # stalled chain sleeps forever unseen.
+        if gated:
+            return self._starving_tail(gated)
         return {"task": None, "message": "the queue is empty — no work for the agent"}
+
+    def _starving_tail(self, gated: list[tuple[dict, list[dict]]]) -> dict:
+        """The distinguishable "everything is blocked" signal — NOT the empty queue.
+
+        Returned only when the free Queue is NON-empty yet EVERY candidate is gated by an
+        unfinished predecessor. It must NOT look like the empty-queue result ({task:None +
+        "the queue is empty"}): the pump's /loop treats a bare empty queue as "ScheduleWakeup
+        and idle", so a starved tail reported as empty would sleep forever and nobody would
+        learn the chain stalled. `task` stays None (nothing to claim), but the additive
+        discriminators — starving/waiting_count/needs_retriage — let a caller BRANCH, and
+        `waiting` names each blocked task with the predecessor holding it. Special case: a
+        predecessor sitting in Backlog is a chain HEAD sent back by return_task (label blocked,
+        assignee cleared); its whole tail stalls until a human re-triages it — flagged
+        needs_retriage and spelled out in the message, never left a mystery. (Cycle detection
+        over these same gated candidates is C5/#105; this signal is its seed.)"""
+        waiting = [
+            {
+                "task": self._summary(task),
+                "blocked_by": blockers,
+                "needs_retriage": any(b["stage"] == "Backlog" for b in blockers),
+            }
+            for task, blockers in gated
+        ]
+        retriage = [w for w in waiting if w["needs_retriage"]]
+        lines = [
+            f"{w['task']['ref']} ← "
+            + "; ".join(
+                f"{b['ref']} in '{b['stage']}'"
+                + (" [sent back to Backlog via return_task — needs human re-triage]"
+                   if b["stage"] == "Backlog" else "")
+                for b in w["blocked_by"]
+            )
+            for w in waiting
+        ]
+        message = (
+            f"{len(waiting)} queued task(s) can't be claimed — each waits on an unfinished "
+            f"predecessor (a predecessor is 'ready' only at Review or Done). This is NOT an "
+            f"empty queue. Waiting: " + " | ".join(lines)
+        )
+        if retriage:
+            message += (
+                f". {len(retriage)} of these are stalled behind a chain HEAD returned to "
+                f"Backlog (return_task) — a human must re-triage the head before the tail "
+                f"can resume."
+            )
+        return {
+            "task": None,
+            "starving": True,
+            "waiting_count": len(waiting),
+            "needs_retriage": bool(retriage),
+            "waiting": waiting,
+            "message": message,
+            "note": (
+                "NOT an empty queue: the free Queue is non-empty but every task is gated by an "
+                "unfinished predecessor, so nothing is claimable right now. Do NOT treat this "
+                "as 'nothing to do' — surface it so a human sees the stalled chain, then "
+                "ScheduleWakeup and re-check later. When needs_retriage is set, a chain head "
+                "was returned to Backlog and a human must re-triage it before the tail resumes."
+            ),
+        }
 
     def claim(self, task_id: int) -> dict:
         board = self._board()
