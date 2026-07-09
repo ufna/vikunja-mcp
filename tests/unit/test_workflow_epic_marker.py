@@ -242,3 +242,47 @@ def test_no_stdout_and_no_stderr_when_marker_is_a_noop(env, capsys):
     wf.advance(t["id"], to="review", worklog="w", evidence="e")
     captured = capsys.readouterr()
     assert captured.out == "" and captured.err == ""
+
+
+# --- #135: an exception whose __str__ itself raises must not escape the except handler ---
+
+class EvilStr(Exception):
+    """Pathological exception whose __str__ ITSELF raises, so str(exc) blows up. The marker's
+    stderr log formats `{exc}` (-> str(exc)) INSIDE the except handler, so an unguarded log line
+    would let this second exception escape advance() (#135)."""
+
+    def __str__(self):
+        raise RuntimeError("__str__ itself raises")
+
+
+def test_marker_exception_with_raising_str_does_not_escape_advance(env, capsys):
+    """#135: the marker's LOG path must be as guarded as the marker itself. When the swallowed
+    exception's __str__ itself raises, building the stderr line (`{exc}` calls str(exc)) would
+    propagate that second exception out of advance() — but by then the child has ALREADY reached
+    Review and written its [worklog], so advance would raise for work that genuinely succeeded (a
+    state/report divergence, not a lost log). Assert the child reaches Review with an unchanged
+    payload, stdout stays empty (the MCP stdio channel), and stderr still names the child and the
+    exception class (a silent swallow would undo #134)."""
+    api, wf = env
+    epic, (c0, c1) = _epic(api, ["Review", "Build"])
+    epic_id = epic["id"]
+    orig = api.add_label
+
+    def boom(task_id, *a, **k):
+        if task_id == epic_id:            # break the marker's label write on the epic card
+            raise EvilStr()
+        return orig(task_id, *a, **k)
+
+    api.add_label = boom
+    # must NOT raise, even though EvilStr.__str__ blows up inside the except handler
+    res = wf.advance(c1["id"], to="review", worklog="did it", evidence="deadbeef")
+
+    # child wholly unaffected: reached Review, payload shape unchanged (marker adds/removes no keys)
+    assert res["moved_to"] == "Review" and api.stage_of(c1["id"]) == "Review"
+    assert set(res) == {"moved_to", "task_id", "review_needed", "review_kind", "note"}
+
+    captured = capsys.readouterr()
+    assert captured.out == ""                        # never pollute the stdio protocol channel
+    assert captured.err != ""                        # not a silent swallow — #134 stays satisfied
+    assert f"#{c1['id']}" in captured.err            # still names the advancing child
+    assert "EvilStr" in captured.err                 # and the exception class (str(exc) not needed)

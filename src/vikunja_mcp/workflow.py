@@ -814,11 +814,29 @@ class Workflow:
                 # reliably known here — the helper can raise before resolving a parent — and the
                 # helper is out of this card's slice; the child is one get_task from the epic). Same
                 # best-effort-with-a-stderr-trace contract as sync_installed_artifacts (#88).
-                print(
-                    f"vikunja-mcp: epic-complete marker skipped for child #{task_id}: "
-                    f"{exc.__class__.__name__}: {exc}",
-                    file=sys.stderr,
-                )
+                #
+                # #135: the LOG path must be as guarded as the marker it reports on. `{exc}`
+                # calls str(exc) INSIDE this handler, so an exception whose __str__ itself
+                # raises would escape advance(). By now the child has ALREADY reached Review
+                # and written its [worklog], so a leaked exception makes advance raise for work
+                # that genuinely succeeded — a state/report divergence, worse than a lost log.
+                # So format the always-safe parts (exception CLASS + child id) unconditionally,
+                # fall back to "<unprintable>" when str(exc) blows up so the diagnostic survives
+                # the pathological case (a silent swallow would undo #134), then wrap the write
+                # itself so nothing on this best-effort path can propagate. For ordinary
+                # exceptions detail == str(exc), so the line is byte-for-byte the #134 one.
+                try:
+                    detail = str(exc)
+                except Exception:
+                    detail = "<unprintable>"
+                try:
+                    print(
+                        f"vikunja-mcp: epic-complete marker skipped for child #{task_id}: "
+                        f"{exc.__class__.__name__}: {detail}",
+                        file=sys.stderr,
+                    )
+                except Exception:
+                    pass
         # push-нудж (#117): ЛЮБАЯ задача, доведённая до Review, требует независимого ревью —
         # не только багфикс. Исключение — epic-контейнер (label epic): его код лежит в детях
         # (каждый отревьюен на своём advance), ревьюить нечего. Скип цепляется за метку epic,
