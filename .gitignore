@@ -6,3 +6,14 @@ dist/
 .ruff_cache/
 .superpowers/
 .vikunja-mcp.env
+
+# Claude Code local state — keep shared config (settings.json) trackable.
+# Use `.claude/*`, NOT `.claude/`: git won't descend into a blanket-ignored
+# dir, so a later `!.claude/settings.json` could never re-include it. This
+# hides machine-local runtime state (scheduled_tasks.lock, worktrees/,
+# mailbox/, settings.local.json) while keeping shared project config.
+.claude/*
+!.claude/settings.json
+
+# Stray saved web pages (e.g. docroot.html); no .html is tracked or ever has been.
+*.html
