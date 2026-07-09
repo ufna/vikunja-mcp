@@ -438,6 +438,95 @@ def test_advance_review_first_submit_no_review_failed_label(env):
     assert api.stage_of(t["id"]) == "Review"
 
 
+def test_manual_bounce_of_approved_card_clears_reviewed_on_resubmit(env):
+    """#119 — сам репортнутый баг. Одобренную карточку (метка `reviewed`) человек РУКАМИ
+    вытаскивает из Review на доработку — ни одна тулза не срабатывает, поэтому `reviewed`
+    переживает переезд. После доработки агент ресабмитит через advance(to='review'):
+    несвежий `reviewed` ДОЛЖЕН исчезнуть (ресабмит инвалидирует любой прошлый вердикт),
+    иначе карточка въезжает в новый Review с чужим APPROVE. И карточка снова предлагается
+    на независимое ревью (оффер цепляется за свежесть [worklog], а не за метку)."""
+    api, wf, t = env
+    # довели до Review и получили независимый approve -> на карточке метка reviewed
+    _to_review(wf, t["id"])
+    reviewer = type(wf)(api, project_id=3)
+    reviewer._me_cache = {"id": 77, "username": "agent-reviewer"}
+    reviewer.review_task(t["id"], verdict="approve", report="воспроизвёл, фикс по причине")
+    assert "reviewed" in _label_titles(api, t["id"])
+    assert api.stage_of(t["id"]) == "Review"
+    assert not reviewer.next_task().get("review")   # свежий APPROVE закрыл ревью
+
+    # ЧЕЛОВЕК руками тащит одобренную карточку из Review обратно в Build на доработку.
+    # update_task(bucket_id=) задачу НЕ двигает — ручной drag в FakeAPI это прямая правка
+    # task_bucket. Ни одна тулза не сработала -> reviewed переживает переезд (это и есть баг).
+    api.task_bucket[t["id"]] = api.bucket_id("Build")
+    assert api.stage_of(t["id"]) == "Build"
+    assert "reviewed" in _label_titles(api, t["id"])
+
+    # агент дорабатывает и ресабмитит в Review -> reviewed должен уйти, review-failed тоже нет
+    wf.advance(t["id"], to="review", worklog="доработал по замечанию человека", evidence="e2")
+    titles = _label_titles(api, t["id"])
+    assert "reviewed" not in titles           # ключевая проверка: несвежий вердикт снят
+    assert "review-failed" not in titles
+    assert api.stage_of(t["id"]) == "Review"
+    # ресабмит снова уходит на независимое ревью (свежий [worklog] новее прошлого [review])
+    offered = reviewer.next_task()
+    assert offered.get("review") is True and offered["task"]["id"] == t["id"]
+
+
+def test_advance_to_build_clears_stale_verdict_labels(env):
+    """#119: человек может утащить вердикт-несущую карточку (reviewed ИЛИ review-failed) аж
+    в Design; когда агент (пере)входит в сборку через advance(to='build'), несвежий вердикт
+    снимается — карточка в активной (пере)сборке не несёт действующего вердикта."""
+    api, wf, t = env                               # t стартует в Design, назначена на меня
+    api.tasks[t["id"]]["labels"].append({"id": 999, "title": "reviewed"})
+    wf.advance(t["id"], to="build", spec="доработка после ручного возврата человеком")
+    assert "reviewed" not in _label_titles(api, t["id"])
+    assert api.stage_of(t["id"]) == "Build"
+
+
+def test_advance_to_build_fresh_claim_adds_no_verdict_labels(env):
+    """Свежий клейм: advance(to='build') на задаче без вердикт-меток — чистый no-op снятия,
+    никакие метки не появляются (страхуемся, что helper не добавляет, а только снимает)."""
+    api, wf, t = env
+    wf.advance(t["id"], to="build", spec="s")
+    assert _label_titles(api, t["id"]) == []
+    assert api.stage_of(t["id"]) == "Build"
+
+
+def test_resubmit_after_needs_work_clears_review_failed_and_no_reviewed(env):
+    """Цикл needs_work: карточка в Build с review-failed, reviewed уже снят. Ресабмит через
+    advance(to='review') снимает review-failed и НЕ воскрешает reviewed — чистый лист."""
+    api, wf, t = env
+    api.tasks[t["id"]]["labels"].append({"id": 999, "title": "bug"})
+    wf.advance(t["id"], to="build", spec="s")
+    wf.advance(t["id"], to="review", worklog="w1", evidence="e1")
+    reviewer = type(wf)(api, project_id=3)
+    reviewer._me_cache = {"id": 77, "username": "agent-reviewer"}
+    reviewer.review_task(t["id"], verdict="needs_work", report="не закрыта причина")
+    assert "review-failed" in _label_titles(api, t["id"])
+    assert "reviewed" not in _label_titles(api, t["id"])
+    wf.advance(t["id"], to="review", worklog="w2: доработано", evidence="e2")
+    titles = _label_titles(api, t["id"])
+    assert "review-failed" not in titles   # ресабмит снял
+    assert "reviewed" not in titles        # и не воскресил
+
+
+def test_stale_reviewed_label_does_not_suppress_review_offering(env):
+    """#119 разбор подавления: оффер ревью в next_task цепляется за СВЕЖЕСТЬ комментов
+    [worklog]/[review], а НЕ за метку `reviewed`. Карточка со стале-`reviewed`, у которой
+    последний [worklog] новее последнего [review] (тут [review] вообще нет), всё равно
+    предлагается на ревью — значит метка это косметическая ложь на доске, а не
+    функциональная блокировка следующего ревью (поэтому задача человека и попала на новое
+    ревью, несмотря на несвежий бейдж)."""
+    api, wf, t = env
+    _to_review(wf, t["id"])                                        # свежий [worklog], вердикта нет
+    api.tasks[t["id"]]["labels"].append({"id": 999, "title": "reviewed"})  # стале-бейдж вручную
+    reviewer = type(wf)(api, project_id=3)
+    reviewer._me_cache = {"id": 77, "username": "agent-reviewer"}
+    offered = reviewer.next_task()
+    assert offered.get("review") is True and offered["task"]["id"] == t["id"]
+
+
 def test_advance_review_bug_returns_review_needed_note(env):
     """advance(to='review') на баге отдаёт review_needed=True, review_kind='bug' + подсказку."""
     api, wf, t = env

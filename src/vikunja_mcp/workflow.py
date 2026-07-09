@@ -157,6 +157,21 @@ class Workflow:
         if lb:
             self.api.remove_label(task["id"], lb["id"])
 
+    def _clear_verdict_labels(self, task: dict) -> None:
+        """Снять ОБЕ взаимоисключающие вердикт-метки (`reviewed` / `review-failed`). Задача,
+        (пере)входящая в активный пайплайн — агент начинает (пере)сборку или ресабмитит в
+        Review, — НЕ несёт действующего вердикта: любой прошлый инвалидируется в момент
+        возобновления работы. #119: когда человек РУКАМИ вытаскивает одобренную карточку из
+        Review на доработку, ни одна тулза не срабатывает, поэтому `reviewed` переживает
+        возврат; снятие здесь, на следующем forward-переходе агента, не даёт несвежему APPROVE
+        уехать обратно в свежий Review (ложь на доске). Оффер ревью в next_task при этом
+        цепляется за свежесть коммента [worklog]/[review], а НЕ за эту метку, так что стале-
+        `reviewed` не подавлял бы re-ревью — но ложный бейдж всё равно не должен оставаться.
+        Идемпотентно по каждой метке — _remove_label шлёт DELETE только по реально висящей на
+        снапшоте связи, поэтому на задаче без вердикт-меток (свежий клейм) это no-op."""
+        self._remove_label(task, LABEL_REVIEW_FAILED)
+        self._remove_label(task, LABEL_REVIEWED)
+
     def _require_mine(self, task: dict) -> None:
         if self._me()["id"] not in self._assignee_ids(task):
             raise WorkflowError(f"task {task['id']} is not assigned to you — claim it first")
@@ -628,6 +643,10 @@ class Workflow:
             if not (spec or "").strip():
                 raise WorkflowError("a spec is required: describe your approach before implementing")
             self.api.add_comment(task_id, f"[spec]\n{spec.strip()}")
+            # (пере)сборка тоже инвалидирует любой прошлый вердикт: человек мог руками
+            # вернуть одобренную/отбитую карточку сюда (#119). На свежем клейме меток нет —
+            # это no-op; needs_work-цикл идёт через Build (не Design), сюда не заходит.
+            self._clear_verdict_labels(task)
         else:
             # hard sequence gate (option C, epic #94, mechanism 2): the advance→review LATCH on
             # an in-flight successor — the case the human asked about. Refuse to land THIS task in
@@ -661,8 +680,11 @@ class Workflow:
             report.append(f"Сделано: {worklog.strip()}")
             report.append(f"\nEvidence: {evidence.strip()}")
             self.api.add_comment(task_id, "\n".join(report))
-            # resubmit-reset: снимаем прошлый review-failed (no-op на первом сабмите)
-            self._remove_label(task, LABEL_REVIEW_FAILED)
+            # resubmit-reset: ресабмит инвалидирует ЛЮБОЙ прошлый вердикт — снимаем ОБЕ
+            # вердикт-метки, и review-failed, и reviewed (#119: человек мог руками вытащить
+            # одобренную карточку из Review на доработку — reviewed не должен уехать на новое
+            # ревью). No-op на первом сабмите (меток ещё нет).
+            self._clear_verdict_labels(task)
         self._move(task_id, to_stage)
         result = {"moved_to": to_stage, "task_id": task_id}
         # push-нудж (#117): ЛЮБАЯ задача, доведённая до Review, требует независимого ревью —
