@@ -95,8 +95,12 @@ def next_task() -> dict:
     result is a DISTINGUISHABLE starving-tail signal (task:null PLUS starving:true,
     waiting_count, waiting[], needs_retriage) — NOT the empty-queue result: don't idle on it,
     surface the stalled chain to the human (needs_retriage means a head was sent back to
-    Backlog and must be re-triaged). A genuinely empty queue is still task:null with
-    'the queue is empty'."""
+    Backlog and must be re-triaged). If those gated tasks form a predecessor CYCLE (a hand-made
+    follows/blocked loop, e.g. A follows B and B follows A — nothing claimable and it can't
+    self-unblock), the result is instead a distinct cycle signal (task:null PLUS cycle:true and
+    cycle_tasks naming the loop): this is NOT sleepable — surface it via call_human so a human
+    breaks the cycle (removes one link in the web UI). A genuinely empty queue is still task:null
+    with 'the queue is empty'."""
     return _wf().next_task()
 
 
