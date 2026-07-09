@@ -19,6 +19,18 @@ LABEL_BUG = "bug"
 LABEL_REVIEWED = "reviewed"            # прошёл независимое агентское ревью
 LABEL_REVIEW_FAILED = "review-failed"  # отбит на доработку, сейчас переделывается
 
+# Hard sequence gate (option C, epic #94). A predecessor is "ready" — no longer blocks its
+# successor — only at Review or Done. The human chose REVIEW (not Done) as the bar so a chain
+# can drain autonomously: only a human moves a task to Done, so gating on Done would wedge a
+# human between every step. NB: "Your Call" sorts AFTER Review in STAGES yet is NOT ready (a
+# parked question), so readiness is explicit set membership, never a positional comparison.
+READY_STAGES = frozenset({"Review", "Done"})
+# Relation kinds that make the OTHER task a PREDECESSOR of this one. Vikunja auto-inverts:
+# "P precedes S" surfaces as "follows: P" on S; "P blocking S" surfaces as "blocked: P" on S.
+# The gate keys off THESE kinds only — never parenttask — so old unordered epics whose children
+# carry just a parenttask link stay claimable exactly as before (the migration guard).
+PREDECESSOR_RELATION_KINDS = ("follows", "blocked")
+
 # advance: to -> (откуда, куда)
 AGENT_ADVANCE = {"build": ("Design", "Build"), "review": ("Build", "Review")}
 
@@ -85,12 +97,46 @@ class Workflow:
             if my_id in self._assignee_ids(t)
         ]
 
-    def _find_task(self, task_id: int) -> tuple[dict, str]:
-        for bucket in self._board():
+    def _find_task(self, task_id: int, board: list[dict] | None = None) -> tuple[dict, str]:
+        for bucket in (board if board is not None else self._board()):
             for task in bucket.get("tasks") or []:
                 if task["id"] == task_id:
                     return task, bucket["title"]
         raise WorkflowError(f"task {task_id} not found on the board of project {self.project_id}")
+
+    def _unfinished_predecessors(
+        self, task_id: int, board: list[dict] | None = None
+    ) -> list[dict]:
+        """Predecessors of `task_id` that are NOT yet ready (still below Review) and so must
+        reach Review/Done before this task may be started. A predecessor is any task linked from
+        this one by a `follows` (this follows P) or `blocked` (this blocked-by P) relation;
+        parenttask is deliberately excluded, so an old epic whose children carry only a parenttask
+        link yields [] and stays claimable (the migration guard). Each entry: {id, ref, title,
+        stage}, deduped by id. A task with no follows/blocked relation returns [] without arming
+        the gate. Pass a pre-fetched full board (raw _board()) to reuse one snapshot for stages."""
+        full = self._board() if board is None else board
+        stage_by_id = {
+            t["id"]: (t, bucket["title"])
+            for bucket in full for t in (bucket.get("tasks") or [])
+        }
+        related = self.api.get_task(task_id).get("related_tasks") or {}
+        unfinished: list[dict] = []
+        seen: set[int] = set()
+        for kind in PREDECESSOR_RELATION_KINDS:
+            for pred in related.get(kind) or []:
+                pid = pred["id"]
+                if pid in seen:
+                    continue
+                seen.add(pid)
+                found = stage_by_id.get(pid)
+                if found is None or found[1] in READY_STAGES:
+                    continue  # gone from the board, or already ready -> not a blocker
+                pred_task, pred_stage = found
+                unfinished.append({
+                    "id": pid, "ref": self._ref(pred_task),
+                    "title": pred_task["title"], "stage": pred_stage,
+                })
+        return unfinished
 
     @staticmethod
     def _assignee_ids(task: dict) -> list[int]:
@@ -224,9 +270,22 @@ class Workflow:
         return {"task": None, "message": "the queue is empty — no work for the agent"}
 
     def claim(self, task_id: int) -> dict:
-        task, stage = self._find_task(task_id)
+        board = self._board()
+        task, stage = self._find_task(task_id, board=board)
         if stage != "Queue":
             raise WorkflowError(f"task is in '{stage}', you can only claim from Queue")
+        # hard sequence gate (option C, epic #94): refuse to START a successor while any of its
+        # predecessors is unfinished (below Review). claim otherwise checks only stage==Queue, so
+        # without this the gate is trivially bypassed by claiming a successor directly. Keys off
+        # follows/blocked only (never parenttask) — old epics stay claimable. Reuses the snapshot.
+        blockers = self._unfinished_predecessors(task_id, board=board)
+        if blockers:
+            joined = "; ".join(f"{b['ref']} in '{b['stage']}'" for b in blockers)
+            raise WorkflowError(
+                f"can't claim {self._ref(task)} yet — it's waiting on an unfinished "
+                f"predecessor: {joined}. A predecessor becomes ready only at Review or Done; "
+                f"finish that one first"
+            )
         # optional single-WIP gate (opt-in via enforce_single_wip). Off -> no extra
         # board fetch, behavior unchanged. On -> refuse a new task while an active one
         # exists; the discipline answer is "finish it or return_task it first".
