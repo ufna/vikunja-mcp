@@ -4,9 +4,11 @@ import httpx
 
 import pytest
 
+from tests.unit.fakes import FakeAPI
 from vikunja_mcp import server
 from vikunja_mcp.api import VikunjaError
-from vikunja_mcp.config import ConfigError
+from vikunja_mcp.config import Config, ConfigError
+from vikunja_mcp.workflow import STAGES, Workflow
 
 
 def test_exposes_exactly_the_workflow_tools():
@@ -167,8 +169,6 @@ def test_reload_failure_degrades_gracefully_without_crashing(monkeypatch, config
 def test_reload_rebuilds_workflow_with_the_fresh_on_disk_token(monkeypatch):
     """_reload_workflow_from_disk rebuilds the cached Workflow from a fresh config read, so the
     NEW token in .vikunja-mcp.env is the credential used from the retry onward."""
-    from vikunja_mcp.config import Config
-
     built = {}
     monkeypatch.setattr(
         server, "load_config",
@@ -184,8 +184,85 @@ def test_reload_rebuilds_workflow_with_the_fresh_on_disk_token(monkeypatch):
         assert server._reload_workflow_from_disk() is True
         assert built == {"url": "https://t", "token": "FRESH"}   # rebuilt with the fresh token
         assert server._workflow == ("wf", ("api", "FRESH"), 10)  # and cached
+        assert server._workflow_token == "FRESH"                 # ...and the token is tracked
     finally:
         server._reset_workflow_cache()      # don't leak the fake Workflow into other tests
+
+
+# --- tracker #140 rework: the whole-tool retry must NOT duplicate writes on a scope gap ---------
+# A tool is several HTTP requests. On a scope-gap 401 (token lacks views_buckets_tasks) the 401
+# lands on the kanban MOVE, AFTER an earlier write already succeeded — advance posts [worklog]
+# then moves (workflow.py); file_task creates the card then moves. Retrying the WHOLE tool re-runs
+# that earlier write, which the reviewer proved on a real container (comment 0->2, card 0->2). The
+# guard: retry ONLY when the token freshly read from .vikunja-mcp.env DIFFERS from the one that
+# just 401'd — a rotation changes it (recovery lives), a scope gap does not (no retry, no dup).
+
+
+class _ScopeGapAPI(FakeAPI):
+    """A token WITH tasks/comments scope but WITHOUT views_buckets_tasks: every write lands EXCEPT
+    the kanban bucket MOVE, which 401s — exactly the scope gap the reviewer used. The move is where
+    the 401 surfaces, AFTER advance's [worklog] / file_task's create_task has already written."""
+
+    def move_task(self, *args, **kwargs):
+        raise VikunjaError(
+            401, '{"code":11,"message":"missing, malformed, expired or otherwise invalid token"}'
+        )
+
+
+def _wire_scope_gap(monkeypatch, workflow):
+    """Wire `server` so a 401 reload reads an UNCHANGED token (a scope gap, not a rotation): the
+    REAL _reload_workflow_from_disk then returns False and the retry never fires. The SAME setup
+    makes the current (pre-guard) code retry — which is what turns these tests RED before the fix."""
+    token = "scoped-token-that-never-changes"
+    monkeypatch.setattr(server, "_wf", lambda: workflow)
+    monkeypatch.setattr(
+        server, "load_config",
+        lambda: Config(url="https://t", token=token, project_id=workflow.project_id),
+    )
+    monkeypatch.setattr(server, "_workflow_token", token, raising=False)
+
+
+def test_scope_gap_401_does_not_duplicate_the_worklog_comment(monkeypatch):
+    """advance(to='review') posts [worklog] then moves the bucket; under a scope gap the move 401s.
+    The whole-tool retry must NOT re-post the comment. RED before the changed-token guard (it posts
+    twice); GREEN after (the unchanged token means no retry)."""
+    api = _ScopeGapAPI(buckets=STAGES)
+    task = api.add_task("t", "Build", assignee=api.me_user)
+    _wire_scope_gap(monkeypatch, Workflow(api, api.project["id"]))
+
+    result = server.advance(task["id"], "review", worklog="did it", evidence="abc123")
+
+    worklogs = [c for c in api.comments_text(task["id"]) if c.startswith("[worklog]")]
+    assert len(worklogs) == 1, "scope-gap 401 re-ran advance and DUPLICATED the [worklog] comment"
+    assert "projects:views_buckets" in result["error"]   # honest guidance still surfaced
+
+
+def test_scope_gap_401_does_not_duplicate_the_filed_card(monkeypatch):
+    """file_task creates the card then moves it to Backlog; under a scope gap the move 401s. The
+    whole-tool retry must NOT create a second card. RED before the guard (two cards); GREEN after."""
+    api = _ScopeGapAPI(buckets=STAGES)
+    _wire_scope_gap(monkeypatch, Workflow(api, api.project["id"]))
+
+    before = len(api.tasks)
+    result = server.file_task("found a leak")
+
+    assert len(api.tasks) - before == 1, "scope-gap 401 re-ran file_task and DUPLICATED the card"
+    assert "projects:views_buckets" in result["error"]
+
+
+def test_reload_returns_false_when_the_on_disk_token_is_unchanged(monkeypatch):
+    """The guard proper: an UNCHANGED token (a scope gap — the file was not touched) must NOT
+    rebuild or signal a retry. This is what distinguishes the two byte-identical 401s by looking
+    at the credential rather than the (indistinguishable) response."""
+    monkeypatch.setattr(
+        server, "load_config",
+        lambda: Config(url="https://t", token="SAME", project_id=10),
+    )
+    monkeypatch.setattr(server, "_workflow_token", "SAME", raising=False)
+    sentinel = object()
+    monkeypatch.setattr(server, "_workflow", sentinel, raising=False)
+    assert server._reload_workflow_from_disk() is False   # no rotation -> no retry
+    assert server._workflow is sentinel                   # cached Workflow left untouched
 
 
 def test_403_is_surfaced_as_project_permission_error(monkeypatch):

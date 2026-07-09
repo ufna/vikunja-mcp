@@ -32,8 +32,9 @@ _AUTH_GUIDANCE = {
         "Vikunja API 401 (unauthorized) — the token is REJECTED. Vikunja sends this same "
         "`code 11` body for an invalid/expired/malformed token AND for a valid token that is "
         "MISSING a required permission group, so the two cannot be told apart from the response. "
-        "On a 401 this server re-reads .vikunja-mcp.env and retries once, so a freshly ROTATED "
-        "token self-heals — seeing this means the token in .vikunja-mcp.env is STILL rejected. "
+        "On a 401 this server re-reads .vikunja-mcp.env and, if the token there was ROTATED, "
+        "retries once with it — so a rotation self-heals; seeing this means the token in "
+        ".vikunja-mcp.env is STILL rejected (unchanged, or the new value is also bad). "
         "Remedy: put a current, valid token in .vikunja-mcp.env, minted WITH the permission "
         "groups `other:user` and `projects:views_buckets` (the latter gates every stage "
         "transition — advance/claim/review_task move kanban buckets); if you just re-minted, "
@@ -50,15 +51,18 @@ _AUTH_GUIDANCE = {
 }
 
 _workflow: Workflow | None = None
+# The token baked into the cached _workflow. On a 401, the retry fires ONLY if the token freshly
+# read from .vikunja-mcp.env DIFFERS from this — the #140-rework write-safety gate (see below).
+_workflow_token: str | None = None
 
 
 def _reset_workflow_cache() -> None:
-    global _workflow
+    global _workflow, _workflow_token
     _workflow = None
+    _workflow_token = None
 
 
-def _build_workflow() -> Workflow:
-    cfg = load_config()
+def _build_workflow(cfg) -> Workflow:
     return Workflow(
         VikunjaAPI(cfg.url, cfg.token), cfg.project_id,
         enforce_single_wip=cfg.enforce_single_wip,
@@ -66,25 +70,41 @@ def _build_workflow() -> Workflow:
 
 
 def _wf() -> Workflow:
-    global _workflow
+    global _workflow, _workflow_token
     if _workflow is None:
-        _workflow = _build_workflow()
+        cfg = load_config()
+        _workflow = _build_workflow(cfg)
+        _workflow_token = cfg.token
     return _workflow
 
 
 def _reload_workflow_from_disk() -> bool:
-    """Rebuild the cached Workflow from a FRESH read of config — picking up a token ROTATED in
-    .vikunja-mcp.env while the server was running. Returns True if a new Workflow was built,
-    False if config is now missing / unreadable / malformed (the previously cached Workflow is
-    then left untouched). Total by contract: it runs inside _tool's except block, so it must
-    NEVER raise — any config-read failure degrades to "no reload" rather than crashing the stdio
-    server (same best-effort posture as _self_heal_installed_artifacts)."""
-    global _workflow
+    """Rebuild the cached Workflow from a FRESH read of config to pick up a token ROTATED in
+    .vikunja-mcp.env while the server runs — but ONLY when that token actually CHANGED. Returns
+    True (and swaps in the new Workflow) only if the freshly read token differs from the one baked
+    into the cached Workflow; returns False when it is unchanged, or when config is now missing /
+    unreadable / malformed (the cached Workflow is left untouched either way).
+
+    The changed-token gate is the #140-rework fix. _tool retries the WHOLE tool on a 401, and a
+    tool is several HTTP requests: on a scope-gap 401 (a valid token lacking one permission group)
+    the EARLIER requests already wrote before a LATER one 401'd, so a blind retry duplicates them
+    (the reviewer saw a [worklog] comment and a filed card land twice on real 2.3.0). A scope gap
+    never changes the on-disk token, so gating the retry on a token change skips it for a scope gap
+    (no duplicate) yet still fires it for a real rotation (recovery lives — a rotation replaces the
+    whole dead token, so the tool's FIRST request 401'd with nothing written yet).
+
+    Total by contract: runs inside _tool's except block, so it must NEVER raise — any config-read
+    failure degrades to "no reload" rather than crashing the stdio server (same best-effort posture
+    as _self_heal_installed_artifacts)."""
+    global _workflow, _workflow_token
     try:
-        rebuilt = _build_workflow()
+        cfg = load_config()
     except Exception:
         return False
-    _workflow = rebuilt
+    if cfg.token == _workflow_token:
+        return False                # same credential -> a scope gap, not a rotation -> no retry
+    _workflow = _build_workflow(cfg)
+    _workflow_token = cfg.token
     return True
 
 
@@ -112,14 +132,22 @@ def _tool(fn):
         except (WorkflowError, ConfigError, VikunjaError, httpx.HTTPError) as e:
             # A 401 may be a ROTATED token, not a permanent fault: this long-lived server caches
             # the token from first use, but a human can re-mint it (which INVALIDATES the old
-            # value) and rewrite .vikunja-mcp.env. Reload config and retry the SAME call ONCE with
-            # the fresh token, so /loop survives a rotation without a restart (tracker #140).
-            # Write-safe: Vikunja rejects a 401 at its auth layer BEFORE the route handler runs,
-            # so nothing was mutated server-side (verified on 2.3.0 — an unscoped token 401s a
-            # write untouched). Same reasoning api.py uses to retry 429 for ANY method, unlike an
-            # ambiguous 5xx it retries only for idempotent ones. Guard hard: only status 401,
-            # exactly ONE retry, and the retry's outcome is FINAL — a second 401 surfaces the
-            # guidance, it never recurses into another reload.
+            # value) and rewrite .vikunja-mcp.env. Reload config and retry the SAME call ONCE, so
+            # /loop survives a rotation without a restart (tracker #140).
+            # Retry ONLY when the reloaded token CHANGED (the gate is in _reload_workflow_from_disk).
+            # Why not always: _tool retries the WHOLE tool, and a tool is several HTTP requests. A
+            # 401 is rejected at auth before ITS OWN handler runs — but on a scope gap (a valid
+            # token lacking one group) an EARLIER request already wrote before a LATER one 401'd,
+            # so a blind whole-tool retry re-runs that write (the #140 review saw a [worklog]
+            # comment and a filed card duplicated on a real container). A scope gap leaves the
+            # token unchanged; a rotation replaces the whole dead token, so its FIRST request 401s
+            # with nothing written yet — so gating on a token change retries the safe case and
+            # skips the duplicating one. (Residual, accepted by the review: a token rotated
+            # MID-tool — alive for an early write, then replaced before a later request 401s —
+            # would still re-run the early write; that needs a human re-mint inside the sub-second
+            # gap between two requests of one call. Fully closing it means per-request retry in
+            # api.py, deferred as the bigger change.) Guard hard: only status 401, exactly ONE
+            # retry, outcome FINAL — a second 401 surfaces the guidance, never recursing.
             if isinstance(e, VikunjaError) and e.status == 401 and _reload_workflow_from_disk():
                 try:
                     return fn(*args, **kwargs)
