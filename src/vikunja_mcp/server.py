@@ -12,24 +12,34 @@ from vikunja_mcp.workflow import Workflow, WorkflowError
 
 mcp = FastMCP("vikunja-tracker")
 
-# A 401/403 from Vikunja is a CREDENTIAL problem, not a transient one — but a bare
-# "Vikunja API 401" reads like a session hiccup and invites a pointless /mcp reconnect
-# or server restart. Real incident: a token missing the `projects:views_buckets` group
-# let reads + comment through but 401'd every stage transition (advance/claim/
-# review_task move kanban buckets); the agent misdiagnosed it as a "stuck credential"
-# and told the operator to restart the server — which CANNOT help, since a token's
-# scopes are fixed at mint time. Spell out the scope and the real remedy here (server.py
-# owns "clear errors") so this can't be misread again. The raw server text is appended.
+# A 401 from Vikunja is a CREDENTIAL problem, not a transient one. TWO traps here, both learned
+# the expensive way (tracker #140):
+#  1. Vikunja returns the SAME 401 for an invalid/expired/malformed token AND for a valid token
+#     missing a required permission group — body {"code":11,"message":"missing, malformed,
+#     expired or otherwise invalid token provided"} in BOTH cases (verified against real 2.3.0:
+#     a scoped token lacking `other:user`/`projects` 401s those endpoints BYTE-FOR-BYTE like a
+#     garbage token, same code 11, same headers). So the body's `code` CANNOT tell "expired"
+#     from "scope gap" — do NOT branch on it; a message that confidently names one cause is
+#     wrong half the time. The guidance below OWNS BOTH possibilities.
+#  2. The old text asserted "a RESTART will NOT help: a token's scopes are fixed at mint" — the
+#     exact OPPOSITE of the truth when the token was merely ROTATED (a re-mint invalidates the
+#     old value, which this long-lived server had cached). That confidently-wrong advice
+#     stranded a real task mid-Build. _tool now reloads .vikunja-mcp.env and retries once on a
+#     401 (rotation self-heals); a 401 that still surfaces means the on-disk token is genuinely
+#     rejected, and the fix is the token in the FILE — a restart only re-reads what we reloaded.
 _AUTH_GUIDANCE = {
     401: (
-        "Vikunja API 401 (unauthorized) — a token PERMISSION/SCOPE problem, not a "
-        "transient or session error. The token authenticates (reads/comment may still "
-        "work) but is not authorized for THIS endpoint. This server needs the token "
-        "permission groups `other:user` and `projects:views_buckets` — the latter gates "
-        "every stage transition (advance/claim/review_task/… move kanban buckets). A "
-        "/mcp reconnect or a full server RESTART will NOT help: a token's scopes are "
-        "fixed when it is minted. Remedy: re-mint the token with those groups and "
-        "repoint the config"
+        "Vikunja API 401 (unauthorized) — the token is REJECTED. Vikunja sends this same "
+        "`code 11` body for an invalid/expired/malformed token AND for a valid token that is "
+        "MISSING a required permission group, so the two cannot be told apart from the response. "
+        "On a 401 this server re-reads .vikunja-mcp.env and retries once, so a freshly ROTATED "
+        "token self-heals — seeing this means the token in .vikunja-mcp.env is STILL rejected. "
+        "Remedy: put a current, valid token in .vikunja-mcp.env, minted WITH the permission "
+        "groups `other:user` and `projects:views_buckets` (the latter gates every stage "
+        "transition — advance/claim/review_task move kanban buckets); if you just re-minted, "
+        "confirm the new value actually landed in the file. A /mcp reconnect or full RESTART "
+        "only re-reads the same file the server already reloaded, so it will NOT help until the "
+        "token in that file is valid"
     ),
     403: (
         "Vikunja API 403 (forbidden) — the token authenticates but its user lacks "
@@ -47,15 +57,51 @@ def _reset_workflow_cache() -> None:
     _workflow = None
 
 
+def _build_workflow() -> Workflow:
+    cfg = load_config()
+    return Workflow(
+        VikunjaAPI(cfg.url, cfg.token), cfg.project_id,
+        enforce_single_wip=cfg.enforce_single_wip,
+    )
+
+
 def _wf() -> Workflow:
     global _workflow
     if _workflow is None:
-        cfg = load_config()
-        _workflow = Workflow(
-            VikunjaAPI(cfg.url, cfg.token), cfg.project_id,
-            enforce_single_wip=cfg.enforce_single_wip,
-        )
+        _workflow = _build_workflow()
     return _workflow
+
+
+def _reload_workflow_from_disk() -> bool:
+    """Rebuild the cached Workflow from a FRESH read of config — picking up a token ROTATED in
+    .vikunja-mcp.env while the server was running. Returns True if a new Workflow was built,
+    False if config is now missing / unreadable / malformed (the previously cached Workflow is
+    then left untouched). Total by contract: it runs inside _tool's except block, so it must
+    NEVER raise — any config-read failure degrades to "no reload" rather than crashing the stdio
+    server (same best-effort posture as _self_heal_installed_artifacts)."""
+    global _workflow
+    try:
+        rebuilt = _build_workflow()
+    except Exception:
+        return False
+    _workflow = rebuilt
+    return True
+
+
+def _error_result(e: Exception) -> dict:
+    """Turn a caught tool exception into an {"error": ...} result — never re-raise, so the stdio
+    server can't crash. Shared by the first attempt and the single post-401 retry."""
+    if isinstance(e, (WorkflowError, ConfigError)):
+        return {"error": str(e)}
+    if isinstance(e, VikunjaError):
+        guidance = _AUTH_GUIDANCE.get(e.status)
+        if guidance:
+            return {"error": f"{guidance} [server said: {e.message}]"}
+        return {"error": f"Vikunja API: {e.status} {e.message}"}
+    return {
+        "error": f"tracker unreachable ({e.__class__.__name__}): "
+        f"check the url in .vikunja-mcp.toml and the VPN"
+    }
 
 
 def _tool(fn):
@@ -63,18 +109,23 @@ def _tool(fn):
     def wrapper(*args, **kwargs):
         try:
             return fn(*args, **kwargs)
-        except (WorkflowError, ConfigError) as e:
-            return {"error": str(e)}
-        except VikunjaError as e:
-            guidance = _AUTH_GUIDANCE.get(e.status)
-            if guidance:
-                return {"error": f"{guidance} [server said: {e.message}]"}
-            return {"error": f"Vikunja API: {e.status} {e.message}"}
-        except httpx.HTTPError as e:
-            return {
-                "error": f"tracker unreachable ({e.__class__.__name__}): "
-                f"check the url in .vikunja-mcp.toml and the VPN"
-            }
+        except (WorkflowError, ConfigError, VikunjaError, httpx.HTTPError) as e:
+            # A 401 may be a ROTATED token, not a permanent fault: this long-lived server caches
+            # the token from first use, but a human can re-mint it (which INVALIDATES the old
+            # value) and rewrite .vikunja-mcp.env. Reload config and retry the SAME call ONCE with
+            # the fresh token, so /loop survives a rotation without a restart (tracker #140).
+            # Write-safe: Vikunja rejects a 401 at its auth layer BEFORE the route handler runs,
+            # so nothing was mutated server-side (verified on 2.3.0 — an unscoped token 401s a
+            # write untouched). Same reasoning api.py uses to retry 429 for ANY method, unlike an
+            # ambiguous 5xx it retries only for idempotent ones. Guard hard: only status 401,
+            # exactly ONE retry, and the retry's outcome is FINAL — a second 401 surfaces the
+            # guidance, it never recurses into another reload.
+            if isinstance(e, VikunjaError) and e.status == 401 and _reload_workflow_from_disk():
+                try:
+                    return fn(*args, **kwargs)
+                except (WorkflowError, ConfigError, VikunjaError, httpx.HTTPError) as retry_err:
+                    return _error_result(retry_err)
+            return _error_result(e)
 
     return wrapper
 

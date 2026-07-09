@@ -2,8 +2,11 @@ import asyncio
 
 import httpx
 
+import pytest
+
 from vikunja_mcp import server
 from vikunja_mcp.api import VikunjaError
+from vikunja_mcp.config import ConfigError
 
 
 def test_exposes_exactly_the_workflow_tools():
@@ -41,23 +44,148 @@ def test_tool_catches_transport_errors_with_hint(monkeypatch):
     assert "ConnectError" in result["error"]
 
 
-def test_401_is_surfaced_as_actionable_scope_error(monkeypatch):
-    """A bare 'Vikunja API 401' reads like a session hiccup and invites a pointless
-    /mcp reconnect or server restart. Real incident: a token missing the
-    `projects:views_buckets` group let reads + comment through but 401'd every stage
-    transition (they move kanban buckets), and the agent misdiagnosed it as a 'stuck
-    credential → restart the server'. The tool must name the scope and kill that
-    instinct — a token's permissions are fixed at mint time, so only a re-mint helps."""
+def test_401_message_owns_both_expired_and_scope_without_the_restart_myth(monkeypatch):
+    """tracker #140: verified on real 2.3.0 that Vikunja returns the SAME code-11 401 for an
+    invalid/expired token AND for a scope gap (byte-for-byte identical body + headers), so the
+    message must OWN BOTH — and must NOT repeat the old, confidently-wrong claim that a restart
+    can't help 'because scopes are fixed at mint' (dead wrong for a rotated token). It names both
+    required groups, the file to fix, the expired possibility, and preserves the raw server text."""
     class Boom:
         def next_task(self):
-            raise VikunjaError(401, "missing permission")
+            raise VikunjaError(401, '{"code":11,"message":"invalid token"}')
 
     monkeypatch.setattr(server, "_wf", lambda: Boom())
+    monkeypatch.setattr(server, "_reload_workflow_from_disk", lambda: False)  # nothing rotated
     msg = server.next_task()["error"]
-    assert "projects:views_buckets" in msg   # names the group that gates transitions
-    assert "restart" in msg.lower()          # ... and explicitly kills the restart instinct
-    assert "mint" in msg.lower()             # ... points at the real remedy (re-mint the token)
-    assert "missing permission" in msg       # ... while preserving the raw server text
+    assert "projects:views_buckets" in msg           # owns the scope-gap remedy
+    assert "other:user" in msg
+    assert "expired" in msg.lower()                  # owns the invalid/expired case too
+    assert ".vikunja-mcp.env" in msg                 # points at the file to fix
+    assert "restart" in msg.lower()                  # still speaks to the restart instinct
+    assert "scopes are fixed" not in msg.lower()     # ...but the confidently-wrong claim is GONE
+    assert '{"code":11' in msg                       # raw server body preserved
+
+
+def test_401_reloads_config_and_retries_once_then_succeeds(monkeypatch):
+    """tracker #140 option (б): on a 401 the server reloads .vikunja-mcp.env and retries the SAME
+    call once; if the freshly read token works, the rotation is survived with no restart."""
+    reloads = {"n": 0}
+    state = {"token_ok": False}
+
+    class WF:
+        def next_task(self):
+            if not state["token_ok"]:
+                raise VikunjaError(401, '{"code":11}')
+            return {"ok": True}
+
+    def fake_reload():
+        reloads["n"] += 1
+        state["token_ok"] = True          # the on-disk token is now the fresh, valid one
+        return True
+
+    monkeypatch.setattr(server, "_wf", lambda: WF())
+    monkeypatch.setattr(server, "_reload_workflow_from_disk", fake_reload)
+    assert server.next_task() == {"ok": True}
+    assert reloads["n"] == 1               # reloaded exactly once
+
+
+def test_second_401_after_reload_is_not_retried_again(monkeypatch):
+    """The retry is EXACTLY one: a token still rejected after the reload surfaces the guidance,
+    it does not reload/retry in a loop."""
+    reloads = {"n": 0}
+    calls = {"n": 0}
+
+    class WF:
+        def next_task(self):
+            calls["n"] += 1
+            raise VikunjaError(401, '{"code":11,"message":"still bad"}')
+
+    def fake_reload():
+        reloads["n"] += 1
+        return True
+
+    monkeypatch.setattr(server, "_wf", lambda: WF())
+    monkeypatch.setattr(server, "_reload_workflow_from_disk", fake_reload)
+    msg = server.next_task()["error"]
+    assert reloads["n"] == 1               # reloaded once, never again
+    assert calls["n"] == 2                 # original attempt + exactly one retry, no loop
+    assert "projects:views_buckets" in msg
+    assert "still bad" in msg              # raw text from the SECOND 401 is what surfaced
+
+
+def test_non_401_errors_never_reload_or_retry(monkeypatch):
+    """Only a 401 arms the reload+retry. A 403/404/5xx must not touch config or re-run the call
+    (re-running a mutating tool blindly is exactly what we must not do off an ambiguous error)."""
+    reloads = {"n": 0}
+
+    def fake_reload():
+        reloads["n"] += 1
+        return True
+
+    monkeypatch.setattr(server, "_reload_workflow_from_disk", fake_reload)
+    for status in (403, 404, 500):
+        calls = {"n": 0}
+
+        class WF:
+            def next_task(self):
+                calls["n"] += 1
+                raise VikunjaError(status, "boom")
+
+        monkeypatch.setattr(server, "_wf", lambda: WF())
+        server.next_task()
+        assert calls["n"] == 1, f"status {status} must not be retried"
+    assert reloads["n"] == 0                # reload never even considered for a non-401
+
+
+@pytest.mark.parametrize(
+    "config_error",
+    [ConfigError("no token: .vikunja-mcp.env vanished"), OSError("Permission denied")],
+    ids=["config-gone", "unreadable-file"],
+)
+def test_reload_failure_degrades_gracefully_without_crashing(monkeypatch, config_error):
+    """tracker #140: if .vikunja-mcp.env is missing / unreadable at reload time, the reload must
+    fail SOFT via the REAL _reload_workflow_from_disk — no crash, no retry — and the original 401
+    guidance is surfaced. Exercised for both a ConfigError (token gone) and an OSError (file
+    unreadable) at load_config time."""
+    calls = {"n": 0}
+
+    class WF:
+        def next_task(self):
+            calls["n"] += 1
+            raise VikunjaError(401, '{"code":11}')
+
+    def boom():
+        raise config_error
+
+    monkeypatch.setattr(server, "_wf", lambda: WF())
+    monkeypatch.setattr(server, "load_config", boom)    # real _reload_workflow_from_disk runs
+    result = server.next_task()                          # must not raise
+    assert "projects:views_buckets" in result["error"]   # original 401 guidance surfaced
+    assert calls["n"] == 1                               # reload failed -> no retry
+
+
+def test_reload_rebuilds_workflow_with_the_fresh_on_disk_token(monkeypatch):
+    """_reload_workflow_from_disk rebuilds the cached Workflow from a fresh config read, so the
+    NEW token in .vikunja-mcp.env is the credential used from the retry onward."""
+    from vikunja_mcp.config import Config
+
+    built = {}
+    monkeypatch.setattr(
+        server, "load_config",
+        lambda: Config(url="https://t", token="FRESH", project_id=10),
+    )
+    monkeypatch.setattr(
+        server, "VikunjaAPI",
+        lambda url, token: built.update(url=url, token=token) or ("api", token),
+    )
+    monkeypatch.setattr(server, "Workflow", lambda api, pid, enforce_single_wip=False: ("wf", api, pid))
+    server._reset_workflow_cache()
+    try:
+        assert server._reload_workflow_from_disk() is True
+        assert built == {"url": "https://t", "token": "FRESH"}   # rebuilt with the fresh token
+        assert server._workflow == ("wf", ("api", "FRESH"), 10)  # and cached
+    finally:
+        server._reset_workflow_cache()      # don't leak the fake Workflow into other tests
 
 
 def test_403_is_surfaced_as_project_permission_error(monkeypatch):
