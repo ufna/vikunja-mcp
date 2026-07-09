@@ -3,6 +3,19 @@ import itertools
 
 from vikunja_mcp.formatting import html_to_text, text_to_html
 
+# Real Vikunja 2.3.0 auto-creates the reciprocal relation on the OTHER task: write one side
+# ("P precedes S") and the inverse surfaces on the far end ("S follows P"). This map (verified
+# against real 2.3.0) is applied on READ in get_task so self.relations stays the literal written
+# set. See epic #94 / #104.
+_INVERSE_RELATION = {
+    "subtask": "parenttask", "parenttask": "subtask",
+    "related": "related",
+    "duplicateof": "duplicates", "duplicates": "duplicateof",
+    "blocking": "blocked", "blocked": "blocking",
+    "precedes": "follows", "follows": "precedes",
+    "copiedfrom": "copiedto", "copiedto": "copiedfrom",
+}
+
 
 class FakeAPI:
     def __init__(self, me_id=2, me_username="agent-infra", buckets=None):
@@ -74,10 +87,17 @@ class FakeAPI:
         # зеркалим реальную vikunja 2.3.0: related_tasks — дикт по kind, значения —
         # ПОЛНЫЕ таск-дикты (наблюдалось эмпирически), выведен из relations "на лету"
         # (не хранится отдельно на таске) -> add_relation сразу видно в get_task.
+        # Реальная 2.3.0 авто-создаёт ОБРАТНУЮ связь на другой задаче (записали
+        # "P precedes S" — на S видно "follows: P"). add_relation не трогаем (self.relations
+        # хранит ровно записанное); инверсию синтезируем ЗДЕСЬ, на чтении: если task_id —
+        # ЦЕЛЬ связи, отдаём её под инвертированным kind (_INVERSE_RELATION).
         related: dict[str, list[dict]] = {}
         for tid, other_id, kind in self.relations:
             if tid == task_id and other_id in self.tasks:
                 related.setdefault(kind, []).append(dict(self.tasks[other_id]))
+            elif other_id == task_id and tid in self.tasks:
+                inverse = _INVERSE_RELATION.get(kind, kind)
+                related.setdefault(inverse, []).append(dict(self.tasks[tid]))
         t["related_tasks"] = related
         return t
 

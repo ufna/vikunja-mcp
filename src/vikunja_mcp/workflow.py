@@ -560,7 +560,7 @@ class Workflow:
         self._move(task_id, "Backlog")
         return {"moved_to": "Backlog", "task_id": task_id, "labeled": LABEL_BLOCKED}
 
-    def decompose(self, task_id: int, subtasks: list[dict]) -> dict:
+    def decompose(self, task_id: int, subtasks: list[dict], ordered: bool = False) -> dict:
         if not subtasks or len(subtasks) < 2:
             raise WorkflowError("decomposition means at least 2 subtasks")
         if any(not (st.get("title") or "").strip() for st in subtasks):
@@ -581,6 +581,21 @@ class Workflow:
                 created.append({"id": child["id"], "title": child["title"]})
                 self.api.add_relation(child["id"], task_id, "parenttask")
                 self._move(child["id"], "Queue")
+            # ordered chain (option C, epic #94): link adjacent children so each precedes the
+            # next, in ARRAY ORDER — child[i] `precedes` child[i+1]. Vikunja auto-creates the
+            # inverse `follows` on the SUCCESSOR (empirically verified on real 2.3.0), which is
+            # exactly the kind the sequence gate reads (PREDECESSOR_RELATION_KINDS). So the head
+            # keeps only an outgoing `precedes` (no follows -> claimable now) while every later
+            # child gains `follows`→its predecessor the instant the chain is built (gated until
+            # that predecessor reaches Review). The direction is load-bearing: a flipped chain
+            # would gate the head and free the tail — the exact silent corruption to prevent.
+            # Kept INSIDE the try so a chaining failure (children already exist) is surfaced by
+            # the same partial-failure handler, never blind-retried. range(len(created) - 1) is a
+            # no-op for 0/1 children. No cycle detection — a linear chain is acyclic by
+            # construction (that's #105, deliberately out of scope).
+            if ordered:
+                for i in range(len(created) - 1):
+                    self.api.add_relation(created[i]["id"], created[i + 1]["id"], "precedes")
         except (VikunjaError, httpx.HTTPError) as exc:
             if not created:
                 raise  # nothing landed on the board yet — the bare error is safe to retry
@@ -593,12 +608,25 @@ class Workflow:
             ) from exc
 
         listing = ", ".join(f"#{c['id']} {c['title']}" for c in created)
-        self.api.add_comment(task_id, f"[decompose] создано: {listing}")
+        comment = f"[decompose] создано: {listing}"
+        if ordered:
+            comment += " (упорядочено: цепочка precedes — клеймабельна только голова)"
+        self.api.add_comment(task_id, comment)
         label = self.api.get_or_create_label(LABEL_EPIC)
         self.api.add_label(task_id, label["id"])
         self.api.remove_assignee(task_id, self._me()["id"])
         self._move(task_id, "Backlog")
-        return {"created": created, "parent": {"id": task_id, "moved_to": "Backlog", "labeled": LABEL_EPIC}}
+        result = {
+            "created": created,
+            "parent": {"id": task_id, "moved_to": "Backlog", "labeled": LABEL_EPIC},
+        }
+        if ordered:
+            result["ordered"] = True
+            result["note"] = (
+                "children are chained head→tail (precedes/follows); only the head is claimable "
+                "now — each successor unlocks when its predecessor reaches Review"
+            )
+        return result
 
     def file_task(
         self, title: str, description: str = "", priority: int = 0,

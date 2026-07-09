@@ -437,3 +437,120 @@ def test_bounce_scenario_end_to_end(env):
     res = wf.advance(s["id"], to="review", worklog="did S", evidence="sha-s")
     assert res["moved_to"] == "Review"
     assert api.stage_of(s["id"]) == "Review"
+
+
+# --- C4 (#104): decompose(ordered=True) chains children head→tail (precedes/follows) ---
+
+
+def _ordered_parent(api):
+    """A parent task in Design assigned to me — the precondition decompose enforces
+    (_require_mine). decompose(ordered=True) then chains the created children."""
+    return api.add_task("epic parent", "Design", assignee=api.me_user)
+
+
+def test_decompose_ordered_chains_children_follows_head_to_tail(env):
+    """ordered=True writes `precedes` on child[i]→child[i+1] in ARRAY ORDER, which the fake
+    (like real Vikunja 2.3.0) auto-inverts into `follows` on each successor. So every successor
+    reports its immediate predecessor as an unfinished blocker while the HEAD has none — and the
+    parenttask links + parent finalization (Backlog + epic) are all still there."""
+    api, wf = env
+    parent = _ordered_parent(api)
+    res = wf.decompose(
+        parent["id"],
+        subtasks=[{"title": "one"}, {"title": "two"}, {"title": "three"}],
+        ordered=True,
+    )
+    created = res["created"]
+    assert len(created) == 3
+    assert res.get("ordered") is True                       # additive marker on the ordered path
+    # precedes written in ARRAY ORDER: child[i] precedes child[i+1] (the load-bearing direction)
+    for i in range(len(created) - 1):
+        assert (created[i]["id"], created[i + 1]["id"], "precedes") in api.relations
+    # each successor sees its immediate predecessor as an unfinished blocker (the follows inverse)
+    for i in range(len(created) - 1):
+        preds = wf._unfinished_predecessors(created[i + 1]["id"])
+        assert [p["id"] for p in preds] == [created[i]["id"]]
+    # the HEAD has no predecessor -> claimable now
+    assert wf._unfinished_predecessors(created[0]["id"]) == []
+    # children still carry the parenttask link to the parent
+    for c in created:
+        assert (c["id"], parent["id"], "parenttask") in api.relations
+    # parent finalized exactly as an epic: Backlog + epic label
+    assert api.stage_of(parent["id"]) == "Backlog"
+    assert any(lb["title"] == "epic" for lb in api.tasks[parent["id"]]["labels"])
+
+
+def test_decompose_ordered_head_claimable_tail_gated(env):
+    """THE direction guard: after an ordered decompose the HEAD is immediately claimable, but the
+    next child is REFUSED and the refusal NAMES the head. This proves the chain is enforced
+    FORWARD — a backwards chain would free the tail and gate the head (the silent-corruption bug)."""
+    api, wf = env
+    parent = _ordered_parent(api)
+    created = wf.decompose(
+        parent["id"], subtasks=[{"title": "head"}, {"title": "tail"}], ordered=True
+    )["created"]
+    # head claimable -> moves to Design
+    assert wf.claim(created[0]["id"])["claimed"] is True
+    assert api.stage_of(created[0]["id"]) == "Design"
+    # tail gated: refusal names the head, and the tail is neither moved nor assigned
+    with pytest.raises(WorkflowError) as exc:
+        wf.claim(created[1]["id"])
+    assert api.tasks[created[0]["id"]]["identifier"] in str(exc.value)
+    assert api.stage_of(created[1]["id"]) == "Queue"
+    assert api.tasks[created[1]["id"]]["assignees"] == []
+
+
+def test_decompose_ordered_tail_unlocks_after_head_reaches_review(env):
+    """The chain drains autonomously: once the head reaches Review (the 'ready' bar), the next
+    child unlocks and becomes claimable."""
+    api, wf = env
+    parent = _ordered_parent(api)
+    created = wf.decompose(
+        parent["id"], subtasks=[{"title": "head"}, {"title": "tail"}], ordered=True
+    )["created"]
+    # drive the head all the way to Review
+    wf.claim(created[0]["id"])
+    wf.advance(created[0]["id"], to="build", spec="approach")
+    wf.advance(created[0]["id"], to="review", worklog="did head", evidence="sha")
+    assert api.stage_of(created[0]["id"]) == "Review"
+    # now the tail unlocks
+    assert wf.claim(created[1]["id"])["claimed"] is True
+    assert api.stage_of(created[1]["id"]) == "Design"
+
+
+def test_decompose_unordered_adds_no_precedes_regression_guard(env):
+    """Migration / byte-for-byte guard: plain decompose (ordered omitted) writes NO precedes,
+    keeps the parenttask links, leaves every child claimable, and returns the IDENTICAL dict shape
+    (no additive ordered/note keys)."""
+    api, wf = env
+    parent = _ordered_parent(api)
+    res = wf.decompose(parent["id"], subtasks=[{"title": "a"}, {"title": "b"}])
+    created = res["created"]
+    assert not any(kind == "precedes" for _t, _o, kind in api.relations)
+    for c in created:
+        assert (c["id"], parent["id"], "parenttask") in api.relations
+        assert wf._unfinished_predecessors(c["id"]) == []       # all claimable, nothing gated
+    # return shape is byte-for-byte unchanged: exactly {created, parent}, no ordered/note
+    assert set(res) == {"created", "parent"}
+    assert res["parent"] == {"id": parent["id"], "moved_to": "Backlog", "labeled": "epic"}
+
+
+def test_decompose_ordered_false_explicit_adds_no_precedes(env):
+    """ordered=False passed explicitly behaves exactly like ordered omitted: no precedes, same
+    dict shape."""
+    api, wf = env
+    parent = _ordered_parent(api)
+    res = wf.decompose(parent["id"], subtasks=[{"title": "a"}, {"title": "b"}], ordered=False)
+    assert not any(kind == "precedes" for _t, _o, kind in api.relations)
+    assert set(res) == {"created", "parent"}
+    assert res["parent"] == {"id": parent["id"], "moved_to": "Backlog", "labeled": "epic"}
+
+
+def test_decompose_ordered_single_child_rejected_no_relation(env):
+    """ordered=True does not bypass the >=2 guard nor crash on a degenerate 1-element chain:
+    the guard still rejects it and NO precedes tuple is written."""
+    api, wf = env
+    parent = _ordered_parent(api)
+    with pytest.raises(WorkflowError, match="2"):
+        wf.decompose(parent["id"], subtasks=[{"title": "only"}], ordered=True)
+    assert not any(kind == "precedes" for _t, _o, kind in api.relations)

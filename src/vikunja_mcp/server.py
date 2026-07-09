@@ -185,11 +185,15 @@ def return_task(task_id: int, reason: str) -> dict:
 
 @mcp.tool()
 @_tool
-def decompose(task_id: int, subtasks: list[dict]) -> dict:
+def decompose(task_id: int, subtasks: list[dict], ordered: bool = False) -> dict:
     """Break up YOUR large task (>~half a day of work) into >=2 subtasks:
     [{'title': ..., 'description'?: ..., 'priority'?: 0-5}]. Subtasks go into Queue with
-    a relation to the parent; the parent moves to Backlog with label 'epic'."""
-    return _wf().decompose(task_id, subtasks)
+    a relation to the parent; the parent moves to Backlog with label 'epic'.
+    Pass ordered=True when the subtasks MUST run in sequence (each builds on the previous):
+    they are chained in ARRAY ORDER so only the head is claimable immediately and each later
+    child unlocks when its predecessor reaches Review. Leave ordered=False (default) when the
+    subtasks are independent and may be worked in parallel."""
+    return _wf().decompose(task_id, subtasks, ordered)
 
 
 @mcp.tool()
