@@ -265,6 +265,131 @@ def test_reload_returns_false_when_the_on_disk_token_is_unchanged(monkeypatch):
     assert server._workflow is sentinel                   # cached Workflow left untouched
 
 
+# --- tracker #148: a token rotation must NOT silently REPOINT the session -----------------------
+# _reload_workflow_from_disk re-reads the WHOLE config, so before #148 a rotation that ALSO changed
+# url/project_id rebuilt onto the OTHER project/host with no error — the next next_task would hand
+# back a DIFFERENT project's queue (four agent identities share this config shape on one tracker, so
+# a mass re-mint mixing up project_id is a realistic slip). The guard: on a rotation (token changed)
+# the reload REFUSES to adopt a changed url or project_id, surfacing an actionable restart error
+# instead of silently repointing. An unchanged token (scope gap) and a pure rotation are unaffected.
+
+
+def _set_session_baseline(monkeypatch, *, token, url, project_id):
+    """Pin the in-memory session baseline the repoint guard compares the fresh config against."""
+    monkeypatch.setattr(server, "_workflow_token", token, raising=False)
+    monkeypatch.setattr(server, "_workflow_url", url, raising=False)
+    monkeypatch.setattr(server, "_workflow_project_id", project_id, raising=False)
+
+
+def test_reload_refuses_a_rotation_that_also_repoints_project_or_host(monkeypatch):
+    """Function-level guard: a rotation (token changed) that ALSO moves project_id OR url raises
+    ConfigError with an actionable restart message INSTEAD of rebuilding onto the other
+    project/host. The cached Workflow and the baseline are left untouched (no silent repoint)."""
+    sentinel = object()
+    monkeypatch.setattr(server, "_workflow", sentinel, raising=False)
+    _set_session_baseline(monkeypatch, token="OLD", url="https://t", project_id=10)
+
+    monkeypatch.setattr(                                   # project_id moved 10 -> 999
+        server, "load_config",
+        lambda: Config(url="https://t", token="ROTATED", project_id=999),
+    )
+    with pytest.raises(ConfigError, match="MID-SESSION"):
+        server._reload_workflow_from_disk()
+    assert server._workflow is sentinel                   # did NOT rebuild
+    assert server._workflow_project_id == 10              # baseline intact
+
+    monkeypatch.setattr(                                   # host moved instead
+        server, "load_config",
+        lambda: Config(url="https://ELSEWHERE", token="ROTATED", project_id=10),
+    )
+    with pytest.raises(ConfigError, match="MID-SESSION"):
+        server._reload_workflow_from_disk()
+    assert server._workflow is sentinel
+    assert server._workflow_url == "https://t"
+
+
+def test_401_rotation_that_changes_project_id_refuses_to_repoint(monkeypatch, capsys):
+    """Through the real _tool + _reload: a 401 whose reload finds a ROTATED token but a CHANGED
+    project_id must surface the restart error and must NOT retry the tool onto the other project's
+    queue. RED before #148 (the reload rebuilds and the tool retries -> calls==2, wrong project)."""
+    calls = {"n": 0}
+
+    class WF:
+        def next_task(self):
+            calls["n"] += 1
+            raise VikunjaError(401, '{"code":11}')
+
+    monkeypatch.setattr(server, "_wf", lambda: WF())
+    _set_session_baseline(monkeypatch, token="OLD", url="https://t", project_id=10)
+    monkeypatch.setattr(
+        server, "load_config",
+        lambda: Config(url="https://t", token="ROTATED", project_id=999),
+    )
+    msg = server.next_task()["error"]
+    assert "mid-session" in msg.lower()          # the repoint refusal, not the generic 401 text
+    assert "10" in msg and "999" in msg          # names old -> new project
+    assert "restart" in msg.lower()
+    assert calls["n"] == 1                        # refused: NOT retried onto project 999
+    assert capsys.readouterr().out == ""         # MCP stdio channel stays byte-clean
+
+
+def test_401_rotation_that_changes_url_refuses_to_repoint(monkeypatch, capsys):
+    """Same guard for a changed HOST: a rotation that also moves url must refuse, not repoint to
+    another tracker. RED before #148 (rebuild + retry, calls==2)."""
+    calls = {"n": 0}
+
+    class WF:
+        def next_task(self):
+            calls["n"] += 1
+            raise VikunjaError(401, '{"code":11}')
+
+    monkeypatch.setattr(server, "_wf", lambda: WF())
+    _set_session_baseline(monkeypatch, token="OLD", url="https://t", project_id=10)
+    monkeypatch.setattr(
+        server, "load_config",
+        lambda: Config(url="https://elsewhere.example", token="ROTATED", project_id=10),
+    )
+    msg = server.next_task()["error"]
+    assert "mid-session" in msg.lower()
+    assert "elsewhere.example" in msg            # names the new host
+    assert "restart" in msg.lower()
+    assert calls["n"] == 1
+    assert capsys.readouterr().out == ""
+
+
+def test_401_pure_rotation_same_url_and_project_still_self_heals(monkeypatch, capsys):
+    """The rotation path must SURVIVE #148: a 401 whose reload finds a new token but the SAME url +
+    project_id still rebuilds and retries once (recovery lives). Driven through the REAL _reload so
+    the guard is exercised end-to-end, not stubbed away."""
+    monkeypatch.setattr(server, "_workflow", None, raising=False)   # let the real reload write it
+    calls = {"n": 0}
+    state = {"ok": False}
+
+    class WF:
+        def next_task(self):
+            calls["n"] += 1
+            if not state["ok"]:
+                raise VikunjaError(401, '{"code":11}')
+            return {"ok": True}
+
+    monkeypatch.setattr(server, "_wf", lambda: WF())
+    _set_session_baseline(monkeypatch, token="OLD", url="https://t", project_id=10)
+    monkeypatch.setattr(
+        server, "load_config",
+        lambda: Config(url="https://t", token="ROTATED", project_id=10),   # SAME url + project
+    )
+
+    def fake_build(cfg):
+        state["ok"] = True                        # once rebuilt on the fresh token, the call works
+        return WF()
+
+    monkeypatch.setattr(server, "_build_workflow", fake_build)
+    assert server.next_task() == {"ok": True}
+    assert calls["n"] == 2                         # original 401 + exactly one retry
+    assert server._workflow_token == "ROTATED"     # baseline advanced to the rotated token
+    assert capsys.readouterr().out == ""
+
+
 def test_403_is_surfaced_as_project_permission_error(monkeypatch):
     """403 is a different remedy than 401: the token is fine but its user lacks
     permission on the project/resource — grant write access, don't touch scopes."""

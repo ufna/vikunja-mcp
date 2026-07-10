@@ -51,15 +51,23 @@ _AUTH_GUIDANCE = {
 }
 
 _workflow: Workflow | None = None
-# The token baked into the cached _workflow. On a 401, the retry fires ONLY if the token freshly
-# read from .vikunja-mcp.env DIFFERS from this — the #140-rework write-safety gate (see below).
+# The credential + TARGET baked into the cached _workflow, captured when the server first built it.
+#  * _workflow_token — the #140-rework write-safety gate: on a 401 the retry fires ONLY if the token
+#    freshly read from .vikunja-mcp.env DIFFERS from this (see _tool / _reload_workflow_from_disk).
+#  * _workflow_url / _workflow_project_id — the #148 REPOINT gate: a rotation may swap the credential,
+#    but it must NOT silently adopt a changed host/project mid-session (that would hand the agent
+#    another project's queue); a reload that finds either changed REFUSES instead of repointing.
 _workflow_token: str | None = None
+_workflow_url: str | None = None
+_workflow_project_id: int | None = None
 
 
 def _reset_workflow_cache() -> None:
-    global _workflow, _workflow_token
+    global _workflow, _workflow_token, _workflow_url, _workflow_project_id
     _workflow = None
     _workflow_token = None
+    _workflow_url = None
+    _workflow_project_id = None
 
 
 def _build_workflow(cfg) -> Workflow:
@@ -69,42 +77,76 @@ def _build_workflow(cfg) -> Workflow:
     )
 
 
+def _remember_session(cfg) -> None:
+    """Record the credential + target of the currently-cached Workflow — the baseline a later 401
+    reload compares a fresh config against (token change = rotation; url/project change = repoint)."""
+    global _workflow_token, _workflow_url, _workflow_project_id
+    _workflow_token = cfg.token
+    _workflow_url = cfg.url
+    _workflow_project_id = cfg.project_id
+
+
 def _wf() -> Workflow:
-    global _workflow, _workflow_token
+    global _workflow
     if _workflow is None:
         cfg = load_config()
         _workflow = _build_workflow(cfg)
-        _workflow_token = cfg.token
+        _remember_session(cfg)
     return _workflow
 
 
 def _reload_workflow_from_disk() -> bool:
     """Rebuild the cached Workflow from a FRESH read of config to pick up a token ROTATED in
-    .vikunja-mcp.env while the server runs — but ONLY when that token actually CHANGED. Returns
-    True (and swaps in the new Workflow) only if the freshly read token differs from the one baked
-    into the cached Workflow; returns False when it is unchanged, or when config is now missing /
-    unreadable / malformed (the cached Workflow is left untouched either way).
+    .vikunja-mcp.env while the server runs — but ONLY when that token actually CHANGED, and ONLY
+    when the rotation does not also move the host/project. Returns True (and swaps in the new
+    Workflow) on a clean rotation; returns False when the token is unchanged, or when config is now
+    missing / unreadable / malformed (the cached Workflow is left untouched either way).
 
-    The changed-token gate is the #140-rework fix. _tool retries the WHOLE tool on a 401, and a
-    tool is several HTTP requests: on a scope-gap 401 (a valid token lacking one permission group)
-    the EARLIER requests already wrote before a LATER one 401'd, so a blind retry duplicates them
-    (the reviewer saw a [worklog] comment and a filed card land twice on real 2.3.0). A scope gap
-    never changes the on-disk token, so gating the retry on a token change skips it for a scope gap
-    (no duplicate) yet still fires it for a real rotation (recovery lives — a rotation replaces the
-    whole dead token, so the tool's FIRST request 401'd with nothing written yet).
+    Two gates on the fresh config:
+      * changed-token (#140 rework): _tool retries the WHOLE tool on a 401, and a tool is several
+        HTTP requests. On a scope-gap 401 (a valid token lacking one permission group) the EARLIER
+        requests already wrote before a LATER one 401'd, so a blind retry duplicates them (the
+        reviewer saw a [worklog] comment and a filed card land twice on real 2.3.0). A scope gap
+        never changes the on-disk token, so gating the retry on a token change skips it for a scope
+        gap (no duplicate) yet still fires it for a real rotation (recovery lives — a rotation
+        replaces the whole dead token, so the tool's FIRST request 401'd with nothing written yet).
+      * changed-target (#148): load_config() returns the WHOLE Config, so a rotation that ALSO moved
+        url or project_id would otherwise rebuild onto a DIFFERENT host/project with no error — the
+        next next_task would hand back another project's queue (four agent identities share this
+        config shape on one tracker, so a mass re-mint mixing up project_id is a realistic human
+        slip, and the failure is SILENT). So when the token changed but url or project_id no longer
+        matches the running session, REFUSE: raise ConfigError with an actionable "restart the
+        server" message (caught by _tool, surfaced, NOT retried) rather than silently repoint.
 
-    Total by contract: runs inside _tool's except block, so it must NEVER raise — any config-read
-    failure degrades to "no reload" rather than crashing the stdio server (same best-effort posture
-    as _self_heal_installed_artifacts)."""
-    global _workflow, _workflow_token
+    Never raises for a config-read or Workflow-construction failure — those degrade to "no reload"
+    (return False) rather than crashing the stdio server (same best-effort posture as
+    _self_heal_installed_artifacts). The ONLY deliberate raise is the #148 repoint refusal above."""
+    global _workflow
     try:
         cfg = load_config()
     except Exception:
         return False
     if cfg.token == _workflow_token:
         return False                # same credential -> a scope gap, not a rotation -> no retry
-    _workflow = _build_workflow(cfg)
-    _workflow_token = cfg.token
+    if _workflow_token is not None and (
+        cfg.url != _workflow_url or cfg.project_id != _workflow_project_id
+    ):
+        # #148: the token rotated, but so did the host/project. A rotation reloads the CREDENTIAL;
+        # it must not silently REPOINT the session onto another project/host. Refuse loudly.
+        raise ConfigError(
+            "Vikunja config changed the project/host MID-SESSION and the server will NOT silently "
+            f"repoint: it started on project {_workflow_project_id} at {_workflow_url}, but the "
+            f"config now reads project {cfg.project_id} at {cfg.url}. A token rotation reloads only "
+            "the credential; adopting a different project or host would hand you another project's "
+            "queue. If the change is intended, RESTART the MCP server to adopt it; if not, revert "
+            "project_id/url in .vikunja-mcp.toml / .vikunja-mcp.env. The failing call was NOT "
+            "retried."
+        )
+    try:
+        _workflow = _build_workflow(cfg)
+    except Exception:
+        return False                # construction failure degrades to "no reload", never a crash
+    _remember_session(cfg)
     return True
 
 
@@ -147,12 +189,19 @@ def _tool(fn):
             # would still re-run the early write; that needs a human re-mint inside the sub-second
             # gap between two requests of one call. Fully closing it means per-request retry in
             # api.py, deferred as the bigger change.) Guard hard: only status 401, exactly ONE
-            # retry, outcome FINAL — a second 401 surfaces the guidance, never recursing.
-            if isinstance(e, VikunjaError) and e.status == 401 and _reload_workflow_from_disk():
+            # retry, outcome FINAL — a second 401 surfaces the guidance, never recursing. And a
+            # rotation that ALSO moved host/project (#148) is REFUSED, not retried: the reload raises
+            # ConfigError, which we surface as-is rather than repointing onto another project's queue.
+            if isinstance(e, VikunjaError) and e.status == 401:
                 try:
-                    return fn(*args, **kwargs)
-                except (WorkflowError, ConfigError, VikunjaError, httpx.HTTPError) as retry_err:
-                    return _error_result(retry_err)
+                    reloaded = _reload_workflow_from_disk()
+                except ConfigError as repoint:
+                    return _error_result(repoint)     # #148: mid-session repoint refusal, no retry
+                if reloaded:
+                    try:
+                        return fn(*args, **kwargs)
+                    except (WorkflowError, ConfigError, VikunjaError, httpx.HTTPError) as retry_err:
+                        return _error_result(retry_err)
             return _error_result(e)
 
     return wrapper
