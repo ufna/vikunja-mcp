@@ -14,13 +14,38 @@ class VikunjaError(Exception):
         super().__init__(f"Vikunja API {status}: {message}")
 
 
+def canonical_base_url(base_url: str) -> str:
+    """Canonicalize a Vikunja base URL — the SINGLE normalization shared by the client (which builds
+    requests from it) and the 401 repoint guard in server.py (which compares a reloaded config's url
+    against the running session's). Kept as one function so the two can NEVER drift apart (tracker
+    #154: they had — the guard compared the RAW url while the client normalized it, so a cosmetic-only
+    difference read as a mid-session host change and refused a healthy token rotation, inverting #148).
+
+    Folds ONLY what is the same endpoint by definition, and keeps every genuine change:
+      * strips a trailing slash — cosmetic;
+      * lowercases the scheme and the authority (host[:port]) — the RFC-3986 case-insensitive parts;
+        httpx folds these the same way when it builds a request, so routing the client through this
+        leaves its observable behaviour identical (the existing api tests pass untouched);
+      * ensures the `/api/v1` suffix.
+    It deliberately does NOT touch the scheme VALUE (http vs https — a plaintext downgrade is REAL),
+    the host, the port, or the path (all case-sensitive): a rotation moving any of those is a genuine
+    repoint the guard must still refuse."""
+    prefix, sep, rest = base_url.partition("://")
+    if sep:
+        authority, slash, path = rest.partition("/")
+        base = f"{prefix.lower()}{sep}{authority.lower()}{slash}{path}"
+    else:
+        base = base_url
+    base = base.rstrip("/")
+    if not base.endswith("/api/v1"):
+        base += "/api/v1"
+    return base
+
+
 class VikunjaAPI:
     def __init__(self, base_url: str, token: str, client: httpx.Client | None = None):
-        base = base_url.rstrip("/")
-        if not base.endswith("/api/v1"):
-            base += "/api/v1"
         self._client = client or httpx.Client(
-            base_url=base,
+            base_url=canonical_base_url(base_url),
             headers={"Authorization": f"Bearer {token}"},
             timeout=30,
         )

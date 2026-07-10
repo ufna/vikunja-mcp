@@ -6,7 +6,7 @@ import httpx
 from mcp.server.fastmcp import FastMCP
 
 from vikunja_mcp import __version__
-from vikunja_mcp.api import VikunjaAPI, VikunjaError
+from vikunja_mcp.api import VikunjaAPI, VikunjaError, canonical_base_url
 from vikunja_mcp.config import ConfigError, load_config
 from vikunja_mcp.workflow import Workflow, WorkflowError
 
@@ -116,7 +116,10 @@ def _reload_workflow_from_disk() -> bool:
         config shape on one tracker, so a mass re-mint mixing up project_id is a realistic human
         slip, and the failure is SILENT). So when the token changed but url or project_id no longer
         matches the running session, REFUSE: raise ConfigError with an actionable "restart the
-        server" message (caught by _tool, surfaced, NOT retried) rather than silently repoint.
+        server" message (caught by _tool, surfaced, NOT retried) rather than silently repoint. The
+        url is compared CANONICALLY (canonical_base_url, #154) so a rotation whose url differs only
+        cosmetically — trailing slash, scheme/host case — is NOT a repoint and self-heals; only a
+        genuinely different scheme value/host/port/path is refused.
 
     Never raises for a config-read or Workflow-construction failure — those degrade to "no reload"
     (return False) rather than crashing the stdio server (same best-effort posture as
@@ -129,9 +132,13 @@ def _reload_workflow_from_disk() -> bool:
     if cfg.token == _workflow_token:
         return False                # same credential -> a scope gap, not a rotation -> no retry
     if _workflow_token is not None and (
-        cfg.url != _workflow_url or cfg.project_id != _workflow_project_id
+        canonical_base_url(cfg.url) != canonical_base_url(_workflow_url)
+        or cfg.project_id != _workflow_project_id
     ):
-        # #148: the token rotated, but so did the host/project. A rotation reloads the CREDENTIAL;
+        # #148: the token rotated, but so did the host/project. The url is compared CANONICALLY
+        # (canonical_base_url — the client's own normalizer, #154) so a cosmetic-only difference
+        # (trailing slash, scheme/host case) is NOT a repoint and self-heals; only a genuinely
+        # different scheme value / host / port / path is refused. A rotation reloads the CREDENTIAL;
         # it must not silently REPOINT the session onto another project/host. Refuse loudly.
         raise ConfigError(
             "Vikunja config changed the project/host MID-SESSION and the server will NOT silently "

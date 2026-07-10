@@ -390,6 +390,120 @@ def test_401_pure_rotation_same_url_and_project_still_self_heals(monkeypatch, ca
     assert capsys.readouterr().out == ""
 
 
+# --- tracker #154: the repoint guard must compare NORMALIZED urls, not raw strings --------------
+# #148 stored and compared the RAW cfg.url, but VikunjaAPI normalizes it (canonical_base_url: strip
+# the trailing slash, fold scheme + host CASE). So a rotation whose url differed only COSMETICALLY
+# read as a mid-session HOST change and was REFUSED — inverting #148, which exists to stop a silent
+# repoint, not to break a healthy token rotation over punctuation. The guard now canonicalizes BOTH
+# sides with the SAME helper the client builds requests from, so the two can't drift apart. A
+# genuinely different endpoint (http vs https, other host / port / path) must STILL refuse.
+
+
+@pytest.mark.parametrize(
+    "rotated_url",
+    [
+        "https://tracker.zz.hgdev.com/",        # trailing slash — cosmetic
+        "HTTPS://tracker.zz.hgdev.com",         # scheme case — cosmetic (RFC 3986)
+        "https://TRACKER.zz.hgdev.com",         # host case — cosmetic (DNS case-insensitive)
+    ],
+    ids=["trailing-slash", "scheme-case", "host-case"],
+)
+def test_reload_self_heals_a_rotation_whose_url_differs_only_cosmetically(
+    monkeypatch, capsys, rotated_url
+):
+    """RED before #154: the raw-string compare treats a cosmetic url difference (trailing slash,
+    HTTPS-vs-https, host case) as a changed host and REFUSES the rotation (raises the repoint
+    ConfigError). After: both sides are canonicalized with the client's own helper, so the rotation
+    rebuilds and self-heals like a same-url one — the fresh credential is adopted, not rejected over
+    punctuation. stdout stays byte-clean (MCP stdio channel)."""
+    rebuilt = object()
+    monkeypatch.setattr(server, "_workflow", None, raising=False)
+    monkeypatch.setattr(server, "_build_workflow", lambda cfg: rebuilt)
+    _set_session_baseline(
+        monkeypatch, token="OLD", url="https://tracker.zz.hgdev.com", project_id=10
+    )
+    monkeypatch.setattr(
+        server, "load_config",
+        lambda: Config(url=rotated_url, token="ROTATED", project_id=10),
+    )
+    try:
+        assert server._reload_workflow_from_disk() is True   # rebuilt, NOT refused as a repoint
+        assert server._workflow is rebuilt
+        assert server._workflow_token == "ROTATED"           # baseline advanced (clean rotation)
+        assert capsys.readouterr().out == ""
+    finally:
+        server._reset_workflow_cache()                        # don't leak the sentinel/baseline
+
+
+@pytest.mark.parametrize(
+    "rotated_url",
+    [
+        "http://tracker.zz.hgdev.com",           # scheme VALUE downgrade to plaintext — REAL
+        "https://other.zz.hgdev.com",            # different host — REAL
+        "https://tracker.zz.hgdev.com:8443",     # different port — REAL
+        "https://tracker.zz.hgdev.com/vikunja",  # different path prefix — REAL
+    ],
+    ids=["scheme-value-downgrade", "different-host", "different-port", "different-path"],
+)
+def test_reload_still_refuses_a_rotation_to_a_genuinely_different_endpoint(
+    monkeypatch, capsys, rotated_url
+):
+    """The normalization must not be too PERMISSIVE: folding the trailing slash + scheme/host case
+    must still leave a real endpoint change refused, or #148's hole re-opens. An http-vs-https
+    plaintext downgrade, a different host, a different port and a different path prefix are all
+    genuine repoints — each must raise the mid-session refusal and NOT rebuild onto the new host."""
+    sentinel = object()
+    monkeypatch.setattr(server, "_workflow", sentinel, raising=False)
+    _set_session_baseline(
+        monkeypatch, token="OLD", url="https://tracker.zz.hgdev.com", project_id=10
+    )
+    monkeypatch.setattr(
+        server, "load_config",
+        lambda: Config(url=rotated_url, token="ROTATED", project_id=10),
+    )
+    with pytest.raises(ConfigError, match="MID-SESSION"):
+        server._reload_workflow_from_disk()
+    assert server._workflow is sentinel                       # did NOT rebuild onto the new host
+    assert capsys.readouterr().out == ""
+
+
+def test_401_rotation_with_a_cosmetic_url_change_still_self_heals(monkeypatch, capsys):
+    """End-to-end through the REAL _tool + _reload: a 401 whose rotated config differs only by a
+    trailing slash on the url must self-heal (rebuild + retry once), NOT surface the repoint refusal.
+    RED before #154 (the raw compare raises the refusal -> next_task returns the error, calls==1,
+    no recovery). stdout stays byte-clean."""
+    monkeypatch.setattr(server, "_workflow", None, raising=False)
+    calls = {"n": 0}
+    state = {"ok": False}
+
+    class WF:
+        def next_task(self):
+            calls["n"] += 1
+            if not state["ok"]:
+                raise VikunjaError(401, '{"code":11}')
+            return {"ok": True}
+
+    monkeypatch.setattr(server, "_wf", lambda: WF())
+    _set_session_baseline(monkeypatch, token="OLD", url="https://t", project_id=10)
+    monkeypatch.setattr(
+        server, "load_config",
+        lambda: Config(url="https://t/", token="ROTATED", project_id=10),   # trailing slash ONLY
+    )
+
+    def fake_build(cfg):
+        state["ok"] = True
+        return WF()
+
+    monkeypatch.setattr(server, "_build_workflow", fake_build)
+    try:
+        assert server.next_task() == {"ok": True}      # recovered, not the repoint error
+        assert calls["n"] == 2                         # original 401 + exactly one retry
+        assert server._workflow_token == "ROTATED"
+        assert capsys.readouterr().out == ""
+    finally:
+        server._reset_workflow_cache()
+
+
 def test_403_is_surfaced_as_project_permission_error(monkeypatch):
     """403 is a different remedy than 401: the token is fine but its user lacks
     permission on the project/resource — grant write access, don't touch scopes."""
