@@ -125,16 +125,26 @@ lifecycle (`get_task` → spec/`advance(to='build')` → implement, possibly spa
 its own sub-agents → commit+push → `advance(to='review')`); the orchestrator does
 no task content itself. Bugs get independent agent review (orchestrator dispatches
 a sibling reviewer).
-Run it under `/loop` with no interval (= self-paced) for continuous operation:
-the agent drains the queue and paces its own pauses on an empty queue instead
-of stopping. This deliberately OVERRIDES the generic autonomous-`/loop` default
-("steward, not initiator: don't start fresh work without a human go-ahead, stop
-when idle") — the Queue is human-triaged work, so claiming a fresh Queue task and
-dispatching IS the mandate, not unbidden initiation; an empty queue means
-`ScheduleWakeup`, never a stop. When the orchestrator needs a human answer, it asks via
-`call_human` (a card) — never a console prompt (`AskUserQuestion`/`ExitPlanMode`/
-plain text), since the human isn't at the console; after asking it keeps draining,
-and the human answers and moves the card back so the loop resumes.
+Run it under `/loop` for continuous operation — the agent drains the queue and,
+instead of stopping when idle, waits for its next tick. Pick the mode by
+supervision: self-paced (`/loop`, no interval) is fine WHEN SUPERVISED, but for
+UNATTENDED / overnight runs use an INTERVAL-backed loop (`/loop 10m`). Why: a
+self-paced loop arms its next tick only via an end-of-turn `ScheduleWakeup`, so a
+turn killed before that call (session limit, API error, crash) arms nothing and the
+loop silently dies forever — whereas an interval loop stores its cadence as a
+persistent session cron that the harness daemon fires BETWEEN turns, surviving a
+killed turn. Honest limit: neither mode survives the session PROCESS exiting — that
+needs a human `claude --resume` (restores session crons within 7 days) or an
+external supervisor (sibling project hgdev-acp), not anything vikunja-mcp can ship;
+the SessionStart hook only FRAMES a running loop, it cannot restart a dead one. This
+loop deliberately OVERRIDES the generic autonomous-`/loop` default ("steward, not
+initiator: don't start fresh work without a human go-ahead, stop when idle") — the
+Queue is human-triaged work, so claiming a fresh Queue task and dispatching IS the
+mandate, not unbidden initiation; an empty queue means yield-to-next-tick, never a
+stop. When the orchestrator needs a human answer, it asks via `call_human` (a card)
+— never a console prompt (`AskUserQuestion`/`ExitPlanMode`/plain text), since the
+human isn't at the console; after asking it keeps draining, and the human answers
+and moves the card back so the loop resumes.
 Each task lands as its own commit on `main`, pushed at `advance(to='review')`
 time (`… (tracker #N)`, `evidence` = the sha) — a completed task commits and
 pushes itself, and that green push auto-releases a patch (CI bumps both version
