@@ -164,10 +164,20 @@ def test_attachment_upload_scoped(project, tmp_path):
     src = tmp_path / "fix.png"
     src.write_bytes(png)
 
-    res = wf1.attach_file(t["id"], str(src))
+    res = wf1.attach_file(t["id"], str(src), note="скрин фикса")
     assert res["attached"] is True and res["name"] == "fix.png"
     assert res["size"] == len(png) and res["mime"] == "image/png"
     assert res["attachment_id"] is not None
+
+    # #184: the upload journals itself over the real wire — an [attach] comment (name + note)
+    # lands in the card's comment stream, so a human browsing comments SEES the bot attached
+    # a file (needs tasks_comments:create beside tasks_attachments:create — both in AGENT_PERMS)
+    assert res["journal_comment"] is True
+    journal = [
+        c["text"] for c in wf1.get_task(t["id"])["comments"] if c["text"].startswith("[attach]")
+    ]
+    assert len(journal) == 1
+    assert "fix.png" in journal[0] and "скрин фикса" in journal[0]
 
     # it round-trips: the dossier now shows the uploaded file's metadata
     att = next(a for a in wf1.get_task(t["id"])["attachments"] if a["id"] == res["attachment_id"])

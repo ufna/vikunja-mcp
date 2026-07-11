@@ -12,6 +12,7 @@ from vikunja_mcp.workflow import (
     STAGES,
     Workflow,
     WorkflowError,
+    _human_size,
     _safe_attachment_name,
 )
 
@@ -780,6 +781,76 @@ def test_attach_file_unknown_task_is_actionable(env, tmp_path):
     src.write_bytes(b"png")
     with pytest.raises(WorkflowError, match="not found"):
         wf.attach_file(987654, str(src))
+
+
+# --- вложения: журнальный след аплоада в комментах (#184) -----------------------------
+
+
+def test_attach_file_journals_the_upload_as_an_attach_comment(env, tmp_path):
+    """#184: a successful upload leaves a TRACE in the comment journal — the human browsing the
+    comments sees '[attach] shot.png (image/png, 2.0 КБ)' in the stream instead of having to
+    discover the file in the attachments widget. Name, mime and human-readable size are all in
+    the comment; without a note there is no dangling ' — ' separator."""
+    api, wf, t = env
+    src = tmp_path / "shot.png"
+    src.write_bytes(b"x" * 2048)
+    res = wf.attach_file(t["id"], str(src))
+    assert res["journal_comment"] is True
+    journal = [c for c in api.comments_text(t["id"]) if c.startswith("[attach]")]
+    assert journal == ["[attach] shot.png (image/png, 2.0 КБ)"]
+
+
+def test_attach_file_note_lands_in_the_journal_comment(env, tmp_path):
+    """The agent says WHAT the file shows via note= — it rides in the SAME journal comment, so
+    the human reads 'бот приложил board.png — доска после reconcile' as part of the story, not
+    as two disconnected entries."""
+    api, wf, t = env
+    src = tmp_path / "board.png"
+    src.write_bytes(b"png")
+    wf.attach_file(t["id"], str(src), note="доска после reconcile")
+    journal = [c for c in api.comments_text(t["id"]) if c.startswith("[attach]")]
+    assert len(journal) == 1
+    assert "board.png" in journal[0]
+    assert journal[0].endswith("— доска после reconcile")
+
+
+def test_attach_file_blank_note_is_ignored(env, tmp_path):
+    """A whitespace-only note is not a note: the journal line stays clean (no trailing ' — ')."""
+    api, wf, t = env
+    src = tmp_path / "s.png"
+    src.write_bytes(b"png")
+    wf.attach_file(t["id"], str(src), note="   ")
+    journal = [c for c in api.comments_text(t["id"]) if c.startswith("[attach]")]
+    assert journal == ["[attach] s.png (image/png, 3 Б)"]
+
+
+def test_attach_file_journal_comment_failure_never_fails_the_upload(env, tmp_path, monkeypatch):
+    """The journal comment is posted AFTER the upload has already landed, so its failure must NOT
+    surface as a tool error: {'error': ...} reads as 'the attach failed' and provokes a blind
+    retry that would DUPLICATE the attachment. Instead the result keeps attached=True, flags
+    journal_comment=False, and the note says exactly what to do (don't re-upload; comment()
+    manually if the trace matters)."""
+    api, wf, t = env
+
+    def boom(task_id, text):
+        raise VikunjaError(500, "comments down")
+
+    monkeypatch.setattr(api, "add_comment", boom)
+    src = tmp_path / "shot.png"
+    src.write_bytes(b"png")
+    res = wf.attach_file(t["id"], str(src))          # must not raise
+    assert res["attached"] is True
+    assert res["journal_comment"] is False
+    assert "re-upload" in res["note"]                # actionable: the file IS there, don't retry
+    dossier = wf.get_task(t["id"])
+    assert [a["name"] for a in dossier["attachments"]] == ["shot.png"]
+
+
+def test_human_size_units():
+    """Journal sizes are human-readable (Б/КБ/МБ) — a human reads '1.4 МБ', not 1468006."""
+    assert _human_size(512) == "512 Б"
+    assert _human_size(2048) == "2.0 КБ"
+    assert _human_size(5 * 1024 * 1024) == "5.0 МБ"
 
 
 # --- вложения: hardening (#146) — sanitize имени, post-read caps, id-confusion --------

@@ -118,6 +118,16 @@ def _write_attachment_to_temp(name: str, data: bytes, fallback: str) -> str:
     return path
 
 
+def _human_size(n: int) -> str:
+    """Человекочитаемый размер для журнального коммента [attach] (#184): человек в ленте читает
+    «1.4 МБ», а не 1468006. Кап вложений — 25 МБ, поэтому МБ — верхняя единица."""
+    if n < 1024:
+        return f"{n} Б"
+    if n < 1024 * 1024:
+        return f"{n / 1024:.1f} КБ"
+    return f"{n / (1024 * 1024):.1f} МБ"
+
+
 class WorkflowError(Exception):
     """The message is shown to the agent as the tool result."""
 
@@ -1199,7 +1209,7 @@ class Workflow:
             ),
         }
 
-    def attach_file(self, task_id: int, path: str) -> dict:
+    def attach_file(self, task_id: int, path: str, note: str | None = None) -> dict:
         """Upload a LOCAL file — typically a SCREENSHOT of finished, visually-verifiable work — as
         an attachment on the task, so a human and the independent reviewer SEE the result instead
         of taking 'done' on faith. The UPLOAD twin of download_attachment; deliberately a STANDALONE
@@ -1207,6 +1217,18 @@ class Workflow:
         half-finished stage transition (the #118/#134/#135 lesson — keep cross-cutting side effects
         out of advance), and both the implementer (own task) and the reviewer (a task in Review)
         can attach. No ownership is required (same as download_attachment) — only board membership.
+
+        Every successful upload also JOURNALS itself (#184): an `[attach] <name> (<mime>, <size>)`
+        comment — plus the optional `note` (one line on WHAT the file shows, e.g. «доска после
+        reconcile») — lands in the task's comment stream through the same add_comment chokepoint
+        as every other marker, so a human reading the comments sees «вот здесь бот приложил четыре
+        скрина» in the story itself, not just rows in the attachments widget. Deliberately a plain-
+        text marker, no deep-link/embed: comment bodies are HTML-ESCAPED (text_to_html, #85), so an
+        <img>/<a> would render as literal text — the filename is the honest reference. The journal
+        comment is posted AFTER the upload landed, and its own failure never fails the tool: an
+        {"error": ...} result would read as 'the attach failed' and provoke a blind re-upload (a
+        duplicate attachment); instead the result carries journal_comment=False plus an actionable
+        note (don't re-upload; post a comment() manually if the trace matters).
 
         Validated BEFORE any bytes hit the wire: `path` must resolve (realpath, so a symlink to a
         real file is followed) to an existing REGULAR file — a symlink to a dir/socket, a missing
@@ -1264,6 +1286,21 @@ class Workflow:
         resp = self.api.upload_attachment(task_id, name, data, mime=mime)
         created = (resp or {}).get("success") or []
         new_id = created[0].get("id") if created and isinstance(created[0], dict) else None
+        # журнальный след аплоада (#184): человек листает ЛЕНТУ КОММЕНТОВ, а не виджет файлов —
+        # без следа «бот приложил скрин» в истории задачи невидимо. mime может быть None
+        # (неизвестное расширение) — тогда в скобках только размер.
+        meta = f"{mime}, {_human_size(len(data))}" if mime else _human_size(len(data))
+        journal = f"[attach] {name} ({meta})"
+        if (note or "").strip():
+            journal += f" — {note.strip()}"
+        journal_failure: str | None = None
+        try:
+            self.api.add_comment(task_id, journal)
+        except (VikunjaError, httpx.HTTPError) as exc:
+            # файл УЖЕ на карточке — ошибка коммента не имеет права выглядеть как ошибка
+            # загрузки (слепой повтор = дубль вложения); деградируем в journal_comment=False
+            # с подсказкой, что делать. Ловим только API/сетевые ошибки — программные пусть падают.
+            journal_failure = str(exc)
         return {
             "attached": True,
             "task_id": task_id,
@@ -1271,9 +1308,15 @@ class Workflow:
             "name": name,
             "mime": mime,
             "size": len(data),
+            "journal_comment": journal_failure is None,
             "note": (
-                "the file is on the card now — a human and the reviewer can view it in the "
-                "tracker. For a visually-verifiable change, cite it in your advance(to='review') "
-                "worklog as evidence alongside the commit sha"
+                "the file is on the card and journaled as an [attach] comment in the task's "
+                "comment stream — don't post a separate comment about the upload. For a "
+                "visually-verifiable change, cite it in your advance(to='review') worklog as "
+                "evidence alongside the commit sha"
+            ) if journal_failure is None else (
+                f"the file IS on the card, but posting the [attach] journal comment failed "
+                f"({journal_failure}) — do NOT re-upload (that would duplicate the attachment); "
+                f"if the journal trace matters, post a brief comment() naming the file"
             ),
         }

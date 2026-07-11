@@ -278,7 +278,7 @@ def download_attachment(task_id: int, attachment_id: int) -> dict:
 
 @mcp.tool()
 @_tool
-def attach_file(task_id: int, path: str) -> dict:
+def attach_file(task_id: int, path: str, note: str | None = None) -> dict:
     """Attach a LOCAL file — typically a SCREENSHOT of the finished work — to a task, so a human
     and the independent reviewer can SEE a visually-verifiable result instead of trusting 'done'.
     WHEN: your change is visually verifiable (a UI, a rendered page/chart, a generated image, a
@@ -286,11 +286,16 @@ def attach_file(task_id: int, path: str) -> dict:
     your advance(to='review') worklog as evidence beside the commit sha. NOT for every task: a
     change with no visual surface (a lockfile, a refactor, config) has nothing to show, so don't
     force it. `path` is a local file (the screenshot you produced); its basename becomes the
-    attachment name, the MIME is inferred from the extension. This is standalone — it does NOT move
-    the task; a failed upload never affects a stage transition. Actionable errors: a missing path,
-    a directory, or an oversized file (>25MB) is refused with the reason; a 401 means the token
-    lacks the tasks_attachments:create scope and a human must add that op."""
-    return _wf().attach_file(task_id, path)
+    attachment name, the MIME is inferred from the extension. Every successful upload JOURNALS
+    itself into the task's comments as `[attach] <name> (<mime>, <size>)` — pass `note` (one line
+    on WHAT the file shows, e.g. 'доска после reconcile') so the human reading the journal sees
+    why it's there, and do NOT post a separate comment about the upload (it would duplicate the
+    journal). This is standalone — it does NOT move the task; a failed upload never affects a
+    stage transition, and a failed journal comment never fails the upload (the result then has
+    journal_comment=false — the file IS on the card, don't re-upload). Actionable errors: a
+    missing path, a directory, or an oversized file (>25MB) is refused with the reason; a 401
+    means the token lacks the tasks_attachments:create scope and a human must add that op."""
+    return _wf().attach_file(task_id, path, note=note)
 
 
 @mcp.tool()
