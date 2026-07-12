@@ -5,7 +5,10 @@ from vikunja_mcp.workflow import STAGES
 
 
 def bucket_titles(api):
-    return [b["title"] for b in api.buckets(0, 0)]
+    # pass the primary project's real coordinates: the multi-project FakeAPI now dispatches on
+    # project_id and 404s an unknown id (as the real server does), so the old bogus (0, 0) — a
+    # relic of the fake ignoring project_id — no longer resolves. Mirrors a real caller.
+    return [b["title"] for b in api.buckets(api.project["id"], api.view["id"])]
 
 
 def test_fresh_project_gets_canonical_buckets_and_done_config():
@@ -52,9 +55,9 @@ def test_reconcile_is_idempotent():
     api = FakeAPI(buckets=[])
     api.project = {"id": -999, "title": "nothing"}
     reconcile(api, "voice", shares=[("agent-voice", 1)])
-    ids_before = {b["title"]: b["id"] for b in api.buckets(0, 0)}
+    ids_before = {b["title"]: b["id"] for b in api.buckets(api.project["id"], api.view["id"])}
     reconcile(api, "voice", shares=[("agent-voice", 1)])
-    ids_after = {b["title"]: b["id"] for b in api.buckets(0, 0)}
+    ids_after = {b["title"]: b["id"] for b in api.buckets(api.project["id"], api.view["id"])}
     assert ids_before == ids_after                   # ничего не пересоздано
     assert len(api.shares) == 1                      # шара не задублирована
 

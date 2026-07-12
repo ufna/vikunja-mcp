@@ -40,6 +40,11 @@ class FakeAPI:
         self.relations = []      # (task_id, other_id, kind)
         self.view_config = None  # последний configure_kanban
         self.shares = []         # (project_id, username, permission)
+        # кросс-проектный file_task: реестр ВТОРИЧНЫХ проектов (см. add_project).
+        # Первичный (self.project/self.view/self._buckets) не трогаем — все старые
+        # тесты работают на нём и не видят изменений.
+        self.other_projects = {}   # pid -> {"project", "view", "buckets"}
+        self._forbidden = set()    # pid, «не расшаренные» токену -> 403 как у сервера
         self.last_require_titles = None  # require_titles последнего view_tasks (#43, для тестов)
         self.view_tasks_calls = 0  # #126: сколько раз звали view_tasks (1 без escalation, 2 с ним)
         # #126: как max_items_per_page реального сервера — не-required бакеты усекаются до первой
@@ -47,12 +52,14 @@ class FakeAPI:
         self.page_size = 50
 
     # --- helpers для тестов ---
-    def _task_identity(self):
+    def _task_identity(self, project=None):
         """Mirror Vikunja: every task read carries a per-project `index` and a computed
         `identifier` = '<project identifier>-<index>' (or '#<index>' when the project has
-        no identifier prefix — verified against real 2.3.0)."""
+        no identifier prefix — verified against real 2.3.0). `project` picks whose prefix
+        (default: the primary); the index counter stays GLOBAL — a documented shortcut
+        (uniqueness is what tests rely on, never per-project density)."""
         idx = next(self._task_index)
-        prefix = self.project.get("identifier") or ""
+        prefix = (project or self.project).get("identifier") or ""
         return idx, (f"{prefix}-{idx}" if prefix else f"#{idx}")
 
     def add_bucket(self, title):
@@ -62,6 +69,40 @@ class FakeAPI:
 
     def bucket_id(self, title):
         return next(b["id"] for b in self._buckets if b["title"] == title)
+
+    def add_project(self, title, buckets=(), identifier="", forbidden=False):
+        """Test helper (кросс-проектный file_task): зарегистрировать ВТОРОЙ проект со своим
+        kanban-view и бакетами. forbidden=True моделирует проект, который СУЩЕСТВУЕТ, но не
+        расшарен пользователю токена: любой project-scoped вызов 403-ит, как реальная 2.3.0
+        («You don't have the right…») — так поверхностью становится сама граница токена.
+        Никогда не регистрировавшийся id, напротив, 404-ит."""
+        proj = {"id": next(self._ids), "title": title, "identifier": identifier}
+        view = {"id": next(self._ids), "title": "Kanban", "view_kind": "kanban",
+                "position": 400}
+        entry = {"project": proj, "view": view, "buckets": []}
+        self.other_projects[proj["id"]] = entry
+        if forbidden:
+            self._forbidden.add(proj["id"])
+        for t in buckets:
+            entry["buckets"].append({
+                "id": next(self._ids), "title": t,
+                "position": (len(entry["buckets"]) + 1) * 100,
+            })
+        return proj
+
+    def _project_state(self, project_id):
+        """Диспетчер project-scoped вызова на ПРАВИЛЬНУЮ доску — ужесточение, делающее
+        кросс-проектный файлинг тестируемым: раньше project_id игнорировался, и баг,
+        использующий view/bucket-иды чужой доски, юниты не ловили (#125-режим).
+        Неизвестный id -> 404, зарегистрированный-но-forbidden -> 403 (формулировки 2.3.0)."""
+        if project_id == self.project["id"]:
+            return {"project": self.project, "view": self.view, "buckets": self._buckets}
+        if project_id in self._forbidden:
+            raise VikunjaError(403, "You don't have the right to see this project.")
+        entry = self.other_projects.get(project_id)
+        if entry is None:
+            raise VikunjaError(404, "The project does not exist.")
+        return entry
 
     def add_task(self, title, bucket_title, priority=0, assignee=None, labels=()):
         idx, identifier = self._task_identity()
@@ -99,7 +140,8 @@ class FakeAPI:
 
     def stage_of(self, task_id):
         bid = self.task_bucket[task_id]
-        return next(b["title"] for b in self._buckets if b["id"] == bid)
+        pools = [self._buckets, *(e["buckets"] for e in self.other_projects.values())]
+        return next(b["title"] for pool in pools for b in pool if b["id"] == bid)
 
     def comments_text(self, task_id):
         # comments are STORED as HTML (mirrors the real client, #85); this helper renders
@@ -179,14 +221,15 @@ class FakeAPI:
         return dict(self.tasks[task_id])
 
     def create_task(self, project_id, title, description="", priority=0):
-        idx, identifier = self._task_identity()
+        state = self._project_state(project_id)
+        idx, identifier = self._task_identity(state["project"])
         t = {
             "id": next(self._ids), "title": title, "description": description,
             "priority": priority, "index": idx, "identifier": identifier,
             "done": False, "assignees": [], "labels": [],
         }
         self.tasks[t["id"]] = t
-        self.task_bucket[t["id"]] = self._buckets[0]["id"]  # default = первый бакет
+        self.task_bucket[t["id"]] = state["buckets"][0]["id"]  # default = первый бакет ЦЕЛИ
         return dict(t)
 
     def comments(self, task_id):
@@ -214,7 +257,10 @@ class FakeAPI:
         self.relations.append((task_id, other_task_id, kind))
 
     def projects(self):
-        return [dict(self.project)]
+        return [dict(self.project)] + [
+            dict(e["project"]) for pid, e in self.other_projects.items()
+            if pid not in self._forbidden
+        ]
 
     def create_project(self, title):
         # mirror real 2.3.0: create_task sends only title -> the new project has an empty
@@ -234,13 +280,14 @@ class FakeAPI:
             self.shares.append((project_id, username, permission))
 
     def views(self, project_id):
-        return [dict(self.view)]
+        return [dict(self._project_state(project_id)["view"])]
 
     def kanban_view(self, project_id):
-        return dict(self.view)
+        return dict(self._project_state(project_id)["view"])
 
     def buckets(self, project_id, view_id):
-        return [dict(b) for b in sorted(self._buckets, key=lambda x: x["position"])]
+        found = self._project_state(project_id)["buckets"]
+        return [dict(b) for b in sorted(found, key=lambda x: x["position"])]
 
     def create_bucket(self, project_id, view_id, title):
         return dict(self.add_bucket(title))
@@ -268,7 +315,7 @@ class FakeAPI:
         self.last_require_titles = require_titles
         self.view_tasks_calls += 1
         out = []
-        for b in self._buckets:
+        for b in self._project_state(project_id)["buckets"]:
             tasks = [
                 dict(t) for tid, t in self.tasks.items()
                 if self.task_bucket.get(tid) == b["id"]
@@ -279,6 +326,12 @@ class FakeAPI:
         return out
 
     def move_task(self, project_id, view_id, bucket_id, task_id):
+        # ужесточено: реальный эндпоинт POST /projects/{p}/views/{v}/buckets/{b}/tasks
+        # 404-ит на бакете, не принадлежащем view ЭТОГО проекта; старый фейк игнорировал
+        # project_id целиком, и такой баг проходил молча (#125-режим).
+        state = self._project_state(project_id)
+        if bucket_id not in {b["id"] for b in state["buckets"]}:
+            raise VikunjaError(404, "bucket does not exist on this project's view")
         self.task_bucket[task_id] = bucket_id
 
     def configure_kanban(self, project_id, view, default_bucket_id, done_bucket_id):
