@@ -250,6 +250,16 @@ def test_scope_gap_401_does_not_duplicate_the_filed_card(monkeypatch):
     assert "projects:views_buckets" in result["error"]
 
 
+def test_file_task_tool_passes_project_id_through(monkeypatch):
+    """The MCP tool must thread project_id into the workflow — a param added in workflow.py
+    but forgotten in server.py would silently never be exposed to agents."""
+    api = FakeAPI(buckets=STAGES)
+    other = api.add_project("neighbor", buckets=STAGES)
+    monkeypatch.setattr(server, "_wf", lambda: Workflow(api, api.project["id"]))
+    result = server.file_task("cross-filed", project_id=other["id"])
+    assert result["filed"]["project_id"] == other["id"]
+
+
 def test_reload_returns_false_when_the_on_disk_token_is_unchanged(monkeypatch):
     """The guard proper: an UNCHANGED token (a scope gap — the file was not touched) must NOT
     rebuild or signal a retry. This is what distinguishes the two byte-identical 401s by looking

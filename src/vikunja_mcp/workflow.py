@@ -755,6 +755,40 @@ class Workflow:
             self.project_id, self._view()["id"], self._bucket(stage)["id"], task_id
         )
 
+    def _target_backlog(self, project_id: int) -> tuple[int, int]:
+        """(view_id, bucket_id) колонки Backlog на ЧУЖОЙ доске — кросс-проектная половина
+        file_task. Сознательно ОТДЕЛЬНА от _view/_bucket/_move: те (и их кэши) привязаны к
+        self.project_id и питают каждый горячий гейт, а кросс-файлинг — редкое событие
+        координации, поэтому здесь свежий kanban_view+buckets на каждый вызов (без кэша ->
+        без новой поверхности устаревания). Резолв происходит ДО создания карточки
+        (fail-fast): кривой id, недоступный токену проект или не-трекерная доска отказывают,
+        НИЧЕГО не осиротив в дефолт-бакете цели. 403/404 заворачиваются в actionable
+        WorkflowError с именем цели — граница безопасности ЗДЕСЬ сам скоуп-токен (решает
+        Vikunja, мы только внятно показываем отказ). 401 НЕ заворачиваем намеренно: он
+        должен дойти до server._tool как VikunjaError, чтобы сработал reload-and-retry
+        ротации токена (#140)."""
+        try:
+            view = self.api.kanban_view(project_id)
+            found = self.api.buckets(project_id, view["id"])
+        except VikunjaError as exc:
+            if exc.status in (403, 404):
+                raise WorkflowError(
+                    f"can't file into project {project_id}: Vikunja said {exc.status} "
+                    f"({exc.message}). Either the token's user has no access to that "
+                    f"project (the scoped API token is the security boundary — a human "
+                    f"must share the target project with this agent), the project id is "
+                    f"wrong, or the project has no kanban board. Nothing was created."
+                ) from exc
+            raise
+        backlog = next((b for b in found if b["title"] == "Backlog"), None)
+        if backlog is None:
+            raise WorkflowError(
+                f"can't file into project {project_id}: its board has no 'Backlog' "
+                f"column — not a tracker-managed board (run `vikunja-mcp setup` for it "
+                f"first). Nothing was created."
+            )
+        return view["id"], backlog["id"]
+
     def _mark_epic_if_children_complete(self, child: dict, board: list[dict]) -> None:
         """Best-effort epic-complete marker (#118 Part 2). When THIS child's advance→review makes
         EVERY child of an epic parent ready (Review or Done — READY_STAGES, the same readiness the
@@ -1073,24 +1107,50 @@ class Workflow:
 
     def file_task(
         self, title: str, description: str = "", priority: int = 0,
-        related_task_id: int | None = None,
+        related_task_id: int | None = None, project_id: int | None = None,
     ) -> dict:
         """File a finding (a bug/tech-debt OUTSIDE the current task) into Backlog for
         human triage — NOT into Queue (a human prioritizes). Optionally: a 'related'
         relation to the task it was found during. No ownership required — this is a new
-        card, not an edit of your task (unlike decompose)."""
+        card, not an edit of your task (unlike decompose). project_id (agent-to-agent
+        coordination): file into ANOTHER project's Backlog; the target board is resolved
+        BEFORE the card is created (fail-fast — no orphan in its default bucket), the
+        token's access to the target is Vikunja's call (403 -> clear refusal), and the
+        marker names the SOURCE project so the target's humans see provenance. None (or
+        the own project id) keeps today's behavior bit-for-bit."""
         if not (title or "").strip():
             raise WorkflowError("a non-empty title is required for the new task")
+        target = self.project_id if project_id is None else int(project_id)
+        cross = target != self.project_id
+        if cross and target <= 0:
+            raise WorkflowError(
+                f"project_id must be a positive Vikunja project id, got {target} "
+                f"(negative ids are Vikunja pseudo-projects like favorites)"
+            )
+        # кросс: резолвим доску ЦЕЛИ до create_task (fail-fast, см. _target_backlog);
+        # свой проект: порядок сегодняшний (create -> _move), байт-в-байт.
+        coords = self._target_backlog(target) if cross else None
         created = self.api.create_task(
-            self.project_id, title.strip(),
+            target, title.strip(),
             description=(description or "").strip(), priority=int(priority or 0),
         )
         new_id = created["id"]
         # явно в Backlog: не полагаемся на то, что default-бакет проекта == Backlog
-        self._move(new_id, "Backlog")
+        if cross:
+            view_id, bucket_id = coords
+            self.api.move_task(target, view_id, bucket_id, new_id)
+        else:
+            self._move(new_id, "Backlog")
         if related_task_id is not None:
             self.api.add_relation(new_id, related_task_id, "related")
-        marker = "[filed-by-agent] заведено агентом для триажа человеком"
+        if cross:
+            # provenance: люди ЦЕЛЕВОГО проекта должны видеть, откуда пришла карточка
+            marker = (
+                f"[filed-by-agent] заведено агентом из проекта id={self.project_id} "
+                f"для триажа человеком"
+            )
+        else:
+            marker = "[filed-by-agent] заведено агентом для триажа человеком"
         if related_task_id is not None:
             marker += f" (по ходу работы над #{related_task_id})"
         self.api.add_comment(new_id, marker)
@@ -1098,6 +1158,14 @@ class Workflow:
             "filed": {"id": new_id, "title": created["title"], "stage": "Backlog"},
             "note": "in Backlog for human triage (not Queue — a human prioritizes)",
         }
+        if cross:
+            result["filed"]["project_id"] = target
+            result["note"] = (
+                f"filed into project {target}'s Backlog for THAT project's human to "
+                f"triage (not Queue — a human prioritizes). The card lives on the TARGET "
+                f"board: your other tools (get_task/comment/next_task) are bound to your "
+                f"own project and won't see it — the 'related' link is the cross-reference"
+            )
         if related_task_id is not None:
             result["related_to"] = related_task_id
         return result

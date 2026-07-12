@@ -384,7 +384,7 @@ def decompose(task_id: int, subtasks: list[dict], ordered: bool = False) -> dict
 @_tool
 def file_task(
     title: str, description: str = "", priority: int = 0,
-    related_task_id: int | None = None,
+    related_task_id: int | None = None, project_id: int | None = None,
 ) -> dict:
     """File a task DISCOVERED mid-work (a bug/tech-debt OUTSIDE your current task) into
     Backlog for human triage. WHEN: you hit a problem unrelated to the current task with
@@ -393,9 +393,19 @@ def file_task(
     subtasks in Queue with a parenttask). Files into Backlog (NOT Queue — a human
     prioritizes), marks it with a [filed-by-agent] comment and, if related_task_id is
     given, adds a 'related' relation to the task it was found during. No ownership needed
-    — this is a new card."""
+    — this is a new card.
+    CROSS-PROJECT (agent-to-agent coordination): pass project_id — a numeric Vikunja
+    project id — to file into ANOTHER project's Backlog, e.g. when your work needs a
+    change owned by that project's repo/agent. Take the id from the task/human context;
+    if you don't know it, ask via call_human — do NOT guess. Access is the API token's
+    call: no access to the target means a clear refusal with NOTHING created. The card
+    lands in the TARGET's Backlog for THAT project's human to triage; the marker names
+    your project, and related_task_id still links it back to your current task across the
+    project boundary. The filed card lives on the target board — your get_task/comment
+    won't see it afterwards. Omit project_id (default) to file into your own project."""
     return _wf().file_task(
-        title, description=description, priority=priority, related_task_id=related_task_id
+        title, description=description, priority=priority,
+        related_task_id=related_task_id, project_id=project_id,
     )
 
 

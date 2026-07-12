@@ -208,6 +208,91 @@ def test_file_task_without_relation_has_no_link(env):
     assert any(c.startswith("[filed-by-agent]") for c in api.comments_text(new_id))
 
 
+def test_file_task_cross_project_lands_in_targets_backlog(env):
+    api, wf, t = env
+    # Backlog у цели НЕ первый бакет: дефолт-бакет = Inbox, так что пропущенный move
+    # оставил бы карточку в Inbox и тест бы упал (create-в-нужном-проекте недостаточно).
+    other = api.add_project("neighbor", buckets=["Inbox", *STAGES])
+    res = wf.file_task(
+        title="repo B: нужен эндпоинт для A",
+        description="координация агент→агент",
+        priority=1,
+        related_task_id=t["id"],
+        project_id=other["id"],
+    )
+    new_id = res["filed"]["id"]
+    other_view = api.kanban_view(other["id"])
+    other_backlog = next(
+        b for b in api.buckets(other["id"], other_view["id"]) if b["title"] == "Backlog"
+    )
+    assert api.task_bucket[new_id] == other_backlog["id"]  # Backlog ЦЕЛИ, не свой
+    assert res["filed"]["project_id"] == other["id"]
+    assert res["filed"]["stage"] == "Backlog"
+    assert (new_id, t["id"], "related") in api.relations   # связь через границу проектов
+    marker = next(c for c in api.comments_text(new_id) if c.startswith("[filed-by-agent]"))
+    assert f"из проекта id={wf.project_id}" in marker      # provenance для людей цели
+    assert f"#{t['id']}" in marker
+
+
+def test_file_task_cross_project_no_access_fails_fast_nothing_created(env):
+    api, wf, _t = env
+    secret = api.add_project("secret", buckets=STAGES, forbidden=True)
+    before = len(api.tasks)
+    with pytest.raises(WorkflowError, match="can't file into project"):
+        wf.file_task(title="x", project_id=secret["id"])
+    assert len(api.tasks) == before        # fail-fast: доска резолвится ДО create_task
+
+
+def test_file_task_cross_project_unknown_or_pseudo_project_refused(env):
+    api, wf, _t = env
+    before = len(api.tasks)
+    with pytest.raises(WorkflowError, match="can't file into project 999999"):
+        wf.file_task(title="x", project_id=999999)
+    with pytest.raises(WorkflowError, match="positive"):
+        wf.file_task(title="x", project_id=-1)  # псевдо-проекты Vikunja (favorites = -1)
+    assert len(api.tasks) == before
+
+
+def test_file_task_cross_project_target_without_backlog_refused(env):
+    api, wf, _t = env
+    virgin = api.add_project("virgin", buckets=["To-Do", "Doing", "Done"])  # без setup
+    before = len(api.tasks)
+    with pytest.raises(WorkflowError, match="Backlog"):
+        wf.file_task(title="x", project_id=virgin["id"])
+    assert len(api.tasks) == before
+
+
+def test_file_task_explicit_own_project_id_is_todays_behavior(env):
+    api, wf, t = env
+    res = wf.file_task(title="own finding", related_task_id=t["id"], project_id=wf.project_id)
+    new_id = res["filed"]["id"]
+    assert api.stage_of(new_id) == "Backlog"
+    assert "project_id" not in res["filed"]    # без кросс-добавок в результате
+    marker = next(c for c in api.comments_text(new_id) if c.startswith("[filed-by-agent]"))
+    assert marker == (
+        f"[filed-by-agent] заведено агентом для триажа человеком "
+        f"(по ходу работы над #{t['id']})"
+    )
+
+
+def test_file_task_cross_project_401_propagates_as_vikunja_error(env):
+    """Binding contract (#140): a 401 from resolving the TARGET board must stay a VikunjaError —
+    NOT be wrapped into a WorkflowError — so server._tool's rotated-token reload-and-retry still
+    fires. Only 403/404 (a real access/shape problem) become an actionable WorkflowError; a 401
+    (invalid/expired/rotated token) must propagate untouched. VikunjaError and WorkflowError are
+    unrelated types, so pytest.raises(VikunjaError) here is RED if the 401 is ever wrapped."""
+    api, wf, _t = env
+    other = api.add_project("neighbor", buckets=STAGES)
+
+    def boom(_pid):
+        raise VikunjaError(401, '{"code":11,"message":"invalid token"}')
+
+    api.kanban_view = boom                      # 401 lands on the target-board resolve
+    with pytest.raises(VikunjaError) as ei:
+        wf.file_task(title="x", project_id=other["id"])
+    assert ei.value.status == 401
+
+
 def test_comment_and_get_task(env):
     api, wf, t = env
     with pytest.raises(WorkflowError):
