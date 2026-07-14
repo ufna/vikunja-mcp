@@ -25,6 +25,8 @@ uv sync                                   # env (Python 3.11+, uv)
 uv run pytest tests/unit -q               # 69 unit tests (FakeAPI, MockTransport)
 uv run ruff check .                       # lint (line-length 100)
 uv run vikunja-mcp --version              # smoke
+uv run vikunja-mcp claimable              # one JSON line: is there claimable work for this
+                                          # token? (hgdev-acp hub's pre-launch idle check)
 
 # integration — real Vikunja 2.3.0 in docker (skipped without VIKUNJA_TEST_URL):
 docker run -d --name vikunja-test -p 3456:3456 \
@@ -78,6 +80,19 @@ docker rm -f vikunja-test
   (rewrites an installed copy only when it exists and differs — never
   provisions `~/.claude`), best-effort (never raises → never crashes the
   stdio server, never writes stdout), opt out with `VIKUNJA_MCP_NO_SKILL_SYNC`.
+- `src/vikunja_mcp/claimable_cmd.py` — `vikunja-mcp claimable`: the sibling-EXPORTED
+  claimable verdict (ONE JSON line `{"claimable","kind","task_id"}`, exit 0 = the check
+  ran / 1 = it failed) that hgdev-acp's repo-agent loop spawns (`uvx …@stable vikunja-mcp
+  claimable`) as its pre-launch idle check, instead of re-implementing next_task's gates
+  hub-side. It runs the REAL `Workflow.next_task()` — zero gate drift by construction —
+  which is therefore **READ-ONLY BY CONTRACT** (comment on `next_task` + a no-writes unit
+  test): the hub polls it per loop tick, so a side effect there becomes a per-poll tracker
+  mutation. Born from a dogfood regression: the hub used to guess from kanban BUCKET
+  PRESENCE, so a Review column holding 25 tasks all assigned to the agent (done work
+  awaiting a human's Done) read as "work!" forever — ~144 no-op agent boots/day ≈ $105/day
+  — while `next_task` rightly offered nothing (you never review your own work). The JSON
+  keys and the exit-code split are a public cross-repo contract; changing them breaks the
+  hub's check (fail-closed: its loops go red until both sides move together).
 - `src/vikunja_mcp/skills/tracker/SKILL.md` — process rules for agents
   (queue discipline, orchestrator-dispatches-subagents, report format,
   independent bug review). Ships inside the wheel; root `skills` is a symlink.

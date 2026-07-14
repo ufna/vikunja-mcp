@@ -545,6 +545,22 @@ def test_version_flag(capsys):
     assert __version__ in capsys.readouterr().out
 
 
+def test_main_dispatches_claimable_subcommand(monkeypatch):
+    """`vikunja-mcp claimable` exits with run_claimable's code — and does so WITHOUT the
+    artifact self-heal or the stdio run loop: the hgdev-acp hub spawns this per poll tick,
+    so it must not touch ~/.claude, must not risk heal noise on stderr, and must start fast."""
+    calls = []
+    monkeypatch.setattr("vikunja_mcp.claimable_cmd.run_claimable", lambda: 3)
+    monkeypatch.setattr(server, "_self_heal_installed_artifacts", lambda: calls.append("heal"))
+    monkeypatch.setattr(server.mcp, "run", lambda: calls.append("run"))
+
+    with pytest.raises(SystemExit) as exc:
+        server.main(["claimable"])
+
+    assert exc.value.code == 3
+    assert calls == []
+
+
 def test_server_self_heals_on_start_before_the_run_loop(monkeypatch):
     """The server refreshes installed agent artifacts on start, and BEFORE the blocking
     stdio run loop — so a `stable` rollout reaches SKILL.md + hook as automatically as code."""

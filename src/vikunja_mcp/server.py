@@ -423,6 +423,14 @@ def main(argv: list[str] | None = None) -> None:
 
         install_skill()
         return
+    # `claimable` — the exported next_task verdict for hgdev-acp's loop idle check (one JSON
+    # line on stdout, exit 0 ran / 1 failed). Dispatched BEFORE the self-heal deliberately: the
+    # hub spawns this per poll tick, so it must not touch ~/.claude, must not risk heal noise,
+    # and must start fast. It is READ-ONLY (see claimable_cmd / Workflow.next_task).
+    if args and args[0] == "claimable":
+        from vikunja_mcp.claimable_cmd import run_claimable
+
+        raise SystemExit(run_claimable())
     _self_heal_installed_artifacts()
     mcp.run()
 
