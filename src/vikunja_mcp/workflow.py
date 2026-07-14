@@ -317,8 +317,9 @@ class Workflow:
     # --- тулзы ---
     def next_task(self) -> dict:
         # READ-ONLY BY CONTRACT: next_task never writes (no comments, moves, labels, assigns) —
-        # its whole call inventory is GETs (me / kanban_view / view_tasks / get_task / comments),
-        # pinned by test_claimable_cmd.test_the_check_makes_no_writes. The hgdev-acp hub polls it
+        # its whole call inventory is GETs: me / kanban_view / view_tasks (which itself probes
+        # GET /info once, cached, for the page size) / get_task / comments — pinned by
+        # test_claimable_cmd.test_the_check_makes_no_writes. The hgdev-acp hub polls it
         # per loop tick via `vikunja-mcp claimable` (see claimable_cmd.py) as its pre-launch idle
         # check, so a side effect added here becomes a per-poll tracker mutation on every repo in
         # the fleet. If one is ever genuinely needed, decouple the claimable verdict first.

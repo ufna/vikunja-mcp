@@ -44,11 +44,18 @@ def test_dogfood_review_bucket_full_of_my_tasks_is_not_claimable():
     HUMAN's Done move). The hub's old bucket-presence heuristic read that board as
     "work!" forever, while next_task correctly offers nothing (you never review your
     own work) — ~144 no-op agent boots/day ≈ $105/day for zero work. The exported
-    verdict MUST therefore be claimable=false."""
+    verdict MUST therefore be claimable=false.
+
+    Every card carries a [worklog] ON PURPOSE — that is what the real board looked like,
+    because advance(to='review') hard-requires a report and posts one. Without it the
+    worklog-freshness guard would filter these cards on its own and this test would pass
+    even with the own-work guard deleted: vacuous. With it, `my_id in assignees` is the
+    ONLY thing between this board and a claimable=true, so the pin bites if it's removed."""
     api = FakeAPI(buckets=STAGES)
     wf = Workflow(api, project_id=3)
     for i in range(25):
-        api.add_task(f"shipped {i}", "Review", assignee=api.me_user)
+        t = api.add_task(f"shipped {i}", "Review", assignee=api.me_user)
+        api.add_comment(t["id"], f"[worklog]\nСделано: shipped {i}\n\nEvidence: sha{i}")
     assert classify_next(wf.next_task()) == {
         "claimable": False, "kind": "empty", "task_id": None,
     }
@@ -89,24 +96,30 @@ def test_my_unfinished_build_task_is_claimable_as_resume():
 
 def test_the_check_makes_no_writes():
     """READ-ONLY CONTRACT PIN: the hub polls this per loop tick — a side effect added to
-    next_task would silently become a per-poll tracker mutation. Snapshot every piece of
-    mutable FakeAPI state a write would land in (tasks incl. their assignees/labels,
-    bucket placement, comments, the label registry, relations) and prove it is untouched."""
+    next_task would silently become a per-poll tracker mutation. Snapshot EVERY piece of
+    mutable FakeAPI state a write could land in — tasks (incl. their assignees/labels),
+    bucket placement, comments, the label registry, relations, AND the board surface
+    itself (buckets, the kanban view config, shares, attachments) — and prove it is
+    untouched. The board half matters: a stray bucket/view write would otherwise pass
+    unseen, and it is exactly the kind of "harmless" reconcile that creeps into a read."""
     api = FakeAPI(buckets=STAGES)
     wf = Workflow(api, project_id=3)
     api.add_task("free", "Queue")
     other = {"id": 77, "username": "agent-other"}
     r = api.add_task("their change", "Review", assignee=other)
     api.add_comment(r["id"], "[worklog]\nСделано: X\n\nEvidence: sha")
-    before = copy.deepcopy(
-        (api.tasks, api.task_bucket, api._comments, api._labels, api.relations)
-    )
+
+    def snapshot():
+        return copy.deepcopy((
+            api.tasks, api.task_bucket, api._comments, api._labels, api.relations,
+            api._buckets, api.view_config, api.shares, api._attachments,
+        ))
+
+    before = snapshot()
 
     classify_next(wf.next_task())
 
-    assert before == (
-        api.tasks, api.task_bucket, api._comments, api._labels, api.relations
-    )
+    assert before == snapshot()
 
 
 def test_run_claimable_prints_exactly_one_json_line_exit_0(monkeypatch, capsys, tmp_path):

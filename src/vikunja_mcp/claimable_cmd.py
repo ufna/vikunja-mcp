@@ -20,9 +20,10 @@ for zero work. So the hub stops guessing and asks the gates themselves: this run
 SAME Workflow.next_task() the agent runs, so the exported verdict has ZERO drift from
 the agent's own by construction — one implementation of the rules, not two.
 
-next_task is READ-ONLY (verified call inventory: me/kanban_view/view_tasks/get_task/
-comments — all GETs; pinned by test_claimable_cmd.test_the_check_makes_no_writes), so
-the hub may poll this at any cadence without mutating the tracker.
+next_task is READ-ONLY (verified call inventory: me / kanban_view / view_tasks (which itself
+probes GET /info once, cached, for the page size) / get_task / comments — all GETs; pinned by
+test_claimable_cmd.test_the_check_makes_no_writes), so the hub may poll this at any cadence
+without mutating the tracker.
 
 Config comes from the standard 4 layers; the hub supplies layer 1 (VIKUNJA_URL/
 VIKUNJA_TOKEN/VIKUNJA_PROJECT_ID in this process's own env). stdout carries the one
