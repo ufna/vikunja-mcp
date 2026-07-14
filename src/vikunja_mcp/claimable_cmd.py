@@ -46,7 +46,18 @@ def classify_next(result: dict) -> dict:
     but never moved — not an active task), the free queue carries resume:false + task.
     task:null is the not-claimable family, where the additive discriminators cycle/
     starving distinguish a wedged board from a genuinely empty queue (all three are
-    'don't launch an agent', but they are NOT the same thing to a human)."""
+    'don't launch an agent', but they are NOT the same thing to a human).
+
+    ⚠ ADDING A KIND HERE IS A BREAKING CHANGE — AND ITS ROLLOUT ORDER IS INVERTED.
+    The hgdev-acp hub validates `kind` against a CLOSED enum of exactly these seven
+    (internal/hub/vikunja/claimable.go `kindIsClaimable`) and fail-CLOSES on anything
+    it does not know — deliberately, because a hub that silently accepted an unknown
+    verdict could idle its loops forever, invisibly. Every push to main here
+    auto-releases and force-moves `stable`, and the hub re-resolves `@stable` on EVERY
+    check — so a new kind reaches every hub within MINUTES and turns all its loops red
+    (loud idle-check rows, no launches) until the hub's enum learns it. Ship the hub's
+    enum FIRST, then this. (Renaming a KEY is the same class, ordered the usual way:
+    the hub reads them, so it must learn the new shape first too.)"""
     task = result.get("task")
     if task is not None:
         if result.get("review"):
