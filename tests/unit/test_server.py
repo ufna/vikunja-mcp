@@ -260,6 +260,15 @@ def test_file_task_tool_passes_project_id_through(monkeypatch):
     assert result["filed"]["project_id"] == other["id"]
 
 
+def test_file_task_tool_passes_queue_through(monkeypatch):
+    """#249: queue=True добавлен в workflow.py — тул обязан прокинуть его насквозь, иначе
+    параметр молча не существует для агентов (schema тула генерится из сигнатуры)."""
+    api = FakeAPI(buckets=STAGES)
+    monkeypatch.setattr(server, "_wf", lambda: Workflow(api, api.project["id"]))
+    result = server.file_task("queued by explicit human ask", queue=True)
+    assert result["filed"]["stage"] == "Queue"
+
+
 def test_reload_returns_false_when_the_on_disk_token_is_unchanged(monkeypatch):
     """The guard proper: an UNCHANGED token (a scope gap — the file was not touched) must NOT
     rebuild or signal a retry. This is what distinguishes the two byte-identical 401s by looking

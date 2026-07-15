@@ -1116,6 +1116,7 @@ class Workflow:
     def file_task(
         self, title: str, description: str = "", priority: int = 0,
         related_task_id: int | None = None, project_id: int | None = None,
+        queue: bool = False,
     ) -> dict:
         """File a finding (a bug/tech-debt OUTSIDE the current task) into Backlog for
         human triage — NOT into Queue (a human prioritizes). Optionally: a 'related'
@@ -1125,11 +1126,26 @@ class Workflow:
         BEFORE the card is created (fail-fast — no orphan in its default bucket), the
         token's access to the target is Vikunja's call (403 -> clear refusal), and the
         marker names the SOURCE project so the target's humans see provenance. None (or
-        the own project id) keeps today's behavior bit-for-bit."""
+        the own project id) keeps today's behavior bit-for-bit. queue=True (#249) is the
+        explicit human-asked opt-in: the card lands in the OWN project's Queue instead —
+        unassigned, so immediately claimable (next_task / the hub's `claimable` poll see
+        it) — because the human's instruction to create the work IS the triage. It is
+        deliberately OWN-PROJECT-ONLY: injecting ready-for-pickup work into ANOTHER
+        project's Queue would bypass that project's human (and wake their fleet loop
+        with work nobody there sanctioned), so queue+cross is refused before anything
+        is created."""
         if not (title or "").strip():
             raise WorkflowError("a non-empty title is required for the new task")
         target = self.project_id if project_id is None else int(project_id)
         cross = target != self.project_id
+        if queue and cross:
+            raise WorkflowError(
+                "queue=True can't be combined with a cross-project project_id: filing "
+                "into ANOTHER project is Backlog-only — that project's human triages "
+                "their own board, an agent must not inject ready-for-pickup work into "
+                "someone else's Queue. Drop queue to file into their Backlog, or ask "
+                "via call_human. Nothing was created."
+            )
         if cross and target <= 0:
             raise WorkflowError(
                 f"project_id must be a positive Vikunja project id, got {target} "
@@ -1143,12 +1159,13 @@ class Workflow:
             description=(description or "").strip(), priority=int(priority or 0),
         )
         new_id = created["id"]
-        # явно в Backlog: не полагаемся на то, что default-бакет проекта == Backlog
+        # явно в Backlog/Queue: не полагаемся на то, что default-бакет проекта == Backlog
+        stage = "Queue" if queue else "Backlog"
         if cross:
             view_id, bucket_id = coords
             self.api.move_task(target, view_id, bucket_id, new_id)
         else:
-            self._move(new_id, "Backlog")
+            self._move(new_id, stage)
         if related_task_id is not None:
             self.api.add_relation(new_id, related_task_id, "related")
         if cross:
@@ -1157,14 +1174,22 @@ class Workflow:
                 f"[filed-by-agent] заведено агентом из проекта id={self.project_id} "
                 f"для триажа человеком"
             )
+        elif queue:
+            # честный провенанс: триаж Backlog пропущен — по явной просьбе человека
+            marker = "[filed-by-agent] заведено агентом сразу в Queue (минуя триаж в Backlog)"
         else:
             marker = "[filed-by-agent] заведено агентом для триажа человеком"
         if related_task_id is not None:
             marker += f" (по ходу работы над #{related_task_id})"
         self.api.add_comment(new_id, marker)
         result = {
-            "filed": {"id": new_id, "title": created["title"], "stage": "Backlog"},
-            "note": "in Backlog for human triage (not Queue — a human prioritizes)",
+            "filed": {"id": new_id, "title": created["title"], "stage": stage},
+            "note": (
+                "in Queue, unassigned — immediately claimable (Backlog triage bypassed; "
+                "queue=True is only for tasks a human explicitly asked to file as work)"
+                if queue
+                else "in Backlog for human triage (not Queue — a human prioritizes)"
+            ),
         }
         if cross:
             result["filed"]["project_id"] = target

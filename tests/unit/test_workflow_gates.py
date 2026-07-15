@@ -293,6 +293,44 @@ def test_file_task_cross_project_401_propagates_as_vikunja_error(env):
     assert ei.value.status == 401
 
 
+def test_file_task_queue_optin_lands_in_queue_ready_for_pickup(env):
+    """#249: queue=True — явный опт-ин «человек попросил завести задачу в работу» (его
+    указание и есть триаж). Карточка ложится сразу в Queue СВОЕГО проекта, неассайненная
+    (→ сразу клеймабельна для next_task/claimable), маркер [filed-by-agent] честно
+    фиксирует пропуск Backlog-триажа. Дефолт (queue=False) пинуют существующие тесты выше."""
+    api, wf, t = env
+    res = wf.file_task(
+        title="переезд конфига на pydantic",
+        description="человек явно попросил завести в работу",
+        priority=1,
+        related_task_id=t["id"],
+        queue=True,
+    )
+    new_id = res["filed"]["id"]
+    assert api.stage_of(new_id) == "Queue"             # сразу в Queue, не в Backlog
+    assert res["filed"]["stage"] == "Queue"
+    assert api.tasks[new_id]["assignees"] == []        # без ассайни → клеймабельна любым агентом
+    assert "Queue" in res["note"]
+    assert (new_id, t["id"], "related") in api.relations
+    marker = next(c for c in api.comments_text(new_id) if c.startswith("[filed-by-agent]"))
+    assert "Queue" in marker                           # провенанс: видно, что триаж пропущен
+
+
+def test_file_task_queue_cross_project_refused_nothing_created(env):
+    """#249: в ЧУЖУЮ Queue агент работу не инжектит — кросс-проектный файлинг остаётся
+    Backlog-only (их доску триажит ИХ человек). Отказ fail-fast: ничего не создано.
+    Граница гейта — именно КРОСС, а не сам параметр: явный СВОЙ project_id с queue=True
+    работает (эквивалентен None, как пинует test_file_task_explicit_own_project_id...)."""
+    api, wf, _t = env
+    other = api.add_project("neighbor", buckets=STAGES)
+    before = len(api.tasks)
+    with pytest.raises(WorkflowError, match="queue"):
+        wf.file_task(title="x", project_id=other["id"], queue=True)
+    assert len(api.tasks) == before                    # fail-fast: карточка не создана
+    res = wf.file_task(title="own queue ok", project_id=wf.project_id, queue=True)
+    assert api.stage_of(res["filed"]["id"]) == "Queue"
+
+
 def test_comment_and_get_task(env):
     api, wf, t = env
     with pytest.raises(WorkflowError):

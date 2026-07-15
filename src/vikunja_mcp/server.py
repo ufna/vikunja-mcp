@@ -385,6 +385,7 @@ def decompose(task_id: int, subtasks: list[dict], ordered: bool = False) -> dict
 def file_task(
     title: str, description: str = "", priority: int = 0,
     related_task_id: int | None = None, project_id: int | None = None,
+    queue: bool = False,
 ) -> dict:
     """File a task DISCOVERED mid-work (a bug/tech-debt OUTSIDE your current task) into
     Backlog for human triage. WHEN: you hit a problem unrelated to the current task with
@@ -394,6 +395,13 @@ def file_task(
     prioritizes), marks it with a [filed-by-agent] comment and, if related_task_id is
     given, adds a 'related' relation to the task it was found during. No ownership needed
     — this is a new card.
+    QUEUE OPT-IN: pass queue=True ONLY when a human explicitly asked you to file this
+    task as work to do (their instruction IS the triage — e.g. an answer on a Your Call
+    card, or a direct "заведи задачу на X" in chat/comments): the card lands in YOUR
+    project's Queue, unassigned and immediately claimable by any agent. NEVER queue=True
+    for findings you discovered yourself — those keep the default (Backlog) so the human
+    prioritizes them. Not combinable with a cross-project project_id (refused, nothing
+    created): another project's Queue is not yours to fill — their human triages.
     CROSS-PROJECT (agent-to-agent coordination): pass project_id — a numeric Vikunja
     project id — to file into ANOTHER project's Backlog, e.g. when your work needs a
     change owned by that project's repo/agent. Take the id from the task/human context;
@@ -405,7 +413,7 @@ def file_task(
     won't see it afterwards. Omit project_id (default) to file into your own project."""
     return _wf().file_task(
         title, description=description, priority=priority,
-        related_task_id=related_task_id, project_id=project_id,
+        related_task_id=related_task_id, project_id=project_id, queue=queue,
     )
 
 
