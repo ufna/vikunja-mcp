@@ -8,6 +8,7 @@ from typing import Mapping
 ENV_URL = "VIKUNJA_URL"
 ENV_TOKEN = "VIKUNJA_TOKEN"
 ENV_PROJECT_ID = "VIKUNJA_PROJECT_ID"
+ENV_NOTIFY_WEBHOOK = "VIKUNJA_NOTIFY_WEBHOOK"
 REPO_FILE = ".vikunja-mcp.toml"
 REPO_ENV_FILE = ".vikunja-mcp.env"
 USER_ENV_FILE = Path("~/.config/vikunja-mcp/env").expanduser()
@@ -27,6 +28,11 @@ class Config:
     # claim() refuses a new task while you already have an active Design/Build one.
     # Default off -> ships inert and reversible; opt in per team.
     enforce_single_wip: bool = False
+    # Slack-compatible incoming-webhook URL pinged when call_human parks a card in
+    # Your Call (#252). A secret of the token's class — whoever holds the URL can post
+    # into the humans' channel — so like the token it is NEVER read from the committed
+    # repo toml, only from the env layers. None (default) -> the feature is off.
+    notify_webhook: str | None = None
 
 
 def _parse_env_file(path: Path) -> dict[str, str]:
@@ -73,6 +79,13 @@ def load_config(cwd: Path | None = None, environ: Mapping[str, str] | None = Non
 
     url = env.get(ENV_URL) or repo_env.get(ENV_URL) or repo.get("url") or user.get(ENV_URL)
     token = env.get(ENV_TOKEN) or repo_env.get(ENV_TOKEN) or user.get(ENV_TOKEN)
+    # секрет класса токена: env-слои ТОЛЬКО, коммитимый toml сознательно пропущен
+    notify_webhook = (
+        env.get(ENV_NOTIFY_WEBHOOK)
+        or repo_env.get(ENV_NOTIFY_WEBHOOK)
+        or user.get(ENV_NOTIFY_WEBHOOK)
+        or None
+    )
     raw_pid = (
         env.get(ENV_PROJECT_ID)
         or repo_env.get(ENV_PROJECT_ID)
@@ -100,4 +113,5 @@ def load_config(cwd: Path | None = None, environ: Mapping[str, str] | None = Non
         url=str(url), token=str(token),
         project_id=project_id, project_name=repo.get("project"),
         enforce_single_wip=bool(repo.get("enforce_single_wip", False)),
+        notify_webhook=notify_webhook,
     )

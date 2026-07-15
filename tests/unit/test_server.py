@@ -178,7 +178,10 @@ def test_reload_rebuilds_workflow_with_the_fresh_on_disk_token(monkeypatch):
         server, "VikunjaAPI",
         lambda url, token: built.update(url=url, token=token) or ("api", token),
     )
-    monkeypatch.setattr(server, "Workflow", lambda api, pid, enforce_single_wip=False: ("wf", api, pid))
+    monkeypatch.setattr(
+        server, "Workflow",
+        lambda api, pid, enforce_single_wip=False, notifier=None: ("wf", api, pid),
+    )
     server._reset_workflow_cache()
     try:
         assert server._reload_workflow_from_disk() is True
@@ -603,3 +606,21 @@ def test_self_heal_logs_to_stderr_never_stdout(monkeypatch, capsys):
     captured = capsys.readouterr()
     assert captured.out == ""                        # never pollute the stdio channel
     assert "refreshed 1" in captured.err             # but do leave a trace on stderr
+
+
+def test_build_workflow_wires_notifier_only_when_configured():
+    """#252: cfg.notify_webhook set -> the Workflow gets a WebhookNotifier carrying that URL
+    and the tracker url (for the frontend deep-link); unset -> notifier is None, so call_human
+    behaves bit-for-bit as before the feature existed."""
+    from vikunja_mcp.notify import WebhookNotifier
+
+    wired = server._build_workflow(Config(
+        url="https://t", token="tk", project_id=10,
+        notify_webhook="https://hooks.example/ping",
+    ))
+    assert isinstance(wired.notifier, WebhookNotifier)
+    assert wired.notifier.webhook_url == "https://hooks.example/ping"
+    assert wired.notifier.tracker_url == "https://t"
+
+    bare = server._build_workflow(Config(url="https://t", token="tk", project_id=10))
+    assert bare.notifier is None

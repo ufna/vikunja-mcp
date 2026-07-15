@@ -193,6 +193,66 @@ def test_no_repo_env_file_behavior_unchanged(tmp_path, monkeypatch):
     assert cfg.token == "tk_from_file"
 
 
+# --- #252: notify_webhook — Slack-compatible YC ping URL, a secret of the token's class ---
+
+def test_notify_webhook_defaults_none(tmp_path):
+    """Absent everywhere -> the feature ships off, no error."""
+    _write_toml(tmp_path)
+    cfg = load_config(cwd=tmp_path, environ={"VIKUNJA_TOKEN": "tk"})
+    assert cfg.notify_webhook is None
+
+
+def test_notify_webhook_from_env(tmp_path):
+    _write_toml(tmp_path)
+    cfg = load_config(cwd=tmp_path, environ={
+        "VIKUNJA_TOKEN": "tk", "VIKUNJA_NOTIFY_WEBHOOK": "https://hooks.example/env",
+    })
+    assert cfg.notify_webhook == "https://hooks.example/env"
+
+
+def test_notify_webhook_from_repo_env(tmp_path):
+    _write_toml(tmp_path)
+    _write_repo_env(
+        tmp_path, VIKUNJA_TOKEN="tk", VIKUNJA_NOTIFY_WEBHOOK="https://hooks.example/repo",
+    )
+    cfg = load_config(cwd=tmp_path, environ={})
+    assert cfg.notify_webhook == "https://hooks.example/repo"
+
+
+def test_notify_webhook_from_user_env_file(tmp_path, monkeypatch):
+    _write_toml(tmp_path)
+    user_file = tmp_path / "userenv"
+    user_file.write_text(
+        "VIKUNJA_TOKEN=tk\nVIKUNJA_NOTIFY_WEBHOOK=https://hooks.example/user\n"
+    )
+    monkeypatch.setattr("vikunja_mcp.config.USER_ENV_FILE", user_file)
+    cfg = load_config(cwd=tmp_path, environ={})
+    assert cfg.notify_webhook == "https://hooks.example/user"
+
+
+def test_notify_webhook_env_beats_repo_env(tmp_path):
+    _write_toml(tmp_path)
+    _write_repo_env(
+        tmp_path, VIKUNJA_TOKEN="tk", VIKUNJA_NOTIFY_WEBHOOK="https://hooks.example/repo",
+    )
+    cfg = load_config(
+        cwd=tmp_path, environ={"VIKUNJA_NOTIFY_WEBHOOK": "https://hooks.example/env"},
+    )
+    assert cfg.notify_webhook == "https://hooks.example/env"
+
+
+def test_notify_webhook_never_read_from_toml(tmp_path):
+    """Вебхук-URL — секрет того же класса, что и токен (кто держит URL, тот постит в канал
+    людей): из КОММИТИМОГО toml он не читается никогда, только из env-слоёв — иначе публичный
+    репозиторий с toml утёк бы URL так же, как утёк бы токен."""
+    tmp_path.joinpath(".vikunja-mcp.toml").write_text(
+        '[tracker]\nurl = "http://x"\nproject_id = 3\n'
+        'notify_webhook = "https://hooks.example/leaked"\n'
+    )
+    cfg = load_config(cwd=tmp_path, environ={"VIKUNJA_TOKEN": "tk"})
+    assert cfg.notify_webhook is None
+
+
 # --- #38: enforce_single_wip policy flag (committed in the toml, default off) ---
 
 def test_enforce_single_wip_defaults_false(tmp_path):

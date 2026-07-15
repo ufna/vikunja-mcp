@@ -8,6 +8,7 @@ from mcp.server.fastmcp import FastMCP
 from vikunja_mcp import __version__
 from vikunja_mcp.api import VikunjaAPI, VikunjaError, canonical_base_url
 from vikunja_mcp.config import ConfigError, load_config
+from vikunja_mcp.notify import WebhookNotifier
 from vikunja_mcp.workflow import Workflow, WorkflowError
 
 mcp = FastMCP("vikunja-tracker")
@@ -71,9 +72,16 @@ def _reset_workflow_cache() -> None:
 
 
 def _build_workflow(cfg) -> Workflow:
+    # Your-Call webhook ping (#252): built only when VIKUNJA_NOTIFY_WEBHOOK is configured —
+    # unset means call_human carries no notifier at all (feature off, zero behavior change).
+    notifier = (
+        WebhookNotifier(cfg.notify_webhook, tracker_url=cfg.url)
+        if cfg.notify_webhook else None
+    )
     return Workflow(
         VikunjaAPI(cfg.url, cfg.token), cfg.project_id,
         enforce_single_wip=cfg.enforce_single_wip,
+        notifier=notifier,
     )
 
 
@@ -354,7 +362,11 @@ def call_human(task_id: int, question: str) -> dict:
     moves to the 'Your Call' column (abbreviated YC), the assignee is kept. After
     calling, don't wait for an answer: take the next task; the human replies with a
     comment and moves the card back to Design/Build themselves, and next_task hands it
-    back as "your active" task. This is NOT review and NOT an external block."""
+    back as "your active" task. This is NOT review and NOT an external block.
+    When a notification webhook is configured (VIKUNJA_NOTIFY_WEBHOOK), the human is also
+    pinged about the parked card — best-effort: the result's `notified` key reports
+    delivery, and notified=false only means the PING was lost (the question IS parked;
+    don't retry the call — mention in your report that the human must check the board)."""
     return _wf().call_human(task_id, question)
 
 

@@ -44,7 +44,9 @@ docker rm -f vikunja-test
 - `src/vikunja_mcp/config.py` — 4-layer config: env (`VIKUNJA_URL/TOKEN/PROJECT_ID`)
   > repo-local `.vikunja-mcp.env` (same dir as the toml, found by the same walk-up,
   gitignored) > repo `.vikunja-mcp.toml` (walk-up from cwd) > `~/.config/vikunja-mcp/env`.
-  Token is NEVER read from the repo toml (so it can't be committed and used).
+  Token is NEVER read from the repo toml (so it can't be committed and used); optional
+  `VIKUNJA_NOTIFY_WEBHOOK` (`notify.py` — best-effort Slack-shaped ping when `call_human`
+  parks a card in Your Call) is a secret of the same class: env layers only, never the toml.
 - `src/vikunja_mcp/api.py` — REST client. **Vikunja gotchas are codified here:
   PUT = create, POST = FULL-REPLACE update** → every update is
   read-modify-write; kanban view updates must always send

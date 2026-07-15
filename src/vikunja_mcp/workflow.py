@@ -12,6 +12,7 @@ import httpx
 
 from .api import VikunjaError
 from .formatting import html_to_text
+from .notify import WebhookNotifier
 
 STAGES = ["Backlog", "Queue", "Design", "Build", "Review", "Your Call", "Done"]
 ACTIVE_STAGES = ("Design", "Build")
@@ -128,17 +129,41 @@ def _human_size(n: int) -> str:
     return f"{n / (1024 * 1024):.1f} МБ"
 
 
+def _stderr_note_best_effort(prefix: str, exc: Exception) -> None:
+    """One guarded line on STDERR for a swallowed best-effort failure — the #134/#135 contract
+    factored out for reuse: never stdout (a stray byte corrupts the MCP stdio protocol), the
+    exception CLASS is formatted unconditionally, a str(exc) that itself raises degrades to
+    '<unprintable>' instead of escaping (the diagnostic survives the pathological case), and
+    the print is wrapped so nothing on this logging path can ever propagate into the caller's
+    (already succeeded) result."""
+    try:
+        detail = str(exc)
+    except Exception:
+        detail = "<unprintable>"
+    try:
+        print(f"{prefix}: {exc.__class__.__name__}: {detail}", file=sys.stderr)
+    except Exception:
+        pass
+
+
 class WorkflowError(Exception):
     """The message is shown to the agent as the tool result."""
 
 
 class Workflow:
-    def __init__(self, api: Any, project_id: int, enforce_single_wip: bool = False):
+    def __init__(
+        self, api: Any, project_id: int, enforce_single_wip: bool = False,
+        notifier: WebhookNotifier | None = None,
+    ):
         self.api = api
         self.project_id = project_id
         # optional WIP gate: when true, claim() refuses a new task while you already
         # have an active one. Off by default -> the gate does zero extra work.
         self.enforce_single_wip = enforce_single_wip
+        # optional Your-Call webhook ping (#252): built from VIKUNJA_NOTIFY_WEBHOOK by the
+        # server; None (default, URL unset) -> call_human behaves bit-for-bit as before.
+        # Called strictly best-effort — see call_human.
+        self.notifier = notifier
         self._me_cache: dict | None = None
         self._view_cache: dict | None = None
         self._buckets_cache: dict[str, dict] | None = None
@@ -1028,10 +1053,33 @@ class Workflow:
             raise WorkflowError(f"call_human works only from Design/Build; task is in {stage}")
         self.api.add_comment(task_id, f"[нужен человек] {question.strip()}")
         self._move(task_id, "Your Call")
-        return {
+        result = {
             "moved_to": "Your Call", "task_id": task_id,
             "note": "assignee kept; the human replies and moves the task back to Design/Build",
         }
+        # Slack-webhook ping (#252): the human used to discover a YC card only by looking at
+        # the board — when VIKUNJA_NOTIFY_WEBHOOK is configured, tell them. Fires only AFTER
+        # the park fully succeeded (comment + move) — never about a card that isn't actually
+        # in Your Call — and is STRICTLY BEST-EFFORT (same contract as the epic marker,
+        # #134/#135): the notifier raises on any failure, and this single boundary swallows
+        # it with one guarded stderr line, so a down/misconfigured gateway costs the ping,
+        # never the parked question. notified=true/false surfaces delivery honestly (the
+        # attach_file journal_comment pattern) so the agent's report can say "check the
+        # board" when the ping was lost; the key is absent entirely when no webhook is
+        # configured (zero result-shape change for the feature-off default).
+        if self.notifier is not None:
+            try:
+                self.notifier.your_call(
+                    ref=self._ref(task), title=task["title"],
+                    question=question.strip(), task_id=task_id,
+                )
+                result["notified"] = True
+            except Exception as exc:
+                _stderr_note_best_effort(
+                    f"vikunja-mcp: Your Call webhook ping skipped for #{task_id}", exc
+                )
+                result["notified"] = False
+        return result
 
     def return_task(self, task_id: int, reason: str) -> dict:
         if not (reason or "").strip():

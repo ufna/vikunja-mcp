@@ -86,6 +86,7 @@ opencode also auto-loads `AGENTS.md` from the repo root (falling back to
 Config is resolved from four layers, in priority order:
 
 1. **Environment variables** — `VIKUNJA_URL`, `VIKUNJA_TOKEN`, `VIKUNJA_PROJECT_ID`
+   (plus optional `VIKUNJA_NOTIFY_WEBHOOK`, below)
 2. **Repo-local env file** `.vikunja-mcp.env` (`KEY=VALUE` lines, same
    directory as `.vikunja-mcp.toml`, found by the same walk-up) —
    per-project token for machines that work across multiple repos, without
@@ -121,8 +122,26 @@ Note: the token is *never* read from `.vikunja-mcp.toml` — only from
 `.vikunja-mcp.toml` has nothing secret in it and is safe to commit.
 `.vikunja-mcp.env` uses the same `KEY=VALUE` parsing rules as the user env
 file (quoted values, trailing `# comment` stripping on unquoted ones), and
-all three keys (`VIKUNJA_URL`/`VIKUNJA_TOKEN`/`VIKUNJA_PROJECT_ID`) may
-appear in it.
+all four keys (`VIKUNJA_URL`/`VIKUNJA_TOKEN`/`VIKUNJA_PROJECT_ID`/
+`VIKUNJA_NOTIFY_WEBHOOK`) may appear in it.
+
+### Your Call webhook notification (optional)
+
+Set `VIKUNJA_NOTIFY_WEBHOOK` to a Slack-compatible incoming-webhook URL and
+`call_human` pings it whenever it parks a card in *Your Call* — one message,
+minimal Slack shape (`{"text": ...}`), carrying the task ref, title, the
+question, and a deep-link to the card:
+
+```
+VIKUNJA_NOTIFY_WEBHOOK=https://hooks.slack.example/services/T000/B000/xxxx
+```
+
+A webhook URL is a secret of the token's class (whoever holds it can post
+into your channel), so it follows the same rule: read from the env layers
+only, **never** from the committed `.vikunja-mcp.toml`. Unset = off, zero
+behavior change. Delivery is best-effort by contract — one attempt, 5s
+timeout, no retries; a down or misconfigured gateway costs only the ping
+(the tool result reports `notified: false`), never the parked question.
 
 ## Tools
 
@@ -133,7 +152,7 @@ appear in it.
 | `get_task(task_id)` | Dossier: description, stage, assignees, labels, full comment thread. |
 | `comment(task_id, text)` | Adds a progress note to the task's comment log. |
 | `advance(task_id, to, spec=, worklog=, evidence=)` | `to="build"`: Design → Build, requires `spec`. `to="review"`: Build → Review, requires `worklog` + `evidence`. `to="done"` is always rejected — Done is human-only. Task must be assigned to you. |
-| `call_human(task_id, question)` | Design/Build → `Your Call` (aka `YC`). Keeps your assignment (not a review step, not an external block); posts `question` as a comment. |
+| `call_human(task_id, question)` | Design/Build → `Your Call` (aka `YC`). Keeps your assignment (not a review step, not an external block); posts `question` as a comment. With `VIKUNJA_NOTIFY_WEBHOOK` set, also pings the humans' Slack-compatible webhook (best-effort). |
 | `return_task(task_id, reason)` | For external blockers (no access, missing dependency, someone else's service down). Unassigns you, adds a `blocked` label, moves the task to Backlog for human re-triage. |
 | `decompose(task_id, subtasks)` | Requires ≥2 subtasks (each needs a `title`). Creates each as a new task with a `parenttask` relation to the parent and drops it in Queue. Parent is unassigned, labeled `epic`, and moved to Backlog. |
 | `file_task(title, description=, priority=, related_task_id=)` | Files an out-of-scope finding (a bug or bit of tech-debt spotted mid-work) into **Backlog** for human triage — not Queue. Stamps a `[filed-by-agent]` comment marker and, when `related_task_id` is given, links it to the originating task with a `related` relation. Distinct from `decompose`, which splits your *own* oversized task into Queue subtasks. |
