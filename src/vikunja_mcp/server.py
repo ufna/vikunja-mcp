@@ -3,7 +3,7 @@ import sys
 from functools import wraps
 
 import httpx
-from mcp.server.fastmcp import FastMCP
+from mcp.server import MCPServer
 
 from vikunja_mcp import __version__
 from vikunja_mcp.api import VikunjaAPI, VikunjaError, canonical_base_url
@@ -11,7 +11,10 @@ from vikunja_mcp.config import ConfigError, load_config
 from vikunja_mcp.notify import WebhookNotifier
 from vikunja_mcp.workflow import Workflow, WorkflowError
 
-mcp = FastMCP("vikunja-tracker")
+# version= is not cosmetic: MCPServer defaults it to "", where FastMCP used to report the
+# SDK's own version — so a client's server list would show a blank. Report OURS, which is
+# what a human debugging a rollout of the moving `stable` channel actually needs to see.
+mcp = MCPServer("vikunja-tracker", version=__version__)
 
 # A 401 from Vikunja is a CREDENTIAL problem, not a transient one. TWO traps here, both learned
 # the expensive way (tracker #140):
