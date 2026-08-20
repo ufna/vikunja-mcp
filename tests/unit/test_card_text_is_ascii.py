@@ -102,10 +102,15 @@ measured what that still missed by putting the same em dash on the same undriven
 different bindings: control 0 failed / 0 errors, 5 collected — a tuple target -> 0 failed, an
 `AugAssign` -> 0 failed, a constant inside a module-level `try:` -> 0 failed, and a
 `list.append` -> 0 failed, against a single-target `Assign` -> 1 failed. A docstring saying
-"module scope is covered" would have been true of one shape in five. `_module_scope_statements`
-and `_module_bindings` now read all of them, and the rounds are in the sweep below. The lesson is
-the card's own, arriving twice: what a static resolver is complete about is SHAPES, and the
-shapes are not enumerable by thinking of them.
+"module scope is covered" would have been true of exactly ONE of the shapes this resolver now
+reads. How many that is OUT OF depends on when the question is asked, and that is the point
+rather than a dodge: five at the time (this pass's four, plus the `Assign` that worked), SIX once
+#1171 measured the annotated assignment — read by the shipped code, present in no round here, and
+blind under the reconstructed first fix — and seven once #1171 added the module-scope WALRUS,
+which was blind before this widening and after it. `_module_scope_statements` and
+`_module_bindings` now read all of them, and the rounds are in the sweep below. The lesson is the
+card's own, arriving three times over: what a static resolver is complete about is SHAPES, and
+the shapes are not enumerable by thinking of them.
 
 What the resolver still does NOT do is cross a FUNCTION boundary, and #1168 chose to leave it
 that way rather than chase callee returns. The reason is that the static form can only ever be
@@ -207,9 +212,14 @@ patcher asserting it replaced exactly one occurrence. `git status` was read afte
   the module hop in place, and the SAME mutation with the hop deleted 0 failed. That pair is what
   says the widening is load-bearing rather than decorative.
 
-* THE FIVE BINDING SHAPES, run after this card's second pass found the first module-scope fix
-  covered one of them. Every round puts the same em dash on the same undriven `attach_file`
-  fallback and varies ONLY how the module-level name is bound, so any difference is the resolver's.
+* FIVE OF THE SIX BINDING SHAPES — this bullet was headed as ALL of them until #1171 measured
+  the sixth, an ANNOTATED assignment, which the shipped resolver reads and which appears in no
+  round below. Its own pair (shipped -> 1 failed, reconstructed first fix -> 0 failed, control 0
+  failed / 0 errors / 6 collected) is in `_module_bindings`'s docstring; the five rounds here are
+  unchanged and were honest about what they ran. Run after this card's second pass found the
+  first module-scope fix covered one of them. Every round puts the same em dash on the same
+  undriven `attach_file` fallback and varies ONLY how the module-level name is bound, so any
+  difference is the resolver's.
   control 0 failed / 0 errors, 5 collected: single-target `Assign` -> 1 failed; TUPLE target -> 1
   failed; `AugAssign` -> 1 failed; a constant inside a module-level `try:` -> 1 failed;
   `list.append` -> 1 failed. Before `_module_scope_statements` and the widened `_module_bindings`,
@@ -241,6 +251,33 @@ came back entirely GREEN, indistinguishable from a blind pin on a mutation that 
 applied. What caught both was the patcher asserting it had replaced exactly one occurrence, not
 anything in the round's own output. A sweep step that fails LOUDLY when it fails to mutate is
 worth more than a cleverer mutation.
+
+#1171'S SWEEP, run in a clone of its own worktree with the working tree COMMITTED INSIDE the
+clone before the first round — the remedy the discarded-rounds paragraph above prescribes,
+applied. Selection this file alone, `__pycache__` cleared and `PYTHONDONTWRITEBYTECODE=1` per
+round, `vikunja_mcp.__file__` printed every round and resolving inside the clone, `-q` dropped so
+`collected` cross-checks, rounds read by COUNTING lines beginning `FAILED ` with lines beginning
+`ERROR ` counted separately, every patcher asserting it replaced exactly one occurrence, and
+`git status` read after every restore. Opening control 0 failed / 0 errors / 6 collected, closing
+control the same. Every round puts the same em dash on the same undriven `attach_file` fallback
+and varies ONLY how the value reaches it.
+* the module-scope WALRUS, `if (_AF := "attachment<em dash>"): pass` -> 1 failed, the source
+  scan; the SAME mutation with the new `NamedExpr` hop deleted from `_module_bindings` -> 0
+  failed. Blind before #1171, and the pair is what says the widening is load-bearing.
+* the cross-MODULE alias: `cardtext.py` given an em-dash constant OUTSIDE `_TABLE`, imported
+  into `workflow.py` under an alias -> 1 failed, and it is the NEW pin that fires, not the
+  resolver — which is the decision, not an accident. The same mutation with that test deleted ->
+  0 failed at 5 collected, the selection being one smaller precisely because the round deletes a
+  test.
+* the two that stay blind, run so that they are named rather than assumed: a `global` re-binding
+  inside a module-level `def` that is then called -> 0 failed, and `"attachment" + chr(0x2014)`
+  -> 0 failed. The second is named permanently uncovered.
+* the SIXTH BINDING SHAPE the #1168 bullet above is missing: an ANNOTATED assignment. Under the
+  SHIPPED resolver -> 1 failed; under a reconstruction of #1168's FIRST module-scope fix
+  (`_module_scope_statements` reduced to `tree.body`, `_module_bindings` to a single-`Name`
+  `Assign`) -> 0 failed, against a single-target `Assign` under that same reconstruction -> 1
+  failed. So it was blind exactly as the other four were, and the count in this file ran one
+  short in both places that carried it.
 """
 import ast
 import pathlib
@@ -251,6 +288,7 @@ from vikunja_mcp.config import DEFAULT_LANGUAGE
 from vikunja_mcp.workflow import _human_size
 
 _WORKFLOW = pathlib.Path(__file__).resolve().parents[2] / "src/vikunja_mcp/workflow.py"
+_CARDTEXT = pathlib.Path(__file__).resolve().parents[2] / "src/vikunja_mcp/cardtext.py"
 
 # The vocabulary, spelled out so an accidental DELETION of a marker is as red as a bad rename.
 # This is the WHOLE set as of #1164, not a chosen subset: the derived scan in the first test
@@ -324,16 +362,61 @@ def _module_scope_statements(tree: ast.Module) -> list[ast.stmt]:
     return out
 
 
+def _module_scope_named_exprs(stmt: ast.stmt) -> list[ast.NamedExpr]:
+    """Every WALRUS binding inside one module-level statement, never entering a def or class.
+
+    A walrus is an EXPRESSION, so unlike the four statement shapes beside it there is no node
+    type to test for at the top level — `if (_AF := "..."): pass` hides it in an `if`'s TEST,
+    which is not a statement at all. It is therefore hunted by walking the statement, with the
+    same def/class stop `_module_scope_statements` applies for the same reason: a walrus inside
+    a function is a LOCAL, and collecting it under its bare name would resolve it into an
+    unrelated call site. Double-collecting across a nested statement is possible and harmless —
+    over-collecting is the safe direction here, as it is for the tuple target below.
+    """
+    out: list[ast.NamedExpr] = []
+    pending: list[ast.AST] = list(ast.iter_child_nodes(stmt))
+    while pending:
+        node = pending.pop()
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            continue
+        if isinstance(node, ast.NamedExpr):
+            out.append(node)
+        pending += list(ast.iter_child_nodes(node))
+    return out
+
+
 def _module_bindings(tree: ast.Module) -> dict[str, list[ast.AST]]:
-    """Every expression bound to a name at MODULE level, by name — the same three shapes
+    """Every expression bound to a name at MODULE level, by name — a superset of the shapes
     `_bindings_of` reads inside a function, so the two scopes answer the same question.
 
-    Assignment (including a TUPLE target and an annotated one), `+=`, and `list.append`. The
-    tuple case binds the WHOLE right-hand side to each name it unpacks rather than trying to
-    pair them off positionally: over-collecting is the safe direction here, since an extra
-    literal can only turn a pass into a red naming the exact string. All four shapes this does
-    not read the naive way — a tuple target, an `AugAssign`, a constant inside module-level
-    control flow, and `list.append` — were measured blind before this function grew to them.
+    SIX SHAPES, enumerated rather than counted from memory: assignment with a single `Name`
+    target, assignment with a TUPLE target, an ANNOTATED assignment, `+=`, `list.append`, and —
+    since #1171 — a WALRUS anywhere inside a module-level statement. The tuple case binds the
+    WHOLE right-hand side to each name it unpacks rather than pairing them off positionally, and
+    the walrus hunt may double-collect across a nested statement: over-collecting is the safe
+    direction here, since an extra literal can only turn a pass into a red naming the exact
+    string, never the reverse.
+
+    FIVE OF THEM WERE MEASURED BLIND before #1168 widened this function and
+    `_module_scope_statements` beside it — the tuple target, the ANNOTATED assignment, the
+    `AugAssign`, the `list.append`, and (a LOCATION rather than a binding shape, and the other
+    function's half) a constant inside module-level control flow. This sentence said FOUR until
+    #1171 re-ran it, and the one missing was the annotated assignment: the shipped code reads it,
+    inside the same `elif` as `AugAssign`, and it appears in NO round of #1168's evidence, so
+    nothing said whether it had ever been blind. It had. Measured against a reconstruction of
+    #1168's FIRST module-scope fix (`_module_scope_statements` reduced to `tree.body`, this
+    function reduced to a single-`Name` `Assign`), selection
+    `tests/unit/test_card_text_is_ascii.py` alone, control 0 failed / 0 errors / 6 collected on
+    every round: under the SHIPPED resolver an `AnnAssign` -> 1 failed and a single-target
+    `Assign` -> 1 failed; under the reconstruction the `Assign` -> 1 failed and the `AnnAssign` ->
+    0 failed. That is the same isolating pair the other four were measured with. An undercount in
+    the one file whose stated lesson is that these shapes are not enumerable by thinking about
+    them is worth a paragraph, which is why this one is here.
+
+    WHAT IS DELIBERATELY NOT A SHAPE HERE: an `ImportFrom` alias. It binds a name in this module
+    all right, but its VALUE lives in another one, and following it takes the resolver out of the
+    file it says it reads — see `test_no_non_ascii_literal_lives_BESIDE_cardtext_s_table`, which
+    closes that case from the receiving module's side instead.
     """
     bound: dict[str, list[ast.AST]] = {}
 
@@ -342,6 +425,9 @@ def _module_bindings(tree: ast.Module) -> dict[str, list[ast.AST]]:
             bound.setdefault(name, []).append(value)
 
     for node in _module_scope_statements(tree):
+        for walrus in _module_scope_named_exprs(node):
+            if isinstance(walrus.target, ast.Name):
+                bind(walrus.target.id, walrus.value)
         if isinstance(node, ast.Assign):
             for target in node.targets:
                 for sub in ast.walk(target):
@@ -416,6 +502,39 @@ def _comment_text_literals() -> list[tuple[int, str]]:
         text_arg = call.args[1]
         literals = _literals_reaching(text_arg, enclosing(call), module_bindings)
         out += [(call.lineno, lit) for lit in literals]
+    return out
+
+
+def _table_literal_ids(tree: ast.Module) -> set[int]:
+    """The ids of every string literal INSIDE `cardtext._TABLE`, which other pins already own.
+
+    The table's `en` column is asserted ASCII by `test_the_default_language_card_text_is_ascii`
+    below and its `ru` column is asserted NOT to be; `test_card_language.py` reads both again from
+    the other side. What has nothing looking at it is everything ELSE in that module, and that is
+    what the pin using this subtraction is for.
+    """
+    for node in tree.body:
+        target = node.target if isinstance(node, ast.AnnAssign) else None
+        if isinstance(node, ast.Assign) and len(node.targets) == 1:
+            target = node.targets[0]
+        if isinstance(target, ast.Name) and target.id == "_TABLE":
+            return {
+                id(c) for c in ast.walk(node.value)
+                if isinstance(c, ast.Constant) and isinstance(c.value, str)
+            }
+    return set()
+
+
+def _docstring_ids(tree: ast.AST) -> set[int]:
+    """The ids of the module/class/function docstrings — documentation, never card text."""
+    out: set[int] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        first = node.body[0] if node.body else None
+        if (isinstance(first, ast.Expr) and isinstance(first.value, ast.Constant)
+                and isinstance(first.value.value, str)):
+            out.add(id(first.value))
     return out
 
 
@@ -532,13 +651,38 @@ def test_every_comment_the_tool_writes_is_ascii_when_it_runs(tmp_path):
     SO WHAT A NEW SITE DOES AND DOES NOT GET FOR FREE. Its MARKER is covered automatically:
     `test_every_comment_marker_is_ascii` DERIVES the bracket set from the source, so — control 0
     failed / 0 errors, 18 collected — that same new site with a Cyrillic look-alike in its bracket
-    gave 2 failed, with `_MARKERS` still untouched. Its BODY is
-    covered only if the source scan can resolve it or the driver happens to reach it. THE
-    UNCOVERED RESIDUE is therefore a site whose body neither resolves statically nor gets driven —
-    and since #1168 the static half resolves module scope as well as locals, what is left of it is
-    a body assembled across a FUNCTION boundary on a path the driver never takes. Nothing here
-    sees that. Whether some third check could is not something this card measured, so it is not
-    claimed either way.
+    gave 2 failed, with `_MARKERS` still untouched. Its BODY is covered only if the source scan
+    can resolve it or the driver happens to reach it.
+
+    THE UNCOVERED RESIDUE is a site whose body neither resolves statically nor gets driven, and
+    #1171 measured what it is MADE OF rather than characterising it. Every round below puts the
+    same em dash on the same undriven `attach_file` fallback and varies only how the value gets
+    there; selection this file alone, `__pycache__` cleared and `PYTHONDONTWRITEBYTECODE=1` per
+    round, `-q` dropped, rounds read by counting lines beginning `FAILED `, control 0 failed / 0
+    errors / 6 collected on every one of them:
+    * a body assembled across a FUNCTION boundary — the shape #1168 chose to leave open, and the
+      one this paragraph used to name as the WHOLE of the residue;
+    * a module-level name bound by a shape `_module_bindings` does not read: a `global`
+      re-binding inside a module-level `def` that is then called -> 0 failed, still blind. The
+      module-scope WALRUS was on this list until #1171 and is not now — -> 1 failed since, and
+      0 failed with the new `NamedExpr` hop deleted, which is the pair that says the widening
+      did the work;
+    * a value living in ANOTHER MODULE. Not closed by this resolver following the import — the
+      unit of a static gate here is a FILE — but by the receiving module's own gate. The place
+      such a constant actually gets hoisted to is `cardtext.py`, which has one since #1171: an
+      em-dash constant beside `_TABLE`, imported under an alias and used at the same undriven
+      fallback, -> 1 failed there and 0 failed with that test deleted;
+    * text that is not a LITERAL at all: `"attachment" + chr(0x2014)` -> 0 failed. Named
+      PERMANENTLY uncovered rather than filed — a literal scan cannot judge a value it would have
+      to execute to see, so no widening of this resolver reaches it and none should be attempted.
+
+    THE SENTENCE THIS PARAGRAPH USED TO CARRY was falsified by two of those four. It said that
+    since #1168 resolves module scope as well as locals, what is left is a body assembled across a
+    FUNCTION boundary — but a module-scope walrus crosses no function boundary at all, and an
+    import alias crosses a MODULE boundary and not a function one. A reader acting on it would
+    have believed any module-level hoist was statically covered. `_module_bindings`'s own
+    docstring was ENUMERATIVE and claimed no completeness, so the file as a whole did not lie —
+    but the two docstrings sit about 150 lines apart and only this one says "what is left".
 
     THE NEIGHBOURING FILE ALREADY ASSERTS SOMETHING SIMILAR, and the duplication is deliberate
     rather than unnoticed. `test_flipping_the_language_moves_the_body_and_never_the_marker` ends on
@@ -619,4 +763,61 @@ def test_the_default_language_card_text_is_ascii():
         "not one `ru` row is non-ASCII, so either the Russian column was never filled in or it "
         "was overwritten with the English one. The language key would then be inert while every "
         "other assert in this file stayed green"
+    )
+
+
+def test_no_non_ascii_literal_lives_BESIDE_cardtext_s_table():
+    """SHAPE 3 OF #1171, closed where the constant LIVES rather than where it is used.
+
+    THE HOLE. `cardtext.py` is this repo's designated home for the prose the product authors,
+    `workflow.py` is the only file the static resolver above parses, and the table pin below reads
+    `cardtext._TABLE` and nothing else. So a shared separator or prefix hoisted into `cardtext.py`
+    BESIDE the table — an ordinary refactor, and the least exotic of the four shapes #1171
+    measured — and then consumed at a site the driver never reaches was seen by NOTHING. Measured
+    at this file's own selection, `__pycache__` cleared and `PYTHONDONTWRITEBYTECODE=1` per round,
+    `-q` dropped, rounds read by counting lines beginning `FAILED `: control 0 failed / 0 errors /
+    6 collected; `cardtext.py` given an em-dash constant outside `_TABLE`, imported into
+    `workflow.py` under an alias and used at the undriven `attach_file` fallback -> 1 failed, THIS
+    test; the same mutation with this test deleted -> 0 failed against a control of 0 failed / 0
+    errors / 5 collected. That pair is the whole argument for the test existing.
+
+    WHY NOT TEACH THE RESOLVER TO FOLLOW THE IMPORT, which is the other half of the fix #1171
+    suggested. The unit of a static gate here is a FILE — the same decision #1170 records for the
+    agent-facing-English scan next door — because nothing marks a string as card text and a
+    scanner can only ever be complete about a boundary. Following an `ImportFrom` into another
+    module takes the resolver out of `workflow.py` and starts precisely the growing pile of static
+    analysis this file's own module docstring rejects for callee returns: close the alias and a
+    module attribute (`cardtext._SEP`), a `getattr`, and a re-export through a third module are
+    all still open. Closing it from the RECEIVING file is complete for that file by construction
+    and costs one scan.
+
+    ITS OWN BLINDNESS, since replacing a blind spot with an unnamed one is not progress. It is
+    ASCII over `cardtext.py`'s literals, so it says nothing about a constant hoisted into any
+    OTHER module — `config.py`, a new `strings.py` — and that is the deliberate shape of the rule
+    rather than an oversight: the answer there is that module's own gate. Docstrings are exempt
+    (this module's own documentation is written with em dashes, like every rulebook here), and so
+    is `_TABLE` itself, whose two columns have opposite requirements and are asserted below.
+    """
+    tree = ast.parse(_CARDTEXT.read_text(encoding="utf-8"))
+    in_table = _table_literal_ids(tree)
+    assert len(in_table) >= 50, (
+        f"the `_TABLE` subtraction resolved to {len(in_table)} literal(s), against the 70 the "
+        f"table holds today. It finds the module-level `_TABLE` assignment by shape, so a rename "
+        f"or a restructure empties it silently — and this pin would then report the whole `ru` "
+        f"column as offenders. Re-point _table_literal_ids, do not widen the exemption to the file"
+    )
+
+    exempt = in_table | _docstring_ids(tree)
+    offenders = [
+        (node.lineno, node.value) for node in ast.walk(tree)
+        if isinstance(node, ast.Constant) and isinstance(node.value, str)
+        and id(node) not in exempt and not node.value.isascii()
+    ]
+    assert not offenders, (
+        f"cardtext.py:{offenders} holds non-ASCII literal(s) OUTSIDE `_TABLE`. The two columns "
+        f"of that table are the module's whole per-language surface and each has its own pin; "
+        f"anything else here is a constant that ordinary refactoring hoists BESIDE the table and "
+        f"then interpolates into card text, where the resolver over workflow.py cannot follow it "
+        f"across the module boundary. Put per-language prose in a `_TABLE` row; keep a shared "
+        f"separator or prefix ASCII"
     )

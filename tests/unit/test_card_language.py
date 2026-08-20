@@ -356,11 +356,22 @@ def test_every_key_carries_every_language():
 
 
 # Latin word runs the `ru` column carries ON PURPOSE, with the reason each one is there. This is
-# a RATCHET, not a description: the pin below rejects any Latin run that is not on it, so adding a
-# Russian row that leaves an English clause behind fails until somebody either translates the
-# clause or writes it here with a reason. Five of the eight are board columns and stages, which
-# the Vikunja UI itself shows untranslated, so a Russian card line naming them in Russian would
-# point at something the human cannot find on their own board.
+# a RATCHET, not a description: the pin below rejects any Latin run that is NOT on this list, so a
+# Russian row carrying one fails until somebody either translates it or writes it here with a
+# reason. Five of the eight are board columns and stages, which the Vikunja UI itself shows
+# untranslated, so a Russian card line naming them in Russian would point at something the human
+# cannot find on their own board.
+# WHAT THAT IS NOT, since this comment promised it until #1171: it is not "no English left
+# behind". The allowlisted tokens COMPOSE into ordinary English, so a `ru` body rebuilt out of
+# them alone sails through. Measured, selection `tests/unit/test_card_language.py` alone,
+# `__pycache__` cleared and PYTHONDONTWRITEBYTECODE=1 per round, rounds read by counting lines
+# beginning `FAILED `, control 0 failed / 0 errors / 13 collected each round: the `worklog_worklog`
+# body rewritten to `Review: {worklog}` -> 0 failed; for contrast a leftover Latin `KB` unit -> 3
+# failed. The first is contrived to trigger and is NOT a reason to change the allowlist, whose
+# composition is honest — its eight tokens are exactly the Latin runs the `ru` column carries
+# today, with no padding and no dead entries. What it is a reason to change is the sentence: the
+# mechanism delivers "no Latin run outside this list", which catches text LEFT BEHIND in ordinary
+# words, and that is the failure that actually happens.
 _LATIN_KEPT_IN_RU = {
     "Backlog", "Build", "Done", "Queue", "Review",   # board columns / stages, shown as-is by the UI
     "Evidence",   # pre-#1164 text: this label was already English while the block around it was not
