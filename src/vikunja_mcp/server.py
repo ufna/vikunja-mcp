@@ -524,13 +524,16 @@ def attach_file(task_id: int, path: str, note: str | None = None) -> dict:
     force it. `path` is a local file (the screenshot you produced); its basename becomes the
     attachment name, the MIME is inferred from the extension. Every successful upload JOURNALS
     itself into the task's comments as `[attach] <name> (<mime>, <size>)` — pass `note` (one line
-    on WHAT the file shows, e.g. 'доска после reconcile') so the human reading the journal sees
-    why it's there, and do NOT post a separate comment about the upload (it would duplicate the
-    journal). This is standalone — it does NOT move the task; a failed upload never affects a
-    stage transition, and a failed journal comment never fails the upload (the result then has
-    journal_comment=false — the file IS on the card, don't re-upload). Actionable errors: a
-    missing path, a directory, or an oversized file (>25MB) is refused with the reason; a 401
-    means the token lacks the tasks_attachments:create scope and a human must add that op."""
+    on WHAT the file shows, e.g. 'the board after reconcile') so the human reading the journal
+    sees why it's there, and do NOT post a separate comment about the upload (it would duplicate
+    the journal). The note is YOUR sentence, not the product's: nothing here rewrites it and the
+    project's `language` key only INSTRUCTS what to write it in — the example is English because
+    this description is. This is standalone — it does NOT move the task; a failed upload
+    never affects a stage transition, and a failed journal comment never fails the upload
+    (the result then has journal_comment=false — the file IS on the card, don't
+    re-upload). Actionable errors: a missing path, a directory, or an oversized file
+    (>25MB) is refused with the reason; a 401 means the token lacks the
+    tasks_attachments:create scope and a human must add that op."""
     return _wf().attach_file(task_id, path, note=note)
 
 
@@ -716,11 +719,12 @@ def file_task(
     came from a log on the server, not from anything here.
     QUEUE OPT-IN: pass queue=True ONLY when a human explicitly asked you to file this
     task as work to do (their instruction IS the triage — e.g. an answer on a Your Call
-    card, or a direct "заведи задачу на X" in chat/comments): the card lands in YOUR
-    project's Queue, unassigned and immediately claimable by any agent. NEVER queue=True
-    for findings you discovered yourself — those keep the default (Backlog) so the human
-    prioritizes them. Not combinable with a cross-project project_id (refused, nothing
-    created): another project's Queue is not yours to fill — their human triages.
+    card, or a direct "file a task for X" in chat/comments, in whatever language they
+    happen to say it in): the card lands in YOUR project's Queue, unassigned and
+    immediately claimable by any agent. NEVER queue=True for findings you discovered
+    yourself — those keep the default (Backlog) so the human prioritizes them. Not
+    combinable with a cross-project project_id (refused, nothing created): another
+    project's Queue is not yours to fill — their human triages.
     CROSS-PROJECT (agent-to-agent coordination): pass project_id — a numeric Vikunja
     project id — to file into ANOTHER project's Backlog, e.g. when your work needs a
     change owned by that project's repo/agent. Take the id from the task/human context;

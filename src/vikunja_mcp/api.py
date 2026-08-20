@@ -425,7 +425,7 @@ class VikunjaAPI:
             # есть, минуя r.json() (который бы упал на бинарнике). См. download_attachment.
             body = r.content if raw else (r.json() if r.content else None)
             return body
-        raise AssertionError("unreachable: последняя попытка всегда вернёт или поднимет")
+        raise AssertionError("unreachable: the final attempt always returns or raises")
 
     def _should_retry(self, method: str, status: int) -> bool:
         if status == 429:
