@@ -13,9 +13,14 @@ IT WAS THE FIRST, and the mover is not this package. The Vikunja container's own
 it: each card entered bucket 44 (Backlog) through `file_task`'s four-call signature, and entered
 bucket 45 (Queue) minutes or hours later behind a request this package never issues —
 `POST /api/v1/tasks/<id>/position`, 173-178 ms ahead of the bucket write, surrounded by JWT
-refreshes, notification polling and avatar fetches. That is the web frontend's kanban drag: a
-human triaging Backlog, which is the entire purpose of Backlog. Nothing was broken. The full
-measurement, with the log lines and the discriminator, is in `docs/dossier/workflow.md`.
+refreshes, notification polling and avatar fetches. That is a kanban drag from the WEB FRONTEND,
+which is exactly as far as the log reads and no further (#1172): the discriminator separates this
+PACKAGE from a browser session holding a JWT, and it cannot separate a person's hand from browser
+automation — something this repo runs routinely, `PLAYWRIGHT_MCP_ISOLATED=true` being committed
+for that reason. A human triaging Backlog is the reading, and a good one, since triaging Backlog
+is the entire purpose of Backlog; what is MEASURED is that the mover is outside this package,
+which is the whole of what the diagnosis needs. Nothing was broken. The full measurement, with
+the log lines and the discriminator, is in `docs/dossier/workflow.md`.
 
 WHAT THIS FILE IS FOR is the half of that diagnosis which is a property of THIS code, so the next
 observer does not spend an afternoon re-deriving it from the board. Two pins, one per hypothesis
@@ -62,11 +67,30 @@ again is invisible to it. (ii) The same `call_human` mutation as above, but plac
 stage guard instead -> 0 failed. The pair is the sharp one: an identical line is caught at the
 top of the method and invisible four lines down, because from Backlog `call_human` refuses before
 reaching it. What that measures is the sweep's REACH, and the reach is small — of the 20 rows it
-drives (10 pointable tools x 2 ownership states) 12 are refusals, 8 run, and only TWO reach a
-`_move` at all: `decompose` and `return_task`, both in the assigned state. The other six that run
-are the reading tools, which move nothing by construction. So the honest claim is WHERE A BACKLOG
-CARD ENDS UP after one tool call from those two states — not every path a card can take through
-Queue, and not the behaviour of a tool behind a guard that refuses from Backlog outright.
+drives (10 pointable tools x 2 ownership states) 10 are refusals, 10 run, and only TWO reach a
+`_move` at all: `decompose` and `return_task`, both in the assigned state. Measured by
+instrumenting `Workflow._move` across every row rather than read off the code. The eight that run
+without moving are NOT "the reading tools", which is what this paragraph said until #1172: four of
+them WRITE — `comment` twice posts a comment, `attach_file` twice uploads a file AND a journal
+line — and four read (`get_task` twice, `download_attachment` twice). What they have in common is
+not that they read but that not one of them touches a bucket. The figures were 12 / 8 / 2 until
+the same card gave `download_attachment` a real attachment: two of those twelve refusals were this
+file's own argument choice rather than a guard's behaviour, and the tool was never exercised at
+all. So the honest claim is WHERE A BACKLOG CARD ENDS UP after one tool call from those two states
+— not every path a card can take through Queue, and not the behaviour of a tool behind a guard
+that refuses from Backlog outright.
+
+#1172 CHANGED THIS SWEEP'S INPUT, so all ten rounds above were RE-RUN rather than assumed to
+hold. Giving `download_attachment` a real attachment adds two rows that RUN and none that MOVE,
+so no count should move — but "should" is the word this repo distrusts. Re-run in a clone with
+the working tree committed inside it, same selection, `__pycache__` cleared and
+`PYTHONDONTWRITEBYTECODE=1` per round, `-q` dropped, rounds read by counting lines beginning
+`FAILED `: control (opening) 0 failed / 0 errors / 5 collected; marker rows 2 failed;
+`file_task`'s stage constant 2 failed; `return_task` retarget 1 failed; `decompose` parent
+retarget 1 failed; `review_task` gate widened 2 failed; ownerless bounce to Build 1 failed;
+`call_human` `_move` above the guards 1 failed; `return_task` dropped from `_OTHER_ARGS` 2 failed;
+both green rounds 0 failed; control (closing) 0 failed / 0 errors / 5 collected. Every figure
+above reproduces to the digit.
 """
 import inspect
 
@@ -77,8 +101,16 @@ from vikunja_mcp import server
 from vikunja_mcp.config import LANGUAGES
 from vikunja_mcp.workflow import STAGES, Workflow, WorkflowError
 
-# Everything besides `task_id` each pointable tool needs to REACH whatever move it makes. Values
-# are the cheapest that get past the argument validation standing in front of the board writes.
+# Everything besides `task_id` each pointable tool needs to REACH whatever move it makes. Most
+# values are the cheapest that get past the argument validation standing in front of the board
+# writes — but READ THE TWO EXCEPTIONS, because "cheapest" was this comment's whole claim until
+# #1172 and it was not true of them. `attach_file` and `download_attachment` are given a REAL
+# temp file and a REAL attachment, so their rows exercise the tool instead of its argument check.
+# `download_attachment` used to be handed a made-up id and refuse on it: two of the sweep's
+# refusals were then the test's own argument choice rather than any guard's behaviour, and the
+# tool itself was never run at all. Measured by instrumenting `Workflow._move` over all 20 rows:
+# with the fabricated id, 12 refusals / 8 run / exactly 2 reaching a `_move`; with a real
+# attachment, 10 refusals / 10 run / still exactly 2 reaching a `_move`.
 #
 # NOT imported from test_done_is_human_only.py, which keeps a map of the same shape, and the
 # reason is the one entry that matters here: that file passes `verdict="approve"`, while the
@@ -96,7 +128,7 @@ _OTHER_ARGS = {
     "get_task": {},
     "comment": {"text": "a note"},
     "attach_file": {"path": None},                    # filled per-call with a real temp file
-    "download_attachment": {"attachment_id": 1},      # no such attachment — the call refuses
+    "download_attachment": {"attachment_id": None},   # filled per-call with a REAL attachment
 }
 
 
@@ -169,7 +201,22 @@ def test_no_tool_pointed_at_a_backlog_card_moves_it_into_queue(tmp_path):
     """HYPOTHESIS 2, closed: "there is a path where the move and the marker disagree". Every
     registered tool that can be aimed at a card is aimed at one sitting in Backlog, and none of
     them may leave it in Queue. That is the step the #1167 diagnosis turns on — a Backlog card
-    found in Queue was moved from OUTSIDE this package — and before this file nothing asked it.
+    found in Queue was moved from OUTSIDE this package.
+
+    WHAT THIS ADDS, said as a delta rather than as a first. Until #1172 this docstring claimed
+    that "before this file nothing asked it", and that is measurably false: `test_workflow_gates.py`
+    pre-exists, is untouched by #1167's commit, and already reddens on the same mutations.
+    Measured on that file ALONE, in a clone, `__pycache__` cleared and `PYTHONDONTWRITEBYTECODE=1`
+    per round, `-q` dropped, rounds read by counting lines beginning `FAILED `: control (opening)
+    0 failed / 0 errors / 102 collected; `file_task`'s `stage = "Queue" if queue else "Backlog"`
+    flipped to a constant -> 2 failed; `decompose`'s PARENT move retargeted Backlog->Queue -> 6
+    failed; control (closing) 0 failed / 0 errors / 102 collected. It also pins the `en` Backlog
+    marker literal outright. Three things are genuinely NEW here and none of them is "asking the
+    question at all": (a) the roster is DERIVED fail-closed from `server._DEFERRED_TOOLS` in both
+    directions, where the pre-existing sweep uses a hand-written tuple — so a newly pointable tool
+    is silently SKIPPED there and reddens here; (b) the `ru` column of the marker property, where
+    the pre-existing test asserts only `en`, and `ru` is exactly the spelling the card observed;
+    (c) the ownership dimension driven systematically over every tool rather than per-test.
 
     Run in BOTH ownership states, because most gates route on ownership first: unassigned (how
     `file_task` leaves a card) and assigned to the caller (how a human's triage leaves one). A
@@ -198,6 +245,11 @@ def test_no_tool_pointed_at_a_backlog_card_moves_it_into_queue(tmp_path):
             kwargs = dict(_OTHER_ARGS[name])
             if name == "attach_file":
                 kwargs["path"] = str(shot)
+            if name == "download_attachment":
+                # a REAL attachment, so this row runs the tool rather than its argument check
+                wf.attach_file(card_id, str(shot))
+                kwargs["attachment_id"] = wf.get_task(card_id)["attachments"][0]["id"]
+                assert api.stage_of(card_id) == "Backlog"
             try:
                 getattr(wf, name)(card_id, **kwargs)
             except WorkflowError:

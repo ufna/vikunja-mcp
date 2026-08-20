@@ -66,8 +66,13 @@ PUT  /api/v1/tasks/1169/comments                      201
 ```
 
 The move into Queue is a different animal. The delay from filing to drag is not a constant and
-not a timer — 33 min for 1166, 19 min for 1167, 7.5 min for 1168, 1 h 53 min for 1169, i.e. the
-pace of a person working through a column. This is 1166, at 09:31:19Z:
+not a timer — 33 min for 1166, 19 min for 1167, 7.5 min for 1168, 1 h 53 min for 1169. That much
+is arithmetic and it holds; the gloss this paragraph carried on top of it — "the pace of a person
+working through a column" — does NOT, and #1172 took it out. There are THREE drag moments here,
+not four: the position calls for 1167 and 1168 are 580 ms apart (10:05:54.182Z and 10:05:54.762Z,
+both listed two paragraphs below), so two of the four "delays" are ONE moment measured from two
+different FILING times, and most of the spread is an artifact of when each card happened to be
+filed rather than of any pace. This is 1166, at 09:31:19Z:
 
 ```
 POST /api/v1/user/token/refresh
@@ -109,13 +114,19 @@ unambiguous by isolation. For 1167 and 1168 both writes land inside the same sec
 and 10:05:54.935) and each is assigned to its card by interleaving order with the two position
 calls that name them. That is an inference, a tight one, and not a reading.
 
-**Diagnosis.** Hypothesis 1 — something moved the card after it was filed — with the mover named:
-a human, triaging Backlog in the web UI. `file_task`'s contract held on all four cards, and the
-triage step the card feared was being skipped is the very thing the log records happening: a
-person opened the board and moved each card by hand. (What is measured is the ACTION, one card at
-a time, from a browser session. Nobody can measure how carefully they read first — but a human
-touching each card individually is exactly what the Backlog contract asks for, and it is more
-than a bypass would leave behind.) And the fourth card is the one that closes it: 1169 was the
+**Diagnosis.** Hypothesis 1 — something moved the card after it was filed — with the mover
+placed: OUTSIDE this package, in a browser session driving the web frontend. `file_task`'s
+contract held on all four cards, and the triage step the card feared was being skipped is the
+very thing the log records happening: each card was moved by hand from the board. (Two limits on
+that sentence, both #1172's. The discriminator separates this PACKAGE from a BROWSER FRONTEND; it
+cannot separate a person's hand from browser automation, and this repo runs the latter routinely
+— `PLAYWRIGHT_MCP_ISOLATED=true` is committed for exactly that reason. A human is the reading and
+it is a good one; it is not the measurement, and "outside `file_task`" is the whole of what the
+diagnosis needs. The second: this entry used to add that "a human touching each card individually
+is exactly what the Backlog contract asks for, and it is more than a bypass would leave behind" —
+that is a VALUE JUDGEMENT stated as a measurement, it is not derivable from a request log, and
+the 580 ms between two of the four drags makes even "individually" the weakest of readings.)
+And the fourth card is the one that closes it: 1169 was the
 orchestrator's own CONTROL for "not everything drifts", still in Backlog after 94 minutes — it
 was dragged at 12:20:16Z like the rest, so the control was never a control, only a card the human
 had not reached yet.
@@ -131,8 +142,16 @@ correction went where the filing agent reads it (`server.file_task`'s docstring)
 halves of the diagnosis that ARE properties of this code are pinned in
 `tests/unit/test_backlog_placement.py`: the marker distinguishes its two destinations in both
 languages, and no registered tool pointed at a Backlog card moves it into Queue — with that
-second pin's reach measured and written into its own docstring, since 12 of the 20 rows it drives
-are refusals and only two reach a move at all. Rewriting the
+second pin's reach measured and written into its own docstring, since 10 of the 20 rows it drives
+are refusals and only two reach a move at all. Read "pinned" as a DELTA and not as a first, which
+is #1172's correction to this paragraph and to that docstring alike: `test_workflow_gates.py`
+pre-exists, is untouched by the #1167 commit, and already reddens on the same mutations —
+measured on that file alone, control 0 failed / 0 errors / 102 collected, `file_task`'s stage
+flipped to a constant -> 2 failed, `decompose`'s parent move retargeted -> 6 failed, closing
+control 0 failed / 0 errors / 102 collected. What the new file adds is a roster DERIVED
+fail-closed from `server._DEFERRED_TOOLS` in both directions rather than hand-written, the `ru`
+column of the marker property (the pre-existing pin reads only `en`, and `ru` is the spelling the
+card observed), and the ownership dimension driven systematically. Rewriting the
 Backlog marker to name its column was considered and dropped: the reader here had already read
 the marker correctly, so a clearer destination would not have helped, and it would have churned
 `cardtext.py`'s two-language table for nothing.

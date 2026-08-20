@@ -713,10 +713,11 @@ def file_task(
     provenance stamp; the column is live state, and the human this tool asks to triage
     moves cards out of Backlog by hand. So a Backlog-marked card sitting in Queue is the
     ORDINARY shape of a card that has been triaged, not a contradiction — on the four
-    cards that raised #1167 the server's own request log named a human in the web UI, four
-    times out of four. Do not read a card's column off its journal. And note what the
-    board cannot tell you: it records no mover, so neither can this tool — that answer
-    came from a log on the server, not from anything here.
+    cards that raised #1167 the server's own request log named the WEB FRONTEND, not this
+    package, four times out of four. Do not read a card's column off its journal. And note
+    what the board cannot tell you: it records no mover, so neither can this tool — that
+    answer came from a log on the server, not from anything here, and even there it reads
+    only as far as "outside this package".
     QUEUE OPT-IN: pass queue=True ONLY when a human explicitly asked you to file this
     task as work to do (their instruction IS the triage — e.g. an answer on a Your Call
     card, or a direct "file a task for X" in chat/comments, in whatever language they
