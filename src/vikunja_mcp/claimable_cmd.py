@@ -188,9 +188,9 @@ opt-out serves humans and other callers.
 
 DO NOT PARSE IT, and do not let it grow a consumer. The key set and the exit-code split on
 stdout are public API; this trail is prose for a human reading a dead process's tail, and its
-shape may change in any release with no hub-side rollout. TWO things GROW it, and only one of
-them has a ceiling. One is api.py's own pagination ceiling — measured against a board
-that never stops paging, one line reached 545 B over 123 requests before `fail/123`. The other
+shape may change in any release with no hub-side rollout. THREE things GROW it, and only one
+of them is bounded OVERALL. One is api.py's own pagination ceiling — measured against a board
+that never stops paging, one line reached 545 B over 123 requests before `fail/123`. The second
 is the BOARD's CONTENT, which has no ceiling at all: next_task issues one
 `GET /tasks/<id>/comments` per foreign non-epic card in Review, BEFORE it checks whether that
 card's verdict is stale (workflow.py, the Review offering loop), so the line grows with the
@@ -199,7 +199,20 @@ carrying: those calls repeat one endpoint, so the elision fires and each extra c
 after the first (measured 11, 3, 3, 3, 3, 3 through the real `_Trail`) — the cheapest step
 there is, not the dearest. "Bounded by pagination" is the wrong thing to remember, and so is
 "a Review-heavy board eats the budget fastest": it eats it slowly and without bound, which is
-the harder failure to see coming. (Several things CUT the line short without bounding how fast
+the harder failure to see coming. THE THIRD ARRIVED WITH #1179 and is the NEIGHBOURS' boards, so
+this enumeration read as complete through FOUR releases while it was not. A free-Queue card whose
+predecessor lives on another project costs a `get_task` for the predecessor plus — for each
+DISTINCT neighbour project — a `kanban_view` and an EXHAUSTIVE `view_tasks` of that project, the
+last being many requests on its own. #1199 is what makes "distinct project" the unit for the two
+BOARD reads: measured on FakeAPI, M free-Queue cards gated on ONE neighbour cost 1, 3 and 5 reads
+of that neighbour's board at M = 1, 3 and 5 before it and exactly 1 at all three after. The
+`get_task` did NOT move and is still one per gated card. Nor is any of it BOUNDED — the number of
+distinct neighbours in one `next_task` is bounded by nothing here, and each of those board reads
+carries api.py's pagination ceiling of its own, which bounds a read and not their number. It is
+plausibly the longest-lived of the three, on a mechanism rather than a measurement: a
+`handoff`-parked card waits until the far card reaches Review or Done, and this command runs once
+per hub poll tick. (Several things CUT the line
+short without bounding how fast
 it grows: a write failure disables it, VIKUNJA_MCP_NO_TRACE never starts it, and the hub's own
 ctx bound kills the process. None of them is a size budget.) A pathological board
 does overflow and the hub does lose the tail again — the compression buys headroom, not a

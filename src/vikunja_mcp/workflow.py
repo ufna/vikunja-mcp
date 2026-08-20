@@ -657,6 +657,7 @@ class Workflow:
     def _unfinished_predecessors(
         self, task_id: int, board: list[dict] | None = None,
         resolve_full: Callable[[], list[dict]] | None = None,
+        foreign_boards: dict[int, dict[int, str] | None] | None = None,
     ) -> list[dict]:
         """Predecessors of `task_id` that are NOT yet ready (still below Review) and so must
         reach Review/Done before this task may be started. A predecessor is any task linked from
@@ -677,7 +678,18 @@ class Workflow:
         light board — never per candidate); the common no-off-board-predecessor path never calls
         it, preserving the #43/#105 single fetch. claim/advance pass the full board and OMIT
         resolve_full, so their verdict is unchanged — this makes next_task agree with them by
-        construction instead of by keeping three bucket-sets in sync by hand."""
+        construction instead of by keeping three bucket-sets in sync by hand.
+
+        foreign_boards (#1199) is the same idea one scope wider, for the NEIGHBOUR boards
+        `_offboard_predecessor` reads. Passed in, the memo belongs to the CALLER and spans every
+        candidate of one next_task; omitted, a fresh one lives for this call alone, which is what
+        claim/advance want — they resolve a single card and have nothing to share. It matters
+        because next_task calls this once per free-Queue candidate, so M cards parked behind one
+        neighbour used to cost M EXHAUSTIVE reads of that neighbour's board (Done included, the
+        very shape #43 removed from our own) on EVERY `vikunja-mcp claimable` poll, for the whole
+        parked lifetime of the cards. The staleness surface does not widen in kind: this is the
+        same within-one-read snapshot the per-candidate memo already accepted, just held for the
+        length of a call that is READ-ONLY BY CONTRACT anyway."""
         base = self._board() if board is None else board
         stage_by_id = {
             t["id"]: (t, bucket["title"])
@@ -685,9 +697,13 @@ class Workflow:
         }
         full_stage_by_id: dict[int, tuple[dict, str]] | None = None
         # project_id -> {task_id: stage} for NEIGHBOUR boards, or None when that board could
-        # not be read. Memoised per call, so N predecessors in one neighbour cost ONE board
-        # read; the common case (no off-board predecessor) never touches it.
-        foreign_boards: dict[int, dict[int, str] | None] = {}
+        # not be read. Memoised for as long as its OWNER lives (#1199): next_task hands in one
+        # dict for the whole call, so M gated candidates on one neighbour cost ONE board read
+        # instead of M; claim/advance hand in nothing and get a per-call dict, which is all a
+        # single-card verdict can use. The common case (no off-board predecessor) never
+        # touches it either way.
+        if foreign_boards is None:
+            foreign_boards = {}
         related = self.api.get_task(task_id).get("related_tasks") or {}
         unfinished: list[dict] = []
         seen: set[int] = set()
@@ -1235,6 +1251,15 @@ class Workflow:
         raw = self._board(require_titles=NEXT_TASK_STAGES)
         board = {b["title"]: (b.get("tasks") or []) for b in raw}
         my_id = self._me()["id"]
+        # ONE neighbour-board memo for the WHOLE call (#1199). Every _unfinished_predecessors
+        # IN THIS METHOD shares it (claim/advance sit lower in the file and deliberately do not —
+        # they resolve one card), so M gated candidates blocked on one sibling project pay ONE
+        # exhaustive read of that project's board per next_task rather than one EACH — and this
+        # is the tool `vikunja-mcp claimable` runs on every hub poll tick, against cards that
+        # stay parked for days. Owned here rather than inside the helper because that helper is
+        # called once per candidate; a memo scoped to it spans predecessors within a candidate
+        # and never candidates within a call, which was exactly the gap.
+        foreign_boards: dict[int, dict[int, str] | None] = {}
 
         mine = self._my_active_tasks(raw)
         # parallel drain: `exclude` names the tasks the CALLER already has a live
@@ -1291,7 +1316,9 @@ class Workflow:
             if len(mine) > 1:
                 active_ids = {t["id"] for _s, t in mine}
                 for _s, t in mine:
-                    for pred in self._unfinished_predecessors(t["id"], board=raw):
+                    for pred in self._unfinished_predecessors(
+                        t["id"], board=raw, foreign_boards=foreign_boards,
+                    ):
                         if pred["id"] in active_ids:
                             rework_first.add(pred["id"])
             offerable.sort(key=lambda st: (
@@ -1553,7 +1580,9 @@ class Workflow:
         # full-board gate backstops the rare Backlog-beyond-page-1 case (never a silent pass).
         gated: list[tuple[dict, list[dict]]] = []
         for t in queue:
-            blockers = self._unfinished_predecessors(t["id"], board=raw, resolve_full=resolve_full)
+            blockers = self._unfinished_predecessors(
+                t["id"], board=raw, resolve_full=resolve_full, foreign_boards=foreign_boards,
+            )
             if not blockers:
                 return with_wip({
                     # "stage" is on EVERY task-bearing result (see the review offer below and
@@ -1590,7 +1619,9 @@ class Workflow:
             # Reuse the ONE board snapshot (raw); the walk is bounded and provably terminating
             # (see _find_predecessor_cycle). A cycle anywhere on the board can NOT suppress a
             # genuinely claimable free task — the loop above already RETURNED it before here.
-            cycle = self._find_predecessor_cycle(gated, raw, resolve_full=resolve_full)
+            cycle = self._find_predecessor_cycle(
+                gated, raw, resolve_full=resolve_full, foreign_boards=foreign_boards,
+            )
             if cycle is not None:
                 return with_wip(self._cycle_signal(cycle, full_board.get("board", raw)))
             return with_wip(self._starving_tail(gated))
@@ -1670,6 +1701,7 @@ class Workflow:
     def _find_predecessor_cycle(
         self, gated: list[tuple[dict, list[dict]]], board: list[dict],
         resolve_full: Callable[[], list[dict]] | None = None,
+        foreign_boards: dict[int, dict[int, str] | None] | None = None,
     ) -> list[int] | None:
         """DFS over UNFINISHED-predecessor edges from the gated Queue candidates; return the ids
         on the first cycle found (a back-edge into the current path), else None. A cycle can only
@@ -1695,7 +1727,8 @@ class Workflow:
             if tid not in preds_cache:
                 preds_cache[tid] = [
                     p["id"] for p in self._unfinished_predecessors(
-                        tid, board=board, resolve_full=resolve_full
+                        tid, board=board, resolve_full=resolve_full,
+                        foreign_boards=foreign_boards,
                     )
                 ]
             return preds_cache[tid]

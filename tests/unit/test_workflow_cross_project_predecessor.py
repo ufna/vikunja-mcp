@@ -419,3 +419,126 @@ def test_finishing_the_predecessor_releases_the_NO_BUCKET_card_and_NOT_the_unrea
     assert "no readable tracker board" in str(exc.value)
     api.update_task(dark["id"], done=True)
     assert wf.claim(b["id"])["claimed"] is True               # only `done` does
+
+
+# --- #1199: what ONE next_task pays for M cards gated on ONE neighbour --------------------
+#
+# The read itself is EXHAUSTIVE (`view_tasks` with no `require_titles`), so it pages the
+# neighbour's unbounded Done — the very shape #43 removed from our own board — and `next_task`
+# is the tool `vikunja-mcp claimable` runs on every hub poll tick, against cards a `handoff`
+# can leave parked for days. Measured on FakeAPI at `048d1f9`, one next_task, M free-Queue
+# cards each blocked on a card in ONE neighbour project:
+#
+#     M=0 -> view_tasks 1 (neighbour 0)   M=1 -> 3 (1)   M=3 -> 5 (3)   M=5 -> 7 (5)
+#
+# The neighbour column is the defect: it tracked M. After the fix the same rows read 1/3/3/3
+# with the neighbour read exactly once. The pins below assert the PROPERTY rather than the new
+# numbers, because the numbers move with every board shape and the property does not.
+#
+# MUTATION SWEEP over them, in a CLONE, `__pycache__` deleted and PYTHONDONTWRITEBYTECODE=1 per
+# round, `vikunja_mcp.__file__` printed per round and resolving inside the clone, selection this
+# file plus `test_workflow_sequence_gate.py`, 90 collected in every round including the control:
+#
+#   control 0 failed   round: memo back to a local of the helper          -> 3 failed
+#   control 0 failed   round: candidate loop passes no memo               -> 3 failed
+#   control 0 failed   round: ONE memo slot shared by every project       -> 1 failed
+#   control 0 failed   round: `claim` shares a memo ACROSS calls          -> 2 failed
+#   control 0 failed   round: narrow the neighbour read to the light set  -> 3 failed
+#
+# The last row kills only the `require_titles is None` half of the first pin, and that is worth
+# knowing precisely: it is a COST mutation here, not a correctness one, because no test in this
+# selection puts a neighbour's Done bucket past one page. What the narrowing really costs was
+# constructed separately and lives in `docs/dossier/workflow.md` — with `page_size + 1` cards in
+# the neighbour's Done and the predecessor last, the exhaustive read claims ALLOWED and the
+# narrowed one REFUSES with "not in any bucket". That is why the read stays exhaustive.
+
+
+def _neighbour_with_m_gated_cards(api, m, project_title="dogiators-backend"):
+    """M free-Queue cards, each blocked on its OWN card in ONE neighbour project's Build."""
+    proj = api.add_project(project_title, buckets=STAGES, identifier="BACK")
+    entry = api.other_projects[proj["id"]]
+    build = next(b for b in entry["buckets"] if b["title"] == "Build")
+    for i in range(m):
+        far = api.create_task(proj["id"], f"far {i}")
+        api.move_task(proj["id"], entry["view"]["id"], build["id"], far["id"])
+        succ = api.add_task(f"succ {i}", "Queue")
+        api.add_relation(succ["id"], far["id"], "blocked")
+    return proj
+
+
+def _count_view_tasks(api):
+    """Record every view_tasks call as (project_id, require_titles). Returns the live list."""
+    seen = []
+    inner = api.view_tasks
+
+    def counted(project_id, view_id, require_titles=None):
+        seen.append((project_id, require_titles))
+        return inner(project_id, view_id, require_titles)
+
+    api.view_tasks = counted
+    return seen
+
+
+@pytest.mark.parametrize("m", [1, 3, 5])
+def test_m_cards_gated_on_one_neighbour_cost_ONE_read_of_that_neighbours_board(env, m):
+    """The property, not the figure. `foreign_boards` is owned by next_task since #1199, so it
+    spans CANDIDATES and not merely the predecessors of one candidate — which is what it did
+    when it was a local of `_unfinished_predecessors`, the method next_task calls once per
+    free-Queue candidate."""
+    api, wf = env
+    proj = _neighbour_with_m_gated_cards(api, m)
+    seen = _count_view_tasks(api)
+    res = wf.next_task()
+    assert res.get("starving") is True, res
+    neighbour = [c for c in seen if c[0] == proj["id"]]
+    assert len(neighbour) == 1, seen
+    # the CONTROL half: the read really is the exhaustive one, so this pin is not vacuously
+    # true of a read that never happens.
+    assert neighbour[0][1] is None, seen
+
+
+def test_two_neighbours_cost_one_read_EACH_so_the_memo_is_per_project_not_a_global_off_switch(
+    env,
+):
+    """The other side of the same pin: memoising per project must not degenerate into reading
+    one board and answering for all of them."""
+    api, wf = env
+    first = _neighbour_with_m_gated_cards(api, 2, project_title="backend")
+    second = _neighbour_with_m_gated_cards(api, 2, project_title="infra")
+    seen = _count_view_tasks(api)
+    assert wf.next_task().get("starving") is True
+    assert len([c for c in seen if c[0] == first["id"]]) == 1, seen
+    assert len([c for c in seen if c[0] == second["id"]]) == 1, seen
+
+
+def test_claim_keeps_a_PER_CALL_memo_so_nothing_is_cached_ACROSS_calls(env):
+    """claim/advance resolve a SINGLE card and hand in no memo, so they get a fresh one per
+    call. Two predecessors of one card on one neighbour still cost one read (that memo always
+    did that); two SEPARATE claims read the board twice, which is the point — nothing is cached
+    across calls.
+
+    That is the half this test can see, and it is not the whole claim. Within ONE `next_task`
+    the staleness WINDOW really does grow, from one candidate to one call — constructed in
+    `docs/dossier/workflow.md`, where a predecessor moving to the neighbour's Review between two
+    candidates is seen before this change and not after. Not a new KIND of staleness (the same
+    trade the per-candidate memo already made), but "widens by nothing" would be false, and this
+    test was named that way in a first draft."""
+    api, wf = env
+    proj = api.add_project("dogiators-backend", buckets=STAGES, identifier="BACK")
+    entry = api.other_projects[proj["id"]]
+    build = next(b for b in entry["buckets"] if b["title"] == "Build")
+    fars = []
+    for title in ("far one", "far two"):
+        far = api.create_task(proj["id"], title)
+        api.move_task(proj["id"], entry["view"]["id"], build["id"], far["id"])
+        fars.append(far)
+    succ = api.add_task("succ", "Queue")
+    for far in fars:
+        api.add_relation(succ["id"], far["id"], "blocked")
+    seen = _count_view_tasks(api)
+    with pytest.raises(WorkflowError):
+        wf.claim(succ["id"])
+    assert len([c for c in seen if c[0] == proj["id"]]) == 1, seen
+    with pytest.raises(WorkflowError):
+        wf.claim(succ["id"])
+    assert len([c for c in seen if c[0] == proj["id"]]) == 2, seen

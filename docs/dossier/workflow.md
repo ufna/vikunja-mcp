@@ -295,9 +295,74 @@ task means deleted (a narrow race — deleting a card takes its relation rows wi
 window is between the successor's relation read and this one); `done` is ready by
 definition; and a predecessor claiming OUR project id while absent from our exhaustive board
 is self-contradictory and keeps the pre-#1179 answer rather than inventing a blocking state
-out of a contradiction. Only what survives that reaches `_foreign_stages`, which is memoised
-per call, so N predecessors in one neighbour cost ONE board read and the common
-no-off-board-predecessor path costs nothing.
+out of a contradiction. Only what survives that reaches `_foreign_stages`, and the common
+no-off-board-predecessor path costs nothing at all.
+
+**THE MEMO'S SCOPE IS THE WHOLE COST, AND IT WAS ONE LEVEL TOO NARROW (#1199).** It used to be a
+local of `_unfinished_predecessors` — "memoised per call, so N predecessors in one neighbour cost
+ONE board read", which is literally true and reads as though it covered `next_task`. It does not:
+`next_task` calls that helper once per free-Queue CANDIDATE, so the memo spanned predecessors
+within a candidate and never candidates within a call. Measured on FakeAPI at `048d1f9`, one
+`next_task`, M free-Queue cards each blocked on a card in ONE neighbour project, with
+`vikunja_mcp.__file__` printed in every round (re-run at `5f26333`, this change's actual base,
+with identical figures — `048d1f9` is the version bump one commit below it):
+
+    M=0 -> view_tasks 1 (of them neighbour 0)      M=3 -> view_tasks 5 (neighbour 3)
+    M=1 -> view_tasks 3 (neighbour 1)              M=5 -> view_tasks 7 (neighbour 5)
+
+The neighbour column tracking M is the defect. The memo is now owned by the CALLER: `next_task`
+hands in ONE dict for the whole call and the same rows come out 1/3/3/3, the neighbour read once
+wherever there is a gated candidate at all (M=0 still reads it zero times); `claim`/`advance`
+hand in nothing, get a per-call dict and are unchanged, which is right — they resolve a single
+card and have nothing to share.
+
+**The staleness surface does not widen in KIND, and saying "not at all" would be false.** Nothing
+is cached ACROSS calls — that half is pinned. But the WINDOW does get longer, from one candidate
+to one call, and that is not a quibble: constructed, two free-Queue candidates on one neighbour
+with the second's predecessor moving to the neighbour's Review immediately after the first
+neighbour read returns (an ordinary shape under a parallel drain), the pre-change tree reads the
+board twice and OFFERS candidate 2, this one reads it once and reports `starving`. That is the
+same trade the per-candidate memo already made, one scope wider, inside a call that is READ-ONLY
+BY CONTRACT — and the card resurfaces on the next tick. It is not a new kind of staleness; it is
+more of the kind already accepted.
+
+**Why it was worth doing at all, since it is a cost and not a wrong answer.** That neighbour read
+is EXHAUSTIVE (`view_tasks` with no `require_titles`), so it pages the neighbour's unbounded Done
+— the very shape #43 removed from our own board — and `next_task` is what `vikunja-mcp claimable`
+runs on every hub poll tick. A `handoff`-parked card is parked precisely until the far card
+reaches Review, which can be days, so before this each parked card cost one exhaustive
+neighbour-board read PER POLL for its whole parked lifetime, in the command whose own dossier
+carries the $105/day dogfood story.
+
+**And the obvious cheaper read is a WRONG ANSWER, which is worth writing down so nobody
+re-derives it.** `require_titles` cannot simply be `NEXT_TASK_STAGES`: a predecessor sitting in
+the neighbour's Done BEYOND THE PAGES that narrowed read would still fetch is absent from the
+returned board, and `_offboard_predecessor` renders it as "not in any bucket" — that is, BLOCKING
+— turning a cheap read into a card that never becomes claimable. That is not a deduction: it was
+CONSTRUCTED on `FakeAPI`, control and round in one script, `vikunja_mcp.__file__` printed. The
+qualifier is load-bearing, and the second shape below is why:
+
+    Done holds page_size + 1 cards, the predecessor LAST
+      CONTROL (exhaustive neighbour read):    claim ALLOWED
+      ROUND   (narrowed to NEXT_TASK_STAGES): claim REFUSED — "… in 'unknown — not in any
+                                              bucket of project 107's board'"
+    Done holds ONE card, the predecessor
+      CONTROL: claim ALLOWED                  ROUND: claim ALLOWED
+
+A narrowed read does not DROP a non-required bucket — `api.py` merges every bucket on every page
+it fetches, and the required set drives only when the paging LOOP stops. So the wrong answer needs
+a Done deep enough to fall outside the pages the required buckets already forced, which is exactly
+the Done #43 exists because of. `FakeAPI` models that truncation as `tasks[:page_size]`, so page
+one is the floor there rather than the rule; the shape of the defect is the same and its threshold
+is the server's, not the fake's"
+
+`done` IS checked before the board read, but that is the task's `done` FLAG and not its bucket:
+a card moved into a Done bucket keeps `done` false, and what releases it is `READY_STAGES`
+matching the bucket TITLE off the very board the cheap read would stop returning. Measured in
+#1190's sweep in this same tree: with the `done` check deleted outright, the Done-bucket test
+still passes and only the flag test fails — control 0 failed, that round 2 failed, 85 collected
+in both. Narrowing the read is therefore a separate design question, not a smaller version of
+this one.
 
 **UNKNOWN IS NOT GONE — the rule the whole card turns on.** Three outcomes cannot establish
 a stage: 403 on the task, 403/404 on the neighbour's board, and a task that is on no bucket

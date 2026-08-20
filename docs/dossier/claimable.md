@@ -58,8 +58,19 @@
   fetch), so TASK FETCHES eat it fastest — NOT a Review-heavy board, whose extra cards repeat
   one endpoint and so cost 3 B each after the first (measured): that one grows the line slowly
   and without bound, which is the harder failure to see coming. Headroom, not a promise — measured against
-  a board that never stops paging, one line reached 545 B over 123 requests. ON BY DEFAULT
-  with a
+  a board that never stops paging, one line reached 545 B over 123 requests.
+  **A THIRD grower arrived with #1179 and went unnamed through FOUR releases** (`b0ce2c6` is in
+  v0.2.332 through v0.2.335, and the "TWO things" enumeration was still in `claimable_cmd.py` in
+  all four): a gated Queue card whose predecessor lives on a NEIGHBOUR project adds a `get_task`,
+  a `kanban_view` and an exhaustive `view_tasks` of that project to the same line. #1199 narrowed
+  the BOARD READS from per gated card to per distinct neighbour project — measured on FakeAPI, M
+  cards gated on one neighbour cost 1/3/5 reads of its board at M = 1/3/5 before and 1 at all
+  three after — which bounds THOSE against the cards and against nothing else. The `get_task` is
+  UNCHANGED and still per gated card (3/9/15 at M = 1/3/5, identical before and after), and it
+  lands on this same line, so the narrowing is real and PARTIAL. Plausibly the longest-lived of
+  the three, though nobody has measured how long a parked card or a Review card actually sits: a
+  `handoff`-parked card waits until the far card reaches Review or Done, and this command runs
+  once per hub poll tick. ON BY DEFAULT with a
   `VIKUNJA_MCP_NO_TRACE=1` opt-out, and on-by-default is settled rather than weighed: a wedge
   is not reproducible on demand, so a flag set IN ADVANCE is only ever set by someone who
   already knows — and the hub could not set it anyway, because it hands its child an
