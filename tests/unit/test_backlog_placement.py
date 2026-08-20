@@ -223,10 +223,32 @@ def test_no_tool_pointed_at_a_backlog_card_moves_it_into_queue(tmp_path):
     flipped to a constant -> 2 failed; `decompose`'s PARENT move retargeted Backlog->Queue -> 6
     failed; control (closing) 0 failed / 0 errors / 102 collected. It also pins the `en` Backlog
     marker literal outright. Three things are genuinely NEW here and none of them is "asking the
-    question at all": (a) the roster is DERIVED fail-closed from `server._DEFERRED_TOOLS` in both
-    directions, where the pre-existing sweep uses a hand-written tuple — so a newly pointable tool
-    is silently SKIPPED there and reddens here; (b) the `ru` column of the marker property, where
-    the pre-existing test asserts only `en`, and `ru` is exactly the spelling the card observed;
+    question at all": (a) the BACKLOG question asked over a DERIVED roster. NEITHER HALF IS NEW
+    ALONE, and #1172 got this clause wrong twice before arriving here — its first landing said
+    the derivation was new, its first rework said the Backlog question was asked nowhere else,
+    and both are false. The pointable-roster derivation
+    pre-exists in `test_done_is_human_only.py`, whose `_pointable_tools()` reads the same
+    `server._DEFERRED_TOOLS` by signature and asserts both directions against its own
+    `_OTHER_ARGS` — the module comment above `_OTHER_ARGS` here says exactly that already, and
+    the docstring contradicting it one screen below is how the second wrong version shipped. And
+    `test_workflow_gates.py` derives `_VERDICT_POLICY`'s roster the same way, over ALL tools
+    rather than the pointable ones. The Backlog question pre-exists too, in
+    `test_the_per_stage_ownerless_exits_state_only_what_the_board_really_does`, which loops its
+    HAND-WRITTEN 8-form `movers` over every stage but Queue, Backlog included, and asserts the
+    only exit anywhere is `review_task(needs_work)` out of Review — ownerless only, which is what
+    (c) below is about. What no other file does is put the two together. Measured under the same
+    discipline in a clone taken for #1172's rework, with one `@_mcp_tool`-decorated
+    `snooze_task(task_id, days=1)` added to `server.py`: on
+    `tests/unit/test_workflow_gates.py`, control 0 failed / 0 errors / 102 collected -> 1 failed
+    / 0 errors / 102 collected, and it is the DERIVED roster that catches it
+    (`test_every_agent_tool_is_graded_for_what_it_does_to_a_stale_verdict`, whose assertion names
+    `['snooze_task']`) while the hand-written `movers` test stays GREEN; on THIS file, control
+    0 failed / 0 errors / 5 collected -> 2 failed / 0 errors / 5 collected. Read those two rows
+    exactly, because they are NOT the new tool being swept: they are the self-check above and a
+    `KeyError` on `_OTHER_ARGS` raised before the tool is ever called. What the derivation buys
+    is that this file goes RED until a human classifies the tool, and sweeps it against Backlog
+    once they do; (b) the `ru` column of the marker property, where the pre-existing test asserts
+    only `en`, and `ru` is exactly the spelling the card observed;
     (c) the ownership dimension driven systematically over every tool rather than per-test.
 
     Run in BOTH ownership states, because most gates route on ownership first: unassigned (how

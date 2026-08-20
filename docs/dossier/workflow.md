@@ -148,10 +148,27 @@ is #1172's correction to this paragraph and to that docstring alike: `test_workf
 pre-exists, is untouched by the #1167 commit, and already reddens on the same mutations —
 measured on that file alone, control 0 failed / 0 errors / 102 collected, `file_task`'s stage
 flipped to a constant -> 2 failed, `decompose`'s parent move retargeted -> 6 failed, closing
-control 0 failed / 0 errors / 102 collected. What the new file adds is a roster DERIVED
-fail-closed from `server._DEFERRED_TOOLS` in both directions rather than hand-written, the `ru`
-column of the marker property (the pre-existing pin reads only `en`, and `ru` is the spelling the
-card observed), and the ownership dimension driven systematically. Rewriting the
+control 0 failed / 0 errors / 102 collected. What the new file adds is the BACKLOG question
+asked over a DERIVED roster, and #1172 needed TWO tries to state even that — its first landing
+claimed the derivation itself was new, its first rework claimed the Backlog question was asked
+nowhere else, and both are false. The pointable-roster derivation pre-exists in
+`tests/unit/test_done_is_human_only.py` (#662), whose `_pointable_tools()` reads the same
+`server._DEFERRED_TOOLS` by signature and asserts both directions; `test_workflow_gates.py`
+derives `_VERDICT_POLICY`'s roster the same way over ALL tools. And the Backlog question
+pre-exists in that file's
+`test_the_per_stage_ownerless_exits_state_only_what_the_board_really_does`, which loops a
+HAND-WRITTEN 8-form `movers` tuple over every stage but Queue, Backlog included — ownerless
+only. Putting the two together is what is new. Measured under the same discipline in a
+clone taken for #1172's rework, with one `@_mcp_tool`-decorated `snooze_task(task_id, days=1)`
+added to `server.py`: `tests/unit/test_workflow_gates.py` goes from control 0 failed / 0 errors /
+102 collected to 1 failed / 0 errors / 102 collected — caught by the DERIVED roster
+(`test_every_agent_tool_is_graded_for_what_it_does_to_a_stale_verdict`, naming `['snooze_task']`)
+while the hand-written `movers` test stays green; the new file goes from control 0 failed /
+0 errors / 5 collected to 2 failed / 0 errors / 5 collected, and those two rows are NOT the tool
+being swept — they are the self-check and a `KeyError` on `_OTHER_ARGS` before the call. What the
+derivation buys is redness until a human classifies the tool, and a sweep once they do. Plus
+the `ru` column of the marker property (the pre-existing pin reads only `en`, and `ru` is the
+spelling the card observed), and the ownership dimension driven systematically. Rewriting the
 Backlog marker to name its column was considered and dropped: the reader here had already read
 the marker correctly, so a clearer destination would not have helped, and it would have churned
 `cardtext.py`'s two-language table for nothing.
