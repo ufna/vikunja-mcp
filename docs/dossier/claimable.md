@@ -246,3 +246,36 @@ the card named: `url`/`token` build the `VikunjaAPI` handed in as `api` and `pro
 `Workflow`'s second positional, so all three already arrive here; `project_name` and
 `worktree_root` are not `Workflow` parameters at all; and
 `enforce_single_wip`/`wip_limit`/`language` were already wired.
+
+## The same rule, one card later — and why it is a gate now (#1179)
+
+The paragraph above is an ENUMERATION, and #1179 is what enumerations do. That card added a fifth
+toml-only key, `siblings`, wired it at `server._build_workflow` and not at
+`claimable_cmd.run_claimable`, leaving BOTH sites' accountings of their asymmetries naming
+exactly one while two keys were absent. Neither sentence went FALSE — each quantifies over
+legitimate/deliberate absences and an accidental omission is not one — which is the whole
+problem: a true sentence that has stopped describing the tree gives no sign of it. Second
+instance of the class in
+two consecutive cards, with the rule already written in four places — CLAUDE.md, both call
+sites, and the section above — and enforced in none.
+
+Nothing about `siblings` was a live defect, and the card is worth reading with that separation
+kept. Measured on `FakeAPI` boards, `classify_next(wf.next_task())` compared EQUAL with
+the registry populated and with it empty — `{"claimable": true, "kind": "queue", ...}` on a
+free-Queue board, `{"claimable": false, "kind": "starving", ...}` on one gated by a predecessor
+living in a neighbour project — while the raw `next_task` payload's `siblings` key DID move,
+which is what says the knob was live and the verdict simply does not read it. Nor is the
+cross-project predecessor gate a reader of the registry: `_offboard_predecessor` resolves a
+blocker off `pred.get("project_id")`, so it answers the same either way. It was wired for
+`language`'s reason — the payload must not lie about a repo that has neighbours — plus the
+construction-site rule.
+
+What the card actually bought is `tests/unit/test_workflow_construction_parity.py`: the two
+keyword sets compared off the syntax tree, equal minus a declared exception list that is itself
+ratcheted, in BOTH directions, with the third site (`workspace_cmd`'s) deliberately outside the
+comparison because it wires no Config keys and never calls `next_task`. Measured against a
+control of 0 failed over the gate plus `tests/unit/test_claimable_cmd.py` (58 collected every
+round): deleting `siblings=cfg.siblings` from `claimable_cmd` -> 1 failed, the new gate ALONE;
+deleting `language=cfg.language` -> 1 failed, again the new gate alone. That pair is the whole
+argument for the file. Deleting `require_review_independence` -> 2 failed, the gate and #1169's
+own end-to-end pin, which is the round that says the selection can move by more than one.

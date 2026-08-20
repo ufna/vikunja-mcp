@@ -260,7 +260,13 @@ def _build_workflow(cfg) -> Workflow:
     # verdict with ZERO drift from the agent's own, and a kwarg present on one side only IS that
     # drift. Between THIS site and claimable_cmd's the one legitimate asymmetry left is
     # `notify_webhook` -> `notifier`: `call_human` alone touches it, and that path calls
-    # `next_task` alone. Full accounting in docs/dossier/claimable.md and config.md.
+    # `next_task` alone. That sentence stopped DESCRIBING the tree within two cards — #1179
+    # wired `siblings` here and not there — without going false, since it quantifies over
+    # LEGITIMATE asymmetries and an accidental omission is not one; it simply left a reader
+    # counting one exception where two keys were absent. Which is why it is no longer prose
+    # alone: the gate comparing the two keyword sets, permitting only what it declares, is
+    # tests/unit/test_workflow_construction_parity.py.
+    # Full accounting in docs/dossier/claimable.md and config.md.
     return Workflow(
         VikunjaAPI(cfg.url, cfg.token), cfg.project_id,
         enforce_single_wip=cfg.enforce_single_wip,

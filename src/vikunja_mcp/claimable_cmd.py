@@ -490,6 +490,13 @@ def run_claimable() -> int:
             # and its flag-absent control. `notify_webhook` -> `notifier` is the one Config key
             # `Workflow` takes that is still deliberately absent here: `call_human` alone touches
             # the notifier, and this path calls `next_task` alone.
+            # THAT SET IS NOW MECHANICAL rather than a sentence: #1179 added a key here and not
+            # there, and this accounting — which counts DELIBERATE absences, so an accidental
+            # one leaves it true and misleading rather than false — stopped describing the tree
+            # the same day. So
+            # tests/unit/test_workflow_construction_parity.py compares the keyword names at the
+            # two sites and treats its own `_DECLARED_ABSENCES` as the WHOLE of the permitted
+            # difference — in both directions, and with a stale declaration a red of its own.
             require_review_independence=cfg.require_review_independence,
             # `language` is emitted by next_task itself — the one call this command makes — so
             # without this line the payload would report a `ru` project as `en`. classify_next
@@ -499,6 +506,15 @@ def run_claimable() -> int:
             # here" and its own second pass refuted it; that retracted wording, and the
             # measurement that killed it, are kept verbatim in docs/dossier/config.md.)
             language=cfg.language,
+            # `siblings` rides in that same next_task payload, so omitting it would report a
+            # repo that HAS neighbours as having none — the `language` case exactly, wired for
+            # the same "the payload must not lie" reason and for the construction-site rule
+            # above. It cannot move the VERDICT: measured, `classify_next(wf.next_task())`
+            # compared EQUAL with the registry populated and with it empty, on a free-Queue
+            # board and on one gated by a cross-project blocker. Nor is it #1169 returning —
+            # the cross-project predecessor gate resolves a blocker off THAT task's own
+            # `project_id`, never off the registry, so the gate reads the same either way.
+            siblings=cfg.siblings,
         )
         verdict = classify_next(wf.next_task())
     except Exception as e:  # noqa: BLE001 — a CLI check: ANY failure is exit 1, never a crash
