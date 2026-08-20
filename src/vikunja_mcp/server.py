@@ -268,6 +268,7 @@ def _build_workflow(cfg) -> Workflow:
         notifier=notifier,
         require_review_independence=cfg.require_review_independence,
         language=cfg.language,
+        siblings=cfg.siblings,
     )
 
 
@@ -755,6 +756,55 @@ def file_task(
         title, description=description, priority=priority,
         related_task_id=related_task_id, project_id=project_id, queue=queue,
     )
+
+
+@_mcp_tool
+@_tool
+def handoff(
+    task_id: int, to: str, title: str, description: str = "", priority: int = 0,
+) -> dict:
+    """Park YOUR active card and file the work it is waiting for onto a NEIGHBOUR project's
+    board. WHEN: mid-task you find that the next step belongs to a DIFFERENT repo — the
+    frontend card needs an endpoint the backend has not built yet. You cannot do that work
+    (wrong repo) and must not silently drop the card.
+    `to` is a sibling NAME from this repo's config (they arrive in every next_task response
+    under `siblings`, e.g. {"backend": 17}) or a bare project id. Unknown name -> refusal
+    that LISTS the configured ones; nothing is changed.
+    WHAT HAPPENS: a new card is created in the NEIGHBOUR's Backlog (never their Queue —
+    their human triages their own board), YOUR card is linked to it as blocked-by, then
+    goes back to Queue unassigned. Your WIP slot frees.
+    YOU DO NOT NEED TO DO ANYTHING ELSE, AND NEITHER DOES A HUMAN: your card is offered
+    again automatically once the filed card reaches Review — the predecessor gate holds it
+    until then. Do NOT keep working the card after a handoff; go take the next one.
+    NOT for a bug you found outside your task (that is file_task), NOT for splitting your
+    own task (decompose), NOT for a card that is simply on the wrong board (transfer_task).
+    The `title` is what the neighbour's human triages: say what THEY need to build, not
+    what you were doing. Echo filed.ref verbatim; never assemble a ref from the id."""
+    return _wf().handoff(
+        task_id, to=to, title=title, description=description, priority=priority,
+    )
+
+
+@_mcp_tool
+@_tool
+def transfer_task(task_id: int, to: str, reason: str) -> dict:
+    """Move a card, with its whole comment history, onto a NEIGHBOUR project's board.
+    WHEN: the card was filed on the WRONG board — it is pure backend work sitting in the
+    frontend project. Nothing stays behind and nothing new is created.
+    NOT for a dependency: if YOUR card needs someone else's work first, that is handoff.
+    `to` takes a sibling name from next_task's `siblings` (or a project id), same as
+    handoff. `reason` is required — it is the only context the people over there will have
+    for a card arriving with a stranger's comment history attached.
+    THE CARD'S REF CHANGES. The target project re-indexes it on arrival (a card moved into
+    a project already holding BACK-2 comes out as BACK-3), so every ref quoted in earlier
+    comments, worklogs or commit messages now names nothing. Use moved.ref from the result
+    from that point on; do NOT reuse the old one and do NOT go back and rewrite refs in
+    comments already written — say plainly that the card moved.
+    The card lands in the target's Backlog, unassigned, with its labels for claim state
+    and review verdicts cleared: a verdict earned on your board does not travel. Relations
+    are kept. Refused for a card in Done (human territory) and for an epic container with
+    children — its children would be left pointing at a parent nobody there can open."""
+    return _wf().transfer_task(task_id, to=to, reason=reason)
 
 
 def main(argv: list[str] | None = None) -> None:

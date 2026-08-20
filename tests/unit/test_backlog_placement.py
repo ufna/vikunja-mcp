@@ -66,9 +66,14 @@ Backlog -> 0 failed: the sweep reads the FINAL column, so a card walked THROUGH 
 again is invisible to it. (ii) The same `call_human` mutation as above, but placed BELOW its
 stage guard instead -> 0 failed. The pair is the sharp one: an identical line is caught at the
 top of the method and invisible four lines down, because from Backlog `call_human` refuses before
-reaching it. What that measures is the sweep's REACH, and the reach is small — of the 20 rows it
-drives (10 pointable tools x 2 ownership states) 10 are refusals, 10 run, and only TWO reach a
-`_move` at all: `decompose` and `return_task`, both in the assigned state. Measured by
+reaching it. What that measures is the sweep's REACH, and the reach is small — of the 24 rows it
+drives (12 pointable tools x 2 ownership states) 14 are refusals, 10 run, and only TWO reach a
+`_move` at all: `decompose` and `return_task`, both in the assigned state. Those figures were
+20 / 10 / 10 / 2 until #1179 added `handoff` and `transfer_task`; RE-MEASURED by the same
+instrumentation rather than adjusted by arithmetic, and the two halves moved differently — the
+run and `_move` counts did not change at all, because both new tools refuse from Backlog in both
+ownership states (`handoff` on its Design/Build stage gate, `transfer_task` on the fail-fast
+resolve of a target board this sweep's Workflow cannot reach, which is BEFORE its first write). Measured by
 instrumenting `Workflow._move` across every row rather than read off the code. The eight that run
 without moving are NOT "the reading tools", which is what this paragraph said until #1172: four of
 them WRITE — `comment` twice posts a comment, `attach_file` twice uploads a file AND a journal
@@ -129,6 +134,12 @@ _OTHER_ARGS = {
     "comment": {"text": "a note"},
     "attach_file": {"path": None},                    # filled per-call with a real temp file
     "download_attachment": {"attachment_id": None},   # filled per-call with a REAL attachment
+    # `to` is a bare project id, not a configured sibling name: the sweep's Workflow carries no
+    # registry, and an id only has to clear _resolve_sibling (positive, not our own) for the row
+    # to reach the guard that actually decides. 999 is registered nowhere, which is what makes
+    # transfer_task's row a fail-fast refusal at the target-board resolve — before any write.
+    "handoff": {"to": 999, "title": "the other half"},
+    "transfer_task": {"to": 999, "reason": "filed on the wrong board"},
 }
 
 

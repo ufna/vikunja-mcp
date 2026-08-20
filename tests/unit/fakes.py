@@ -39,6 +39,9 @@ class FakeAPI:
         self._comments = {}      # task_id -> [{"comment", "author"}]
         self._labels = []
         self.relations = []      # (task_id, other_id, kind)
+        # id -> task dict for cards removed by vanish(): absent from get_task (404) but
+        # still embeddable in another card's related_tasks. See vanish().
+        self._vanished = {}
         self.view_config = None  # последний configure_kanban
         self.shares = []         # (project_id, username, permission)
         # кросс-проектный file_task: реестр ВТОРИЧНЫХ проектов (см. add_project).
@@ -117,6 +120,10 @@ class FakeAPI:
         t = {
             "id": next(self._ids), "title": title, "description": "", "priority": priority,
             "index": idx, "identifier": identifier,
+            # 1:1: every real task read carries the project it belongs to. Without it the
+            # fake made "which board is this predecessor on?" unanswerable, so a gate that
+            # asks was untestable and read as working (#1179).
+            "project_id": self.project["id"],
             "done": False, "assignees": [assignee] if assignee else [],
             "labels": [{"id": next(self._ids), "title": lb} for lb in labels],
         }
@@ -199,7 +206,21 @@ class FakeAPI:
         being less capable."""
         return {**task, "labels": None, "assignees": None, "related_tasks": None}
 
+    def vanish(self, task_id):
+        """Model the RACE that makes `get_task`'s 404 branch reachable at all: the task is
+        gone from GET /tasks/{id} while a relation read taken a moment earlier still embeds
+        it. Deleting a card normally takes its relation rows with it, so a predecessor that
+        is BOTH embedded and absent exists only inside that window — and without this knob
+        the branch is unpinnable, which is how a "gone -> not a blocker" ruling would ship
+        untested."""
+        self._vanished[task_id] = self.tasks.pop(task_id)
+
     def get_task(self, task_id):
+        # 1:1 with the server: an unknown id is a 404, not a KeyError. The fake used to raise
+        # KeyError, which no production `except VikunjaError` can catch — so every "the task
+        # went away under us" branch read as untestable and was written blind.
+        if task_id in self._vanished or task_id not in self.tasks:
+            raise VikunjaError(404, "task does not exist")
         t = self._snapshot(self.tasks[task_id])
         # related_tasks — дикт по kind, выведен из relations "на лету" (не хранится на таске) ->
         # add_relation сразу видно в get_task. Реальная 2.3.0 авто-создаёт ОБРАТНУЮ связь на другой
@@ -209,12 +230,14 @@ class FakeAPI:
         # НЕ полные дикты, а HOLLOW-копии (labels/assignees/nested related_tasks = None), точно как
         # у сервера (см. _related_subdict): кто читает labels связанной задачи, обязан её дофетчить.
         related: dict[str, list[dict]] = {}
+        # `_vanished` counts as embeddable here on purpose — that IS the race vanish() models.
+        embeddable = {**self.tasks, **self._vanished}
         for tid, other_id, kind in self.relations:
-            if tid == task_id and other_id in self.tasks:
-                related.setdefault(kind, []).append(self._related_subdict(self.tasks[other_id]))
-            elif other_id == task_id and tid in self.tasks:
+            if tid == task_id and other_id in embeddable:
+                related.setdefault(kind, []).append(self._related_subdict(embeddable[other_id]))
+            elif other_id == task_id and tid in embeddable:
                 inverse = _INVERSE_RELATION.get(kind, kind)
-                related.setdefault(inverse, []).append(self._related_subdict(self.tasks[tid]))
+                related.setdefault(inverse, []).append(self._related_subdict(embeddable[tid]))
         t["related_tasks"] = related
         # attachments arrive INSIDE the task JSON (tasks:read_one), each {id, task_id,
         # file:{name,mime,size}}. Mirror the real server EXACTLY: a task with NONE reads back
@@ -249,8 +272,22 @@ class FakeAPI:
         return {"errors": None, "success": [att]}
 
     def update_task(self, task_id, **fields):
-        self.tasks[task_id].update(fields)
-        return self._snapshot(self.tasks[task_id])
+        t = self.tasks[task_id]
+        # A project_id change is a MOVE, and real 2.3.0 re-indexes on it: measured on a live
+        # container, FRNT-2 became BACK-3 when it landed in a project already holding BACK-2 —
+        # the target's own counter assigns the next free index, so no collision and the OLD
+        # ref stops resolving. Modelling only the field would make a tool that hands back the
+        # new ref testable against a fake that never changes it.
+        new_project = fields.get("project_id")
+        if new_project is not None and new_project != t.get("project_id"):
+            state = self._project_state(new_project)
+            idx, identifier = self._task_identity(state["project"])
+            fields = {**fields, "index": idx, "identifier": identifier}
+            # ...and it leaves the source board for the target's DEFAULT bucket (measured:
+            # gone from A entirely, sitting in B's first column).
+            self.task_bucket[task_id] = state["buckets"][0]["id"]
+        t.update(fields)
+        return self._snapshot(t)
 
     def create_task(self, project_id, title, description="", priority=0):
         state = self._project_state(project_id)
@@ -258,6 +295,7 @@ class FakeAPI:
         t = {
             "id": next(self._ids), "title": title, "description": description,
             "priority": priority, "index": idx, "identifier": identifier,
+            "project_id": state["project"]["id"],
             "done": False, "assignees": [], "labels": [],
         }
         self.tasks[t["id"]] = t

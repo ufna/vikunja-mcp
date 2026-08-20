@@ -175,6 +175,10 @@ EMPTY = {
     "task": None, "message": "the queue is empty — no work for the agent",
     "wip": {"active": 0, "limit": DEFAULT_WIP_LIMIT, "free": DEFAULT_WIP_LIMIT},
     "language": DEFAULT_LANGUAGE,
+    # #1179: the neighbour registry rides in EVERY payload beside wip/language, empty one
+    # included — a project with no siblings configured says so rather than omitting the key,
+    # so an agent never has to tell "no neighbours" apart from "this build has no such key".
+    "siblings": {},
 }
 
 

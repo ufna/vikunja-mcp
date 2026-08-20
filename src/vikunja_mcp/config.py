@@ -7,7 +7,7 @@ module: the 4-layer precedence, why `wip_limit` is toml-only, and why
 Read it before changing a guard here; CLAUDE.md carries only the rule.
 """
 import tomllib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Mapping
 
@@ -110,6 +110,25 @@ class Config:
     # and is stated as a rule in SKILL.md. A key that localized only our own boilerplate would
     # leave a card with Russian boilerplate around an English spec, which is worse than neither.
     language: str = DEFAULT_LANGUAGE
+    # the OTHER tracker projects this repo may hand work to, as {name: project_id} (#1179).
+    # Committed TEAM POLICY, so repo toml ONLY, never env — same class as wip_limit and for
+    # the same reason: which boards this repo can push work onto is reviewed in a file, not
+    # widened by one machine's environment.
+    #
+    # It is NOT a security boundary and must never be described as one. What decides whether a
+    # cross-project write lands is the scoped token, exactly as it does for `file_task`'s
+    # free-form project_id — which this key deliberately does NOT narrow, because narrowing it
+    # would break every caller for a guard that Vikunja already enforces properly.
+    # What the registry actually buys is DISCOVERABILITY: before it, an agent in
+    # `dogiators-front` had no way to learn that a `dogiators-backend` exists at all, let alone
+    # that it is id 17 — its own toml named neither. So this rides in every next_task payload,
+    # and it gives the neighbour a NAME an agent can type instead of a bare number.
+    #
+    # Read in BOTH directions — name -> id when a tool is called, id -> name when a tool writes
+    # provenance onto a card — which is why load_config refuses two names for one id.
+    # A dict on a frozen dataclass: Config's generated __hash__ would raise on it, but nothing
+    # hashes a Config (checked) and every reader wants a mapping.
+    siblings: dict[str, int] = field(default_factory=dict)
 
 
 def _parse_env_file(path: Path) -> dict[str, str]:
@@ -285,6 +304,52 @@ def load_config(cwd: Path | None = None, environ: Mapping[str, str] | None = Non
             f"are written in is committed team policy, like wip_limit"
         )
 
+    # `repo` ONLY, the same one-source read as language above — see the field's comment on
+    # Config for why this is policy rather than a guard. Every refusal NAMES the offending
+    # entry, because the reader's next act is editing one line of a committed toml.
+    raw_siblings = repo.get("siblings", {})
+    if not isinstance(raw_siblings, dict):
+        raise ConfigError(
+            f"siblings must be a table of name = project_id, got {raw_siblings!r} — write "
+            f"it as `siblings = {{ backend = 17 }}`. A bare id is the plausible typo for a "
+            f"single sibling, and it is refused by SHAPE rather than accepted, because a "
+            f"registry with no names is not one the agent can address."
+        )
+    siblings: dict[str, int] = {}
+    name_by_id: dict[int, str] = {}
+    for raw_name, raw_id in raw_siblings.items():
+        name = str(raw_name).strip()
+        if not name:
+            raise ConfigError(
+                "a siblings entry has a blank name — the name is what an agent types to "
+                "address that neighbour, so every entry must be spellable"
+            )
+        # bool BEFORE int: TOML has real booleans and `int(True)` is 1, a live project id,
+        # so an unguarded `backend = true` would silently address project 1.
+        if isinstance(raw_id, bool) or not isinstance(raw_id, int):
+            raise ConfigError(
+                f"siblings.{name} must be a project id number, got {raw_id!r}"
+            )
+        if raw_id < 1:
+            raise ConfigError(
+                f"siblings.{name} must be a positive project id, got {raw_id} — 0 is no "
+                f"project at all and negative ids are Vikunja pseudo-projects (favorites)"
+            )
+        if raw_id == project_id:
+            raise ConfigError(
+                f"siblings.{name} is this project's OWN id ({raw_id}) — a sibling that is "
+                f"yourself lets `handoff` file a card into your own Backlog and then block "
+                f"the current card on it, a deadlock no gate can break. Remove the entry."
+            )
+        if raw_id in name_by_id:
+            raise ConfigError(
+                f"siblings lists project {raw_id} twice, as {name_by_id[raw_id]!r} and "
+                f"{name!r} — the registry is also read id -> name (a tool writes the "
+                f"neighbour's name onto the card as provenance), so one id needs one name"
+            )
+        name_by_id[raw_id] = name
+        siblings[name] = raw_id
+
     worktree_root = (
         env.get(ENV_WORKTREE_ROOT)
         or repo_env.get(ENV_WORKTREE_ROOT)
@@ -306,4 +371,5 @@ def load_config(cwd: Path | None = None, environ: Mapping[str, str] | None = Non
         wip_limit=wip_limit,
         worktree_root=worktree_root,
         language=language,
+        siblings=siblings,
     )

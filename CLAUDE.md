@@ -32,9 +32,10 @@ Backlog → Queue → Design → Build → Review → [human] → Done
                   Your Call         (+ independent review of EVERY task in Review)
 ```
 
-12 agent tools (`next_task`, `claim`, `get_task`, `comment`, `advance`,
+14 agent tools (`next_task`, `claim`, `get_task`, `comment`, `advance`,
 `call_human`, `return_task`, `decompose`, `file_task`, `review_task`,
-`attach_file`, `download_attachment`); agents can never move a task to Done —
+`attach_file`, `download_attachment`, `handoff`, `transfer_task`); agents can
+never move a task to Done —
 that transition is human-only by design. Gates are guardrails for agents; the
 real security boundary is the scoped API token.
 
@@ -106,11 +107,22 @@ measured shape of both exemptions.
   precedent. It governs the prose the tool authors onto a card (the two-COLUMN table in
   `cardtext.py`, ONE module by rule) and — the larger half — rides in every `next_task` payload
   so the AGENT writes its spec/worklog/review report in the same language. **It NEVER governs a
-  marker.** Two of the ten are literally PARSED — the review offering compares the last
+  marker.** Two of the twelve are literally PARSED — the review offering compares the last
   `startswith("[worklog]")` comment against the last `startswith("[review]")` one — so a
   per-language spelling THERE drops every card written under the other setting out of the
-  offering, silently; the other eight are frozen with them so the vocabulary is not
+  offering, silently; the other ten are frozen with them so the vocabulary is not
   half-translated.
+  **`siblings = { backend = 17 }` is a FIFTH toml-only key, default `{}`** (tracker #1179) — the
+  OTHER tracker projects this repo may hand work to, by name. Same class and same reason as the
+  four above: which boards this repo can push work onto is committed policy, never widened by one
+  machine's env. **It is NOT a gate** — the scoped token still decides what a cross-project write
+  may touch, and `file_task`'s free-form `project_id` is deliberately left un-narrowed by it. What
+  it buys is DISCOVERABILITY, and that is the whole feature: it rides in every `next_task` payload,
+  because an agent in `dogiators-front` had no way to learn a `dogiators-backend` existed at all,
+  let alone that it was id 17 — its own toml named neither. Refused by name: a non-table value, a
+  blank name, a non-int or bool id (TOML `true` would silently address project 1), a non-positive
+  id, THIS project's own id (a self-handoff deadlocks), and two names for one id (the registry is
+  read id->name too, for provenance).
   → **Dossier: `docs/dossier/config.md`**
 - `src/vikunja_mcp/api.py` — REST client. **Vikunja gotchas are codified here: PUT =
   create, POST = FULL-REPLACE update** → every update is read-modify-write; kanban view
@@ -130,6 +142,20 @@ measured shape of both exemptions.
   not just bug fixes — tracker #117: `advance(to='review')` nudges `review_needed` +
   `review_kind` (`'bug'`|`'change'`) for any card WITHOUT the `epic` label, and resets a
   stale verdict). An epic container is the lone exception: its code lives in its children.
+  **A predecessor may live in ANOTHER project, and the gate must resolve it there** (tracker
+  #1179). Vikunja relations are task-to-task and cross projects freely — measured: a card moved
+  between projects kept a `blocked` link to one left behind — but `_unfinished_predecessors`
+  resolved stages against THIS project's board only, so a neighbour's card fell into the
+  "genuinely gone -> not a blocker" branch and the card was released with its blocker untouched.
+  Measured with a same-project control in the same round: control REFUSED/withheld, cross
+  ALLOWED/OFFERED. Off-board predecessors now resolve via `get_task` + that project's board, and
+  **every unresolvable one BLOCKS rather than vanishes** (403, no kanban view, not in any bucket):
+  unknown must never be spelled "gone". `handoff` and `transfer_task` are the two ways a card
+  crosses the boundary — `[handoff]` parks YOUR card in Queue blocked on a new one in the
+  neighbour's Backlog (no `blocked` LABEL: the label suppresses the offer permanently and would
+  defeat the self-clearing resume), `[moved]` carries the card itself over. **Both land in the
+  target's BACKLOG, never its Queue**, and both are shut from Review and Your Call, where
+  something is pending on THIS board.
   **Behavior changes belong here, with a unit test per gate.**
   → **Dossier: `docs/dossier/workflow.md`**
 - `src/vikunja_mcp/server.py` — thin `MCPServer` wiring (the mcp 2.0 SDK; FastMCP is

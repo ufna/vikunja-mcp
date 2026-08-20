@@ -1381,6 +1381,40 @@ unchanged or was found correct on the first try, and what spun was the wordings 
   `git show $rev:path` parses as a parameter modifier rather than as a revision, so per-revision
   counters SILENTLY read as zeros; quote it — `git show "${rev}:path"`.
 
+## Work that belongs to ANOTHER repo (`handoff` / `transfer_task`)
+
+A project may be configured with SIBLINGS — neighbouring tracker projects, each with its own
+repo and its own agent loop. You learn they exist from `next_task`: the response carries
+`siblings`, e.g. `{"backend": 17}`. It is EMPTY for most projects, and then this whole section
+does not apply. You cannot read the repo's toml, so if a neighbour is not in that mapping, it
+does not exist as far as you are concerned — do not guess a project id.
+
+Three tools touch another board, and picking the wrong one loses work. Ask what is true:
+
+- **My card cannot continue until someone else builds something** -> `handoff(task_id,
+  to="backend", title=...)`. It files that work in THEIR Backlog, links your card as blocked-by
+  it, and puts your card back in Queue unassigned. Your WIP slot frees.
+  **Then STOP working this card and take the next one.** Neither you nor a human has to move it
+  back: it is offered again automatically once the filed card reaches Review.
+  The `title` is what THEIR human triages — write what they need to build, not what you were doing.
+- **This card is simply on the wrong board** -> `transfer_task(task_id, to="backend", reason=...)`.
+  The card itself moves, comment history and all; nothing stays behind.
+  **Its ref CHANGES** — the target re-indexes it on arrival (a card landing in a project that
+  already holds `BACK-2` comes out as `BACK-3`), so refs quoted in earlier comments, worklogs and
+  commit messages now name nothing. Quote `moved.ref` from then on, and do NOT rewrite refs in
+  comments already written — say the card moved instead.
+- **I found a bug that is theirs, but my own card is unaffected** -> `file_task(project_id=17)`,
+  exactly as for a finding on your own board. Nothing of yours pauses.
+
+Non-negotiable, and it is the same rule in all three: a card you send lands in the neighbour's
+**Backlog**, never their Queue. Their human triages their own board — an agent from another repo
+does not get to hand their fleet ready-to-claim work. The tools enforce it; do not look for a way
+around it. And a `handoff` is not a way to shed a card you simply find hard: it says "this needs a
+different REPO", and if the work is yours but too big, that is `decompose`.
+
+The `[handoff]` and `[moved]` comment markers record both sides, so a human reading either board
+can see where a card came from and why it paused.
+
 ## Decomposition, review and dead ends — in the reference files
 
 Three phases, each of them needed by not everyone and not always, so they are split out wholesale.

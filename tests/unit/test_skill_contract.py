@@ -238,7 +238,7 @@ def test_comment_markers_the_skill_cites_are_still_emitted():
     they are out of this contract by design (add one here only once the skill starts citing it)."""
     text = _skill_text()
     src = _workflow_src()
-    for marker in ("[review]", "[spec]", "[filed-by-agent]"):
+    for marker in ("[review]", "[spec]", "[filed-by-agent]", "[handoff]", "[moved]"):
         assert marker in src, f"marker {marker!r} is no longer emitted by workflow.py"
         assert marker in text, f"marker {marker!r} is no longer cited in SKILL.md"
 
@@ -3144,7 +3144,10 @@ def _review_sweep(tmp_path, *, mine: bool = True) -> tuple[dict, dict]:
     even where the refusal itself does not."""
     def board():
         api = FakeAPI(buckets=workflow.STAGES)
-        wf = workflow.Workflow(api, project_id=3)
+        # a neighbour project, so the two cross-project tools have somewhere to aim; inert for
+        # every other tool in the table
+        neighbour = api.add_project("neighbour", buckets=workflow.STAGES, identifier="NB")
+        wf = workflow.Workflow(api, project_id=3, siblings={"neighbour": neighbour["id"]})
         card = api.add_task("under review", "Review", assignee=api.me_user if mine else None)
         if not mine:
             api.tasks[card["id"]]["assignees"] = [{"id": 77, "username": "agent-impl"}]
@@ -3170,6 +3173,9 @@ def _review_sweep(tmp_path, *, mine: bool = True) -> tuple[dict, dict]:
         "review_task(needs_work)": lambda wf, c: wf.review_task(
             c["id"], verdict="needs_work", report="вопрос человеку"),
         "file_task": lambda wf, c: wf.file_task("находка", related_task_id=c["id"]),
+        "handoff": lambda wf, c: wf.handoff(c["id"], to="neighbour", title="другая половина"),
+        "transfer_task": lambda wf, c: wf.transfer_task(
+            c["id"], to="neighbour", reason="не та доска"),
         "attach_file": lambda wf, c: wf.attach_file(c["id"], str(probe), note="скрин"),
         # an attachment must EXIST first, or the refusal is "no such attachment" — nothing to do
         # with the stage, and counting it as one would inflate the refusal set by a tool
@@ -3230,14 +3236,16 @@ def test_exactly_ONE_agent_tool_walks_a_card_out_of_Review(tmp_path):
 
     # COVERAGE: every tool the server really exposes is in the table above
     exposed = {fn.__name__ for fn in server._DEFERRED_TOOLS}
-    assert len(exposed) == 12, f"the agent tool surface changed size: {sorted(exposed)}"
+    assert len(exposed) == 14, f"the agent tool surface changed size: {sorted(exposed)}"
     unswept = exposed - {label.split("(")[0] for label in swept}
     assert not unswept, f"agent tools added to the server but not swept from Review: {unswept}"
 
     # THE REFUSAL SET — the number the rulebook quotes, spelled as the tools themselves
     refused = {label.split("(")[0] for label, err in swept.items() if err is not None}
-    assert refused == {"claim", "advance", "call_human", "return_task", "decompose"}, \
-        f"SKILL.md's reviewer bullet quotes exactly these five as refusing from Review: {refused}"
+    assert refused == {
+        "claim", "advance", "call_human", "return_task", "decompose",
+        "handoff", "transfer_task",
+    }, f"SKILL.md's reviewer bullet quotes exactly these seven as refusing from Review: {refused}"
     assert all(swept[form] is not None
                for form in ("advance(to='build')", "advance(to='review')", "advance(to='done')")), \
         "SKILL.md says advance refuses from Review in ALL THREE forms; one of them now passes"
@@ -5409,6 +5417,13 @@ def _bounced_card_tool_forms() -> dict[str, list[tuple[str, dict]]]:
         "decompose": [("decompose", {"task_id": None,
                                      "subtasks": [{"title": "часть A"}, {"title": "часть B"}]})],
         "file_task": [("file_task", {"title": "находка", "related_task_id": None})],
+        # both aim at the neighbour the sweep registers on every board (see below): with no
+        # sibling to aim at they would refuse, and a refusal here reads as "does not move the
+        # card" — which is precisely the false negative this table exists to prevent.
+        "handoff": [("handoff", {"task_id": None, "to": "neighbour",
+                                 "title": "другая половина"})],
+        "transfer_task": [("transfer_task", {"task_id": None, "to": "neighbour",
+                                             "reason": "не та доска"})],
         "attach_file": [("attach_file", {"task_id": None, "path": None, "note": "проба"})],
         "download_attachment": [("download_attachment", {"task_id": None,
                                                          "attachment_id": None})],
@@ -5467,7 +5482,12 @@ def _sweep_card_movers(monkeypatch, tmp_path, assignee: bool = True,
     for fn in server._DEFERRED_TOOLS:
         for label, form in forms[fn.__name__]:
             api = FakeAPI(buckets=workflow.STAGES)
-            wf = workflow.Workflow(api, project_id=3)
+            # every board carries a neighbour so the cross-project forms reach their GATE
+            # rather than a "no such sibling" refusal; inert for every other tool
+            neighbour = api.add_project("neighbour", buckets=workflow.STAGES, identifier="NB")
+            wf = workflow.Workflow(
+                api, project_id=3, siblings={"neighbour": neighbour["id"]},
+            )
             card = api.add_task("починить дренаж", "Review",
                                 assignee=api.me_user if assignee else None)
             if predecessor:
@@ -5534,6 +5554,8 @@ def test_the_needs_work_branch_list_is_MEASURED_not_a_number_somebody_wrote_down
         "call_human": "Your Call",              # the question branch — the reviewer's escalation
         "return_task": "Backlog",               # the external-block branch — `blocked`, no assignee
         "decompose": "Backlog",                 # the split branch — `epic`, children into Queue
+        "handoff": "Queue",                     # the dependency branch — parked, blocked, no assignee
+        "transfer_task": "Backlog",             # the misfile branch — into the NEIGHBOUR's Backlog
     }, (
         f"the set of tools that can move a bounced card off Build changed: {movers}. Every member "
         f"is a branch a needs_work report can be, and «После Review» routes the receiving "
@@ -5550,8 +5572,15 @@ def test_the_needs_work_branch_list_is_MEASURED_not_a_number_somebody_wrote_down
     # ordinary pump, no human required. Still written as a full sweep rather than "claim works":
     # a SECOND mover appearing here would mean an ownerless card can be walked somewhere else
     # before anyone owns it, which is the shape of the bug this replaced.
+    # #1179 adds the second member deliberately, and it does not weaken the shape above:
+    # `transfer_task` requires no ownership BY DESIGN — a card filed on the wrong board is a
+    # misfile anyone can see, exactly as `file_task` needs no ownership — and it does not walk
+    # the card FURTHER DOWN this project's pipeline, it takes it off this board entirely, into
+    # a neighbour's Backlog where their human triages it. The bug this assert guards is an
+    # ownerless card being advanced past a stage nobody owns it through; leaving the board is
+    # the opposite of that. `handoff` is absent because it does require ownership.
     first = _sweep_card_movers(monkeypatch, tmp_path, assignee=False)
-    assert first == {"claim": "Design"}, (
+    assert first == {"claim": "Design", "transfer_task": "Backlog"}, (
         f"the tools that move an ownerless bounced card changed: {first}. Since #705 it lands in "
         f"Queue and `claim` is its way back into the pipeline — an empty result means it is "
         f"stranded again (the #705 bug), and an extra member means something moves a card that "
@@ -5578,7 +5607,8 @@ def test_the_needs_work_branch_list_is_MEASURED_not_a_number_somebody_wrote_down
     # claim about the whole set, so it is re-derived here instead of remembered.
     gated = _sweep_card_movers(monkeypatch, tmp_path, predecessor=True)
     assert gated == {"call_human": "Your Call", "return_task": "Backlog",
-                     "decompose": "Backlog"}, (
+                     "decompose": "Backlog", "handoff": "Queue",
+                     "transfer_task": "Backlog"}, (
         f"an unfinished predecessor no longer costs exactly the defect branch: {gated}. SKILL.md "
         f"tells the implementer the other routes still work and not to start guessing — if the "
         f"gate widened, that advice now strands them"

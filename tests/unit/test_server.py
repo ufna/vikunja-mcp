@@ -21,6 +21,7 @@ def test_exposes_exactly_the_workflow_tools():
         "next_task", "claim", "get_task", "comment",
         "advance", "call_human", "return_task", "decompose", "review_task",
         "file_task", "download_attachment", "attach_file",
+        "handoff", "transfer_task",
     }
 
 
@@ -186,7 +187,8 @@ def test_reload_rebuilds_workflow_with_the_fresh_on_disk_token(monkeypatch):
         # mirrors the real Workflow signature — a kwarg missing here makes _build_workflow
         # raise TypeError, which _reload_workflow_from_disk swallows into a silent False
         lambda api, pid, enforce_single_wip=False, notifier=None, wip_limit=None,
-        require_review_independence=False, language=DEFAULT_LANGUAGE: ("wf", api, pid),
+        require_review_independence=False, language=DEFAULT_LANGUAGE,
+        siblings=None: ("wf", api, pid),
     )
     server._reset_workflow_cache()
     try:
@@ -915,7 +917,7 @@ def test_no_non_mcp_cli_path_imports_the_mcp_sdk():
         assert modules == [], f"{path} imported the MCP SDK: {modules[:5]}... ({len(modules)})"
     # The negative assertions above are only meaningful if the SDK CAN be imported at all:
     assert data["seen"]["touched server.mcp"], "the lazy build imported no SDK — probe is vacuous"
-    assert len(data["tools"]) == 12, data["tools"]
+    assert len(data["tools"]) == 14, data["tools"]
 
 
 def test_the_lazy_server_is_a_single_cached_instance():

@@ -19,10 +19,10 @@ WHAT IS AND IS NOT IN HERE, because the boundary is the whole design and it is n
   card prose.
 * OUT — THE MARKER. Every value below is a body only; the `[claim]` / `[worklog]` / `[attach]`
   bracket stays a literal at its own call site in `workflow.py`. That is not tidiness, it is the
-  wire format. TWO of the ten are literally parsed: `workflow.py` matches rendered comment text
+  wire format. TWO of the twelve are literally parsed: `workflow.py` matches rendered comment text
   with `startswith("[review]")` and `startswith("[worklog]")` — those are its only two reads of
   comment text — so a per-language spelling on either drops every card written under the other
-  setting out of the review offering, silently. The other eight are frozen with them rather than
+  setting out of the review offering, silently. The other ten are frozen with them rather than
   for their own sake: the vocabulary is read by eye and by grep, and half of it translated is
   worse than either half alone. `test_card_language.py` asserts no value here contains a `[` at
   all, so a bracket cannot drift in later.
@@ -119,6 +119,42 @@ _TABLE: dict[str, dict[str, str]] = {
             "все {children} дет(и) эпика достигли Review-или-Done — контейнер собран и готов "
             "к твоему Done (в Done двигает только человек). Если позже отобьёшь ребёнка из "
             "Review — увидишь его в Build и придержишь закрытие."
+        ),
+    },
+    # handoff / transfer_task — a card crossing a project boundary (#1179). The AGENT's half
+    # (the new card's title/description, and transfer_task's `reason`) stays out of this table
+    # as everywhere else; what is here is only the provenance prose the tool itself authors.
+    "handoff_parked": {
+        "en": (
+            "paused: the next step on this card belongs to project id={project_id}, where an "
+            "agent filed #{new_id} for human triage. This card is blocked on that one and "
+            "returns to the queue by itself once it reaches Review"
+        ),
+        "ru": (
+            "пауза: следующий шаг по этой карточке относится к проекту id={project_id}, там "
+            "агент завёл #{new_id} для триажа человеком. Карточка заблокирована на ней и "
+            "вернётся в очередь сама, когда та дойдёт до Review"
+        ),
+    },
+    "handoff_filed": {
+        "en": (
+            "filed by an agent from project id={project_id}, whose task #{blocked_task_id} "
+            "is blocked on this one, for human triage"
+        ),
+        "ru": (
+            "заведено агентом из проекта id={project_id}, чья задача #{blocked_task_id} "
+            "заблокирована на этой, для триажа человеком"
+        ),
+    },
+    "moved_from": {
+        "en": (
+            "moved here from project id={project_id} by an agent, with its comment history; "
+            "it was re-indexed on arrival, so refs quoted in that history are the old ones"
+        ),
+        "ru": (
+            "перенесено сюда из проекта id={project_id} агентом вместе с историей "
+            "комментариев; при переезде карточка переиндексована, поэтому реф'ы в этой "
+            "истории — старые"
         ),
     },
     # _human_size's units, interpolated into the [attach] journal line. Sizes, not prose — but

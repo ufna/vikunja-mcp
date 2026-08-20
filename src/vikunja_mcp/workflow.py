@@ -406,6 +406,7 @@ class Workflow:
         self, api: Any, project_id: int, enforce_single_wip: bool = False,
         notifier: WebhookNotifier | None = None, wip_limit: int | None = None,
         require_review_independence: bool = False, language: str = DEFAULT_LANGUAGE,
+        siblings: dict[str, int] | None = None,
     ):
         # #992: refuse a non-int HERE. Passed a Config (the measured mistake — `Workflow(api,
         # cfg)` instead of `Workflow(api, cfg.project_id)`), the object used to be stored
@@ -453,12 +454,19 @@ class Workflow:
         # this project's cards are written in. It governs the prose THIS tool authors (every
         # `card_text` call below) and, through next_task's payload plus a SKILL.md rule, the
         # spec/worklog/review report the AGENT authors — which is the bulk of a card's text and
-        # is the half no code here can reach. It NEVER governs a marker — and for TWO of the ten
+        # is the half no code here can reach. It NEVER governs a marker — and for TWO of the twelve
         # that is not style but mechanism: next_task's offering branch is the only place in this
         # package that reads comment text, and it does so with startswith("[worklog]") and
         # startswith("[review]"), so a per-language spelling on either drops every card written
         # under the other setting out of the review offering, silently. See cardtext.py.
         self.language = language
+        # committed team policy (#1179), repo toml ONLY like the flags above: {name: project_id}
+        # for the OTHER projects this repo may hand work to (handoff / transfer_task). NOT a
+        # security boundary — the scoped token decides what a cross-project write may touch, and
+        # `file_task`'s free-form project_id is deliberately left un-narrowed by it. What it buys
+        # is that the agent can LEARN a neighbour exists and address it by name; before it, an
+        # agent in dogiators-front had no way to know a dogiators-backend was there at all.
+        self.siblings = dict(siblings or {})
         self._me_cache: dict | None = None
         self._view_cache: dict | None = None
         self._buckets_cache: dict[str, dict] | None = None
@@ -676,6 +684,10 @@ class Workflow:
             for bucket in base for t in (bucket.get("tasks") or [])
         }
         full_stage_by_id: dict[int, tuple[dict, str]] | None = None
+        # project_id -> {task_id: stage} for NEIGHBOUR boards, or None when that board could
+        # not be read. Memoised per call, so N predecessors in one neighbour cost ONE board
+        # read; the common case (no off-board predecessor) never touches it.
+        foreign_boards: dict[int, dict[int, str] | None] = {}
         related = self.api.get_task(task_id).get("related_tasks") or {}
         unfinished: list[dict] = []
         seen: set[int] = set()
@@ -695,6 +707,14 @@ class Workflow:
                             for bucket in resolve_full() for t in (bucket.get("tasks") or [])
                         }
                     found = full_stage_by_id.get(pid)
+                if found is None:
+                    # #1179: absence from OUR board is not deletion either. Vikunja relations are
+                    # task-to-task and cross projects freely (measured: a task moved to another
+                    # project kept its `blocked` link to one left behind), so a predecessor can
+                    # simply live on a NEIGHBOUR's board. Before this, that case fell into the
+                    # "gone" branch below and the gate released the card with its blocker
+                    # untouched — silently, which is the whole defect.
+                    found = self._offboard_predecessor(pid, foreign_boards)
                 if found is None or found[1] in READY_STAGES:
                     continue  # genuinely gone (absent even from the full board) or already ready
                 pred_task, pred_stage = found
@@ -703,6 +723,81 @@ class Workflow:
                     "title": pred_task["title"], "stage": pred_stage,
                 })
         return unfinished
+
+    def _foreign_stages(self, project_id: int) -> dict[int, str] | None:
+        """{task_id: stage} for ANOTHER project's kanban board, or None when it cannot be read.
+
+        Deliberately separate from _board/_view/_bucket and their caches, for the same reason
+        _target_backlog is: those are pinned to self.project_id and feed every hot gate, while
+        this is a rare coordination read. No cache -> no new staleness surface.
+
+        None is "UNKNOWN", never "empty": 403 (the token was never shared this project), 404
+        (no such project) and a board with no kanban view all land here, and the caller turns
+        that into a BLOCKING verdict rather than a passing one. Any other status propagates —
+        a 401 in particular must reach server._tool for the token-reload retry (#140)."""
+        try:
+            view = self.api.kanban_view(project_id)
+            board = self.api.view_tasks(project_id, view["id"])
+        except VikunjaError as exc:
+            if exc.status in (403, 404):
+                return None
+            raise
+        return {
+            t["id"]: bucket["title"]
+            for bucket in board for t in (bucket.get("tasks") or [])
+        }
+
+    def _offboard_predecessor(
+        self, pid: int, foreign_boards: dict[int, dict[int, str] | None],
+    ) -> tuple[dict, str] | None:
+        """Resolve a predecessor that is on no bucket of THIS project's board (#1179).
+
+        Returns (task, stage) when it still BLOCKS, or None when it does not. Every ambiguous
+        outcome returns a blocking pair with the reason spelled into the stage string, because
+        the failure this closes is precisely an unknown being rendered as "gone": noisy beats
+        quiet, and the card's human reads that string in the refusal.
+
+        Three cheap answers come before any board read. A 404 on the task itself means it was
+        deleted between the successor's relation read and this one — a narrow race, since
+        deleting a card takes its relation rows with it — and there "gone" is simply true.
+        `done` is ready by definition. And a predecessor claiming OUR project id while being
+        absent from our exhaustive board is self-contradictory, so it keeps the pre-#1179
+        answer rather than inventing a blocking state out of a contradiction."""
+        try:
+            pred = self.api.get_task(pid)
+        except VikunjaError as exc:
+            if exc.status == 404:
+                return None
+            if exc.status == 403:
+                return (
+                    {"id": pid, "title": f"task {pid}"},
+                    f"unknown — the token got 403 reading task {pid}, so whether it is "
+                    f"finished cannot be established",
+                )
+            raise
+        if pred.get("done"):
+            return None
+        proj = pred.get("project_id")
+        if not isinstance(proj, int) or proj == self.project_id:
+            return None
+        if proj not in foreign_boards:
+            foreign_boards[proj] = self._foreign_stages(proj)
+        stages = foreign_boards[proj]
+        if stages is None:
+            return (
+                pred,
+                f"unknown — project {proj} has no readable tracker board for this token "
+                f"(403/404), so whether it is finished cannot be established",
+            )
+        stage = stages.get(pid)
+        if stage is None:
+            return (
+                pred,
+                f"unknown — not in any bucket of project {proj}'s board",
+            )
+        if stage in READY_STAGES:
+            return None
+        return (pred, f"{stage} (project {proj})")
 
     @staticmethod
     def _assignee_ids(task: dict) -> list[int]:
@@ -1050,6 +1145,13 @@ class Workflow:
             # Here rather than at each return for the same reason `wip` is here: every
             # task-bearing branch and every empty/starving/cycle signal goes through this wrapper.
             result["language"] = self.language
+            # `siblings` rides here for the third time on the same reasoning (#1179): project
+            # policy the agent cannot read off the board. It is the LOAD-BEARING half of the
+            # registry — an agent in dogiators-front had no way to learn a dogiators-backend
+            # existed, let alone that it was id 17, because its own toml named neither. Without
+            # this key `handoff`/`transfer_task` are addressable only by a number nobody can
+            # discover, which is indistinguishable from not shipping them.
+            result["siblings"] = dict(self.siblings)
             return result
 
         offerable = [st for st in mine if st[1]["id"] not in excluded]
@@ -2435,6 +2537,208 @@ class Workflow:
         if related_task_id is not None:
             result["related_to"] = related_task_id
         return result
+
+    def _resolve_sibling(self, to: str | int) -> int:
+        """What an agent typed -> a project id, for `handoff` and `transfer_task` (#1179).
+
+        Accepts a NAME from the repo toml's `siblings` registry, or a bare id for the same
+        free-form addressing `file_task` has always allowed. The registry is not a gate —
+        the scoped token decides what a cross-project write may touch — so a raw id is not
+        refused for being unlisted; what the registry provides is a name to type and, more
+        basically, the knowledge that a neighbour exists. A refusal therefore LISTS the
+        configured names and says which file they come from, because "unknown target" with
+        no inventory is a dead end for an agent that cannot see the toml."""
+        if isinstance(to, bool) or not isinstance(to, (int, str)):
+            raise WorkflowError(
+                f"`to` must be a sibling name or a project id, got {to!r}"
+            )
+        if isinstance(to, int):
+            target = to
+        else:
+            name = to.strip()
+            if name in self.siblings:
+                target = self.siblings[name]
+            elif name.isdigit():
+                target = int(name)
+            else:
+                known = ", ".join(sorted(self.siblings)) or "(none configured)"
+                raise WorkflowError(
+                    f"unknown target {to!r}. Configured siblings: {known}. Names come from "
+                    f"this repo's .vikunja-mcp.toml — `[tracker] siblings = {{ backend = 17 }}` "
+                    f"— which is committed team policy, so a human adds the neighbour there; a "
+                    f"bare project id works too if you have one. Nothing was changed."
+                )
+        if target < 1:
+            raise WorkflowError(
+                f"the target must be a positive Vikunja project id, got {target} (negative "
+                f"ids are pseudo-projects like favorites). Nothing was changed."
+            )
+        if target == self.project_id:
+            raise WorkflowError(
+                f"the target is this project ({target}) — there is nothing to cross. Use "
+                f"file_task for a finding on your own board, or decompose to split this card."
+            )
+        return target
+
+    def handoff(
+        self, task_id: int, to: str | int, title: str,
+        description: str = "", priority: int = 0,
+    ) -> dict:
+        """Park THIS card and file the work it is waiting for onto a NEIGHBOUR's board (#1179).
+
+        The dependency shape: an agent in `dogiators-front` finds that the next step needs an
+        endpoint that does not exist yet. It cannot do that work (wrong repo) and must not
+        silently drop the card, so it files the backend half over there and stands its own
+        card down until that half is ready.
+
+        What makes the pause self-clearing is the `blocked` relation, not a label: the
+        predecessor gate withholds this card while the new one is below Review and offers it
+        again the moment it gets there — no human in the middle. So the card goes back to
+        QUEUE and carries NO `blocked` label. The label means "externally blocked, a human
+        must look" (that is `return_task`), and it suppresses the offer permanently, which
+        would turn an automatic resume into a card nobody ever picks up again.
+
+        The new card lands in the neighbour's BACKLOG, never their Queue: their human triages
+        their own board. Same rule, same reason, as `file_task`'s cross-project branch.
+
+        Ordering is fail-fast throughout — target resolved, stage and ownership checked, and
+        the neighbour's Backlog located, all BEFORE anything is created or moved. A handoff
+        that fails leaves no orphan over there and no parked card over here."""
+        if not (title or "").strip():
+            raise WorkflowError(
+                "a non-empty title is required: it is what the neighbour's human triages, so "
+                "say what THEY need to build, not what you were doing"
+            )
+        target = self._resolve_sibling(to)
+        task, stage = self._find_task(task_id)
+        if stage not in ACTIVE_STAGES:
+            raise WorkflowError(
+                f"handoff works only from Design/Build; task is in {stage}. It stands YOUR "
+                f"active card down — there is nothing to pause from {stage}. To file work "
+                f"for a neighbour without pausing anything, use file_task(project_id=...)."
+            )
+        self._require_mine(task, stage)
+        # fail-fast, the _target_backlog rule: a target the token cannot reach refuses here,
+        # with nothing created and this card untouched.
+        view_id, bucket_id = self._target_backlog(target)
+        created = self.api.create_task(
+            target, title.strip(),
+            description=(description or "").strip(), priority=int(priority or 0),
+        )
+        new_id = created["id"]
+        self.api.move_task(target, view_id, bucket_id, new_id)
+        # THE link. Written on OUR card ("this one is blocked by that one"), which is the
+        # direction PREDECESSOR_RELATION_KINDS reads; Vikunja mirrors the inverse onto theirs.
+        self.api.add_relation(task_id, new_id, "blocked")
+        self.api.add_comment(new_id, "[filed-by-agent] " + card_text(
+            self.language, "handoff_filed",
+            project_id=self.project_id, blocked_task_id=task_id,
+        ))
+        self.api.add_comment(task_id, "[handoff] " + card_text(
+            self.language, "handoff_parked", project_id=target, new_id=new_id,
+        ))
+        # park last: the card only stands down once the thing it waits for actually exists
+        for uid in self._assignee_ids(task):
+            self.api.remove_assignee(task_id, uid)
+        # same family as return_task/decompose (#693): the card leaves the active pipeline, so
+        # any verdict on it is stale. Left standing, the board shows a card parked on a
+        # dependency AND labelled `review-failed`, and nothing says which is the live fact.
+        # The FRESH read, not the board copy (#786) — a verdict written after this call's board
+        # read is exactly the one a stale snapshot cannot see.
+        self._clear_verdict_labels(self.api.get_task(task_id))
+        self._move(task_id, "Queue")
+        return {
+            "filed": {
+                "id": new_id, "ref": self._ref(created),
+                "title": created["title"], "project_id": target, "stage": "Backlog",
+            },
+            "parked": {"id": task_id, "ref": self._ref(task), "stage": "Queue"},
+            "note": (
+                "your card is back in Queue, unassigned, and blocked on the new one — the WIP "
+                "slot is free. Nobody needs to move it back by hand: it is offered again "
+                "automatically once the filed card reaches Review. Do NOT keep working this "
+                "card; pick up the next one."
+            ),
+        }
+
+    def transfer_task(self, task_id: int, to: str | int, reason: str) -> dict:
+        """Move THIS card, history and all, onto a NEIGHBOUR's board (#1179) — the misfile.
+
+        Distinct from `handoff`: nothing stays behind and nothing is created. Use it when the
+        card was filed on the wrong board in the first place, not when your card depends on
+        someone else's work.
+
+        THE REF CHANGES, and callers must not paper over it. Measured on a real 2.3.0: a card
+        moved into a project is re-indexed by the TARGET's own counter (FRNT-2 arrived as
+        BACK-3 in a project already holding BACK-2 — no collision, and the old identifier
+        simply stops naming it). So every ref quoted in an earlier comment, worklog or commit
+        message is dead, and this returns the new one with that said out loud.
+
+        Also measured there: labels, assignees and relations all SURVIVE the move, including
+        a relation whose far end stayed on the source board. Surviving is right for relations
+        and wrong for the other two — the claim is void on a board where nobody claimed it,
+        and a `reviewed` verdict earned under one project's review must not travel — so both
+        are cleared here. Vikunja drops the card into the target's DEFAULT bucket, which is
+        why the explicit move into Backlog is not optional."""
+        if not (reason or "").strip():
+            raise WorkflowError(
+                "state why this card belongs on the other board — it is the only context the "
+                "people over there will have for a card that arrives with someone else's "
+                "comment history attached"
+            )
+        target = self._resolve_sibling(to)
+        task, stage = self._find_task(task_id)          # refuses Done on its own
+        # Review and Your Call are shut, and the two refusals are one idea: a card in either
+        # has something PENDING that belongs to THIS board — a verdict not yet cast, or a
+        # question a human here is being asked. Carrying the card away strands it silently.
+        # Review's closure also keeps #672's invariant intact ("out of Review a card is walked
+        # by exactly ONE agent tool"), which a second mover would quietly falsify. The way out
+        # of Review is review_task(needs_work); the card is then transferred from Build.
+        if stage in ("Review", "Your Call"):
+            raise WorkflowError(
+                f"transfer_task is shut from {stage}: this card has something pending on THIS "
+                f"board — a verdict not yet cast, or a question a human here was asked — and "
+                f"moving it to project {target} would strand that with nobody watching. From "
+                f"Review, send it back with review_task(verdict='needs_work') saying it belongs "
+                f"on another board; whoever picks it up in Build transfers it. Nothing changed."
+            )
+        related = self.api.get_task(task_id).get("related_tasks") or {}
+        if self._has_label(task, LABEL_EPIC) or (related.get("subtask") or []):
+            raise WorkflowError(
+                f"{self._ref(task)} is an epic container: its code lives in its children, and "
+                f"moving the parent alone splits the set across two boards, leaving the "
+                f"children pointing at a parent nobody there can open. Move the children "
+                f"first (or transfer them individually). Nothing was changed."
+            )
+        # fail-fast before the first write, exactly as in handoff/file_task
+        view_id, bucket_id = self._target_backlog(target)
+        source_project = self.project_id
+        self.api.update_task(task_id, project_id=target)
+        # Vikunja parks a moved card in the target's DEFAULT bucket (measured), so Backlog is
+        # reached explicitly rather than assumed.
+        self.api.move_task(target, view_id, bucket_id, task_id)
+        for uid in self._assignee_ids(task):
+            self.api.remove_assignee(task_id, uid)
+        # the claim is void and any verdict was earned elsewhere; `blocked` was about the old
+        # board's situation. Relations are deliberately NOT touched.
+        for label in (LABEL_BLOCKED, LABEL_REVIEWED, LABEL_REVIEW_FAILED, LABEL_EPIC_READY):
+            self._remove_label(task, label)
+        self.api.add_comment(task_id, "[moved] " + card_text(
+            self.language, "moved_from", project_id=source_project,
+        ) + f": {reason.strip()}")
+        moved = self.api.get_task(task_id)
+        return {
+            "moved": {
+                "id": task_id, "ref": self._ref(moved),
+                "project_id": target, "stage": "Backlog",
+            },
+            "note": (
+                f"the card was re-indexed by project {target}, so its ref CHANGED: quote "
+                f"{self._ref(moved)} from now on. The old one no longer names this card — do "
+                f"not reuse it, and do not go back to fix refs in comments already written. "
+                f"It is in their Backlog, unassigned, for their human to triage."
+            ),
+        }
 
     def comment(self, task_id: int, text: str) -> dict:
         if not (text or "").strip():

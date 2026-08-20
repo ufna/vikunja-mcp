@@ -624,7 +624,7 @@ def test_every_tool_forbids_an_unknown_argument_and_publishes_that():
     from vikunja_mcp import server
 
     tools = server._server()._tool_manager._tools
-    assert len(tools) == 12, f"the tool surface moved: {sorted(tools)}"
+    assert len(tools) == 14, f"the tool surface moved: {sorted(tools)}"
     unforbidden = sorted(
         name for name, tool in tools.items()
         if tool.fn_metadata.arg_model.model_config.get("extra") != "forbid"
@@ -789,7 +789,7 @@ def test_a_part_way_forbid_failure_leaves_a_REACHABLE_state(
     s = _ungated_server()
     tools = s._tool_manager._tools
     names = list(tools)
-    assert len(names) == 12, f"the tool surface moved: {sorted(names)}"
+    assert len(names) == 14, f"the tool surface moved: {sorted(names)}"
     finished, target, never_reached = names[1], names[2], names[3]
 
     captured = io.StringIO()

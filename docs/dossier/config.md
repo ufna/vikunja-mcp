@@ -177,3 +177,46 @@ are markers, layout and
 replaced roughly the phrase it fetches, so the count stopped being evidence about the prose. What
 that scan still catches alone is non-ASCII typed straight into an `add_comment` argument, which
 is the shape a new card line takes before anyone thinks about the table.
+
+## `siblings` — the neighbour registry (#1179)
+
+**What created it.** The dogiators setup is two repos on ONE scoped token —
+`fight.dogiators.com-front` against project 4 (`dogiators-front`) and
+`fight.dogiators.com-back` against project 17 (`dogiators-backend`), both children of a
+project 16 the token cannot even read (403 on `/projects/16`, measured). The token was
+never the limitation: it returns BOTH projects from `/projects` and 200s on each. The
+limitation was `project_id: int` in the config plus the fact that **neither toml named the
+other project**, so an agent in front had no way to learn a backend existed, let alone that
+it was 17. `file_task(project_id=…)` had been able to write across the boundary since #125;
+what was missing was any way for the agent to know what to put in that argument.
+
+**Why it is not a gate, said once so it is not re-litigated.** The obvious next thought is
+to narrow `file_task`'s free-form `project_id` to the registry. It is deliberately not
+done. The security boundary here is the scoped token — that is a standing rule of this repo
+and it is the thing Vikunja actually enforces (403 with nothing created, wrapped by
+`_target_backlog` into an actionable refusal). A name list in a committed toml enforces
+nothing an attacker or a confused agent could not step around by passing the id, so calling
+it a guard would be a false statement about what protects the boards. It is an ADDRESS
+BOOK. Narrowing `file_task` on top of it would break every existing caller to buy nothing.
+
+**The refusals, and why each one exists rather than being coerced.** All are `ConfigError`
+naming the offending entry, on the `wip_limit = 0` precedent — the reader's next act is
+editing one line of a committed file, so the message names the line.
+
+- a non-table value (`siblings = 17`) — the plausible typo for a single sibling. Refused by
+  SHAPE: a registry with no names is not one an agent can address.
+- a blank name — the name is what an agent types; unspellable means unusable.
+- a **bool** id, checked BEFORE the int check. TOML has real booleans and `int(True)` is 1,
+  a live project id, so `siblings = { backend = true }` would silently address project 1.
+- a non-positive id — 0 is no project; negative ids are Vikunja pseudo-projects (favorites).
+- **this project's own id.** A self-sibling is not merely useless: `handoff` would file a
+  card into its own project's Backlog and then block the current card on it, and no gate in
+  the package can break that cycle.
+- **two names for one id.** The registry is read in BOTH directions — name→id when a tool is
+  called, id→name when provenance is written onto a card — and the second direction has no
+  answer when two names collide.
+
+**The load-bearing half is `next_task`.** The key rides in every payload beside `wip` and
+`language`, for the same reason those do: it is project policy the agent cannot read off the
+board. Without it the two new tools are addressable only by a number nobody can discover,
+which is indistinguishable from not shipping them.

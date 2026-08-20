@@ -2718,6 +2718,8 @@ _VERDICT_POLICY = {
     "advance":             "CLEARS",   # -> Build and -> Review     (#119)
     "decompose":           "CLEARS",   # -> Backlog as an epic      (#673)
     "return_task":         "CLEARS",   # -> Backlog, unassigned     (#693)
+    "handoff":             "CLEARS",   # -> Queue, blocked on a neighbour's card (#1179)
+    "transfer_task":       "CLEARS",   # -> another project's Backlog           (#1179)
     "call_human":          "KEEPS",    # -> Your Call, still in flight
     "review_task":         "SETS",
     "next_task":           "NO-MOVE",
@@ -2877,6 +2879,29 @@ def test_every_agent_tool_is_graded_for_what_it_does_to_a_stale_verdict(env):
     assert _label_titles(api, big["id"]) == ["epic"], (
         "decompose left a stale verdict beside `epic` — the parent is a container now, and a "
         "verdict on a container is a claim about code it no longer holds"
+    )
+
+    # CLEARS, route 5 — `handoff`: the card leaves the active pipeline to wait on another
+    # project's card. Same shape as return_task above, and driven for the same reason.
+    neighbour = api.add_project("neighbour", buckets=STAGES, identifier="NB")
+    cross = Workflow(api, project_id=3, siblings={"neighbour": neighbour["id"]})
+    waiting = api.add_task("needs the other repo", "Build", assignee=api.me_user)
+    api.tasks[waiting["id"]]["labels"].append({"id": 907, "title": "review-failed"})
+    cross.handoff(waiting["id"], to="neighbour", title="the other half")
+    assert api.stage_of(waiting["id"]) == "Queue"
+    assert _label_titles(api, waiting["id"]) == [], (
+        "handoff parked a card in Queue still carrying a verdict — the board would show it "
+        "waiting on a dependency AND review-failed, with nothing to say which is live"
+    )
+
+    # CLEARS, route 6 — `transfer_task`: the card lands on a board where that verdict was
+    # never earned, so it must not travel with it.
+    misfiled = api.add_task("wrong board", "Build", assignee=api.me_user)
+    api.tasks[misfiled["id"]]["labels"].append({"id": 908, "title": "reviewed"})
+    cross.transfer_task(misfiled["id"], to="neighbour", reason="belongs over there")
+    assert api.stage_of(misfiled["id"]) == "Backlog"
+    assert _label_titles(api, misfiled["id"]) == [], (
+        "transfer_task carried a verdict onto another project's board, where nobody cast it"
     )
 
     # KEEPS — asserted positively, so "clear everywhere" cannot pass by accident.

@@ -140,16 +140,17 @@
   in the process (what was said was "both ways out above", and `decompose` was never among
   them) — the reviewer simply acquired a route this text was silent about, and that was
   enough. And "how many tools refuse" is a question with no ONE answer at all: a sweep of
-  all 12 agent tools on a card in Review gives FIVE (`claim`, `advance` in all three forms,
-  `call_human`, `return_task`, `decompose`), but `claim` and `advance` are not doors for the
+  all 14 agent tools on a card in Review gives SEVEN (`claim`, `advance` in all three forms,
+  `call_human`, `return_task`, `decompose`, `handoff`, `transfer_task`), but `claim` and
+  `advance` are not doors for the
   reviewer, so "three" is a narrowing too, just one nobody has spelled out. Hold on, instead
   of a counter, to the measured ONE, which the new gate does not make stale: EXACTLY ONE
   agent tool walks a card out of Review —
   `review_task(verdict='needs_work')`; `approve` does not move it at all, and every other
-  tool either refuses or leaves the card where it is. (Both numbers, FIVE and EXACTLY ONE,
+  tool either refuses or leaves the card where it is. (Both numbers, SEVEN and EXACTLY ONE,
   are held by `test_exactly_ONE_agent_tool_walks_a_card_out_of_Review` — they will not go
   stale silently; that is why they are written here. Under multi-identity the card is not
-  yours either — no need to claim it, and there are still five refusals: only their reasons
+  yours either — no need to claim it, and there are still seven refusals: only their reasons
   change.)
   You need a decision from the human in the middle of a review — the question goes into
   `review_task(task_id, verdict='needs_work', report=<the question>)`: the card goes back to
@@ -194,8 +195,9 @@
     that is you. It comes out that way because NOT ONE other agent tool walks a card out of
     Review (ALL agent tools were swept on a card in Review — every `to=` form of `advance`,
     every verdict of `review_task`: exactly one moved it, `review_task(needs_work)`;
-    `call_human`, `return_task` and `decompose` refused on the stage gate — as did `claim`
-    and `advance`, see the reviewer's bullet about FIVE refusals), so the reviewer is forced
+    `call_human`, `return_task`, `decompose`, `handoff` and `transfer_task` refused on the
+    stage gate — as did `claim` and `advance`, see the reviewer's bullet about SEVEN
+    refusals), so the reviewer is forced
     to dress everything the OWNER has to do from Build as that same verdict. What can be
     behind a bounce is below; the list is NOT promised to be closed, and the last item is
     precisely about that:
@@ -206,6 +208,14 @@
       for;
     - **"this needs splitting"** — `decompose` from Build (see "Decomposition and filing
       findings");
+    - **"this belongs to another repo"** — two shapes, and they are NOT the same call (see
+      "Work that belongs to ANOTHER repo"). If the CARD is on the wrong board, `transfer_task`
+      from Build moves it into that project's **Backlog**, and its ref CHANGES — quote the new
+      one from then on. If the card is yours but cannot continue until a neighbour builds
+      something, `handoff` from Build files that half in their Backlog and parks yours in
+      **Queue**, unassigned and blocked on it; nobody has to move it back, it is offered again
+      by itself once the filed card reaches Review. Both refuse from Review, so a reviewer who
+      spots either dresses it as this same `needs_work` report;
     - **"it has lost its point" / an external blocker** — `return_task` from Build (see
       "Stuck? The way out depends on your ROLE"): the card goes to **Backlog** with the
       `blocked` label and WITHOUT an assignee, for the human to re-triage. A reviewer who

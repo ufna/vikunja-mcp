@@ -244,3 +244,95 @@ descriptions, which the MCP SDK ships to the agent — unlike `workflow.py`'s do
 human reads in the source and which this gate deliberately exempts. Both are filed as
 VMCP-296 (1170) rather than fixed here, because whether a Russian EXAMPLE inside an English tool
 description is a leftover or an illustration that the value is free-form is a triage question.
+
+## A predecessor in another project (#1179)
+
+**The defect, and how it was measured.** `_unfinished_predecessors` built `stage_by_id` from
+THIS project's board and treated anything missing from it as deleted —
+`continue  # genuinely gone (absent even from the full board)`. #126 had already hardened
+that ruling against one false positive (a card sitting in an unpaged Backlog/Your Call/Done
+bucket, disambiguated via the memoised `resolve_full`), but both boards it consults are the
+OWN project's. Vikunja relations are task-to-task and cross projects freely, so a card can
+legitimately be blocked by a card on another board, and that case fell into the "gone"
+branch.
+
+Measured on `FakeAPI` with a same-project CONTROL in the same round, before any fix, with
+`vikunja_mcp.__file__` printed in each round to prove the tree under test:
+
+    control (blocker in Build, SAME project):     claim REFUSED, next_task withheld
+    round   (blocker in Build, SIBLING project):  claim ALLOWED, next_task OFFERED
+
+The control refusing is what says the probe measured anything. After the fix the same probe
+prints REFUSED/withheld for both rows.
+
+**Why this was worth fixing rather than documenting.** The cross-project `blocked` relation
+was already CREATABLE before the fix — verified against a real 2.3.0, where a task moved
+between projects kept its `blocked` link to a task left behind in the source. So the gate
+was not merely unaware of a hypothetical shape; it silently ignored a link the server
+happily stores, and would have made `handoff` a lie: a card parked "blocked on" a neighbour
+would have been offered again immediately, with its blocker untouched.
+
+**The resolution order, cheapest first.** Off-board predecessors go through
+`_offboard_predecessor`, which answers without a board read wherever it can: a 404 on the
+task means deleted (a narrow race — deleting a card takes its relation rows with it, so the
+window is between the successor's relation read and this one); `done` is ready by
+definition; and a predecessor claiming OUR project id while absent from our exhaustive board
+is self-contradictory and keeps the pre-#1179 answer rather than inventing a blocking state
+out of a contradiction. Only what survives that reaches `_foreign_stages`, which is memoised
+per call, so N predecessors in one neighbour cost ONE board read and the common
+no-off-board-predecessor path costs nothing.
+
+**UNKNOWN IS NOT GONE — the rule the whole card turns on.** Three outcomes cannot establish
+a stage: 403 on the task, 403/404 on the neighbour's board, and a task that is on no bucket
+of it. All three return a BLOCKING pair with the reason spelled into the stage string, which
+the refusal then shows the human (`… in 'unknown — the token cannot read project 107's board
+(403)…'`). Fail-closed is the whole point: rendering an unknown as "gone" is the defect this
+card exists to remove, and re-introducing it one level down would be worse, because there it
+would look like a considered decision.
+
+## `handoff` / `transfer_task` (#1179)
+
+**Two tools, because there are two questions.** `handoff` is the DEPENDENCY ("my card cannot
+continue until another repo builds something") — a new card over there, this one parked and
+blocked on it. `transfer_task` is the MISFILE ("this card is on the wrong board") — the card
+itself moves and nothing stays behind. Collapsing them loses one of the answers.
+
+**Why the parked card goes to Queue and carries NO `blocked` label.** The obvious move is to
+mirror `return_task`: Backlog plus the `blocked` label. It is wrong here, and measurably so
+— `blocked` means "externally blocked, a human must look" and next_task does not offer such
+a card, so the pause would never end without a human. What ends it instead is the relation
+itself: the (now fixed) predecessor gate withholds the card while the blocker is below
+Review and offers it the moment it gets there. Queue plus a relation is self-clearing; the
+label would defeat exactly that.
+
+**What the real 2.3.0 does on a move, all measured on a throwaway container.** There is no
+dedicated endpoint — `/tasks/{id}` has only `get/post/delete` — but `project_id` is not
+`readOnly` in `models.Task`, and `POST /tasks/{id}` with it changed returns 200 and moves
+the card. Then:
+
+- **the card is RE-INDEXED and its identifier CHANGES**: `FRNT-2` arrived as `BACK-3` in a
+  project already holding `BACK-2`. No collision — the target's own counter assigns the next
+  free index, and the next new card there came out `BACK-4`. So every ref quoted in an
+  earlier comment, worklog or commit message is dead, which is why `transfer_task` returns
+  the new ref and says so in its `note` rather than leaving the agent to discover it.
+- **labels, assignees and relations all SURVIVE**, including a relation whose far end stayed
+  on the source board. Surviving is right for relations and wrong for the other two, so the
+  tool clears assignees and the claim/verdict labels itself.
+- **it lands in the target's DEFAULT bucket** and disappears from the source board entirely,
+  which is why the explicit `move_task` into Backlog is not optional.
+
+**Shut from Review and Your Call.** Both stages hold something PENDING that belongs to this
+board — a verdict not yet cast, a question a human here was asked — and carrying the card
+away strands it with nobody watching. Closing Review also keeps #672's invariant intact
+("out of Review a card is walked by exactly ONE agent tool"), which a second mover would
+have quietly falsified; `tests/unit/test_skill_contract.py` reddened on exactly that during
+this card, which is how the gate came to be written.
+
+**What the contract tests forced, and it is worth recording as a pattern.** Three separate
+pins in `test_skill_contract.py` had to be re-derived rather than edited to agree: the
+Review sweep (both new tools refuse — the refusal set went from five to seven), the bounced
+card sweep (both MOVE a card in Build, so «After Review» has to route them by name), and the
+ownerless-card sweep (`transfer_task` moves an unowned card, deliberately — a misfile needs
+no ownership, exactly as `file_task` does not). None of those were anticipated when the
+tools were written; each was surfaced by a test that re-derives its universe instead of
+remembering it.

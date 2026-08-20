@@ -291,12 +291,19 @@ _WORKFLOW = pathlib.Path(__file__).resolve().parents[2] / "src/vikunja_mcp/workf
 _CARDTEXT = pathlib.Path(__file__).resolve().parents[2] / "src/vikunja_mcp/cardtext.py"
 
 # The vocabulary, spelled out so an accidental DELETION of a marker is as red as a bad rename.
-# This is the WHOLE set as of #1164, not a chosen subset: the derived scan in the first test
-# finds exactly these ten distinct bracket tokens and nothing else. Verdict suffixes
+# This is the WHOLE set as of #1179, not a chosen subset: the derived scan in the first test
+# finds exactly these twelve distinct bracket tokens and nothing else. Verdict suffixes
 # (`[review] APPROVE`) are not separate markers and live in test_formatting.py's escaping pin.
+#
+# The derived scan asserts _MARKERS is a SUBSET of what it finds, never the reverse — so a NEW
+# marker is ASCII-checked automatically but is NOT protected from deletion until it is written
+# here. #1179 added two and hit exactly that: both markers shipped, both were scanned, and the
+# contract stayed green while neither was in this tuple. Adding a marker means adding it here
+# in the same commit, and the driver in test_card_language.py must then emit it.
 _MARKERS = (
     "[claim]", "[spec]", "[worklog]", "[review]", "[needs-human]",
     "[blocked]", "[decompose]", "[filed-by-agent]", "[attach]", "[epic-ready]",
+    "[handoff]", "[moved]",
 )
 
 

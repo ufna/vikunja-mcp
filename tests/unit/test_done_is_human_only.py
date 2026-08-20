@@ -78,6 +78,12 @@ _OTHER_ARGS = {
     "comment": {"text": "a note"},
     "attach_file": {"path": None},              # filled per-call with a real temp file
     "download_attachment": {"attachment_id": None},   # filled per-call with a real attachment
+    # `to` is a bare project id rather than a configured sibling name deliberately: this
+    # Workflow has no registry, and an id only has to survive _resolve_sibling (positive, not
+    # our own) to reach the Done decision, which _find_task makes BEFORE the target board is
+    # ever touched. Both are mutating, so neither belongs in _READING_TOOLS.
+    "handoff": {"to": 999, "title": "the other half"},
+    "transfer_task": {"to": 999, "reason": "filed on the wrong board"},
 }
 
 

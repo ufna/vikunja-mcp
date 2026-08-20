@@ -91,6 +91,16 @@ def drive_every_comment_site(api, wf, tmp_path):
     neighbour = api.add_project("neighbour", buckets=STAGES)
     wf.file_task("a cross-project finding", project_id=neighbour["id"])
 
+    # a card crossing a project boundary, both shapes (#1179): handoff writes [handoff] here
+    # and [filed-by-agent] over there, transfer_task writes [moved] on the card it moves.
+    handing_off = api.add_task("needs the other repo", "Build", assignee=api.me_user)
+    cross = Workflow(
+        api, project_id=3, language=wf.language, siblings={"neighbour": neighbour["id"]},
+    )
+    cross.handoff(handing_off["id"], to="neighbour", title="the other half")   # [handoff]
+    misfiled = api.add_task("wrong board", "Build", assignee=api.me_user)
+    cross.transfer_task(misfiled["id"], to="neighbour", reason="belongs there")  # [moved]
+
     with_attachment = api.add_task("with an attachment", "Build", assignee=api.me_user)
     blob = tmp_path / "blob.bin"
     blob.write_bytes(b"x" * 2048)
