@@ -435,3 +435,148 @@
   since `payload["code"]` would then pass every test and `KeyError` in production. On create the
   EXIT CODE is the whole machine-readable verdict, and SKILL.md tells agents to branch on that
   split, so blurring it costs more than the uniformity buys.
+
+## VMCP-300 (#1183) — `--gc` DEFERRED three trees and said so NOWHERE, and the silence was the defect
+
+**The observation, and it is not the diagnosis.** On a live drain FOUR worktrees existed and all
+four were registered in `.git/worktrees` (`ls` printed them): three review ones — `review-1170`,
+`review-1171`, `review-1172` — plus one legitimately live build tree, `task-1179`. All three review
+cards had LEFT Review (two moved to Done by the human, one moved to Build by a `needs_work`
+verdict), and `vikunja-mcp workspace --gc` answered `{"released": [], "kept": [],
+"expected": []}` — three empty lists, nothing removed, nothing reported anywhere. An explicit
+`workspace --release <id> --role review` then removed each one cleanly, so this was not a
+protective refusal that failed to be reported.
+
+**REPRODUCED FIRST, on a constructed stand, before one line was changed** — this file exists
+largely because that step keeps being skipped here. Real git in `tmp_path` plus a `FakeAPI` board
+(the workspace suite's own `repo`/`tracker` fixtures): three review trees made with
+`ensure_workspace(id, role="review", at=head)` for cards taken to Review and then moved out of it
+by both real routes (a human's move to Done; `review_task(verdict='needs_work')`), plus one
+legitimately live build tree. One sweep answered, verbatim, `{'released': [], 'kept': [],
+'expected': []}` with all three trees intact — byte-identical to the live observation.
+
+**THE CARD'S OWN HYPOTHESIS IS REFUTED, and it was labelled a hypothesis.** It proposed that
+`--gc`'s liveness pass may not consider review trees at all. It does: `_read_liveness` builds
+`alive["review"]` from `Workflow.review_task_ids`, and on the stand `wf.review_task_ids() == []`,
+i.e. the board correctly read all three as dead. Recorded because the plausible-and-wrong diagnosis
+is the expensive one here — acting on it would have touched the role-keyed liveness that
+`test_gc_keeps_a_quiesced_review_tree_only_because_its_card_is_in_review` was built to defend.
+
+**THE CAUSE is VMCP-71's grace window, reached one branch later.** A tree that is dead by the board
+but whose `_last_activity` is younger than `_REAP_GRACE_SECONDS` (30 min) was `continue`d — and
+that skip put it in NEITHER list, deliberately and for a reason that was sound as far as it went
+(`kept` means "a human should look"; a merely-young tree is not that; #516 had already had to cure
+a never-empty `kept`). What makes it bite on the REVIEW side is a property of the WINDOW and not of
+liveness, and the MODULE already carried it (this file did not — checked at `HEAD`, the pre-card
+dossier holds no mention of VMCP-84, the window, or a young tree): the note above
+`_REAP_GRACE_SECONDS` in `workspace_cmd.py` measured
+that a read-only reviewer moves neither marker `_last_activity` looks at, so for a review tree the
+window runs FROM CREATION. **A review tree therefore reads young from birth** — the exception is
+an all-FUTURE set of markers, which the `0 <=` bound refuses to honour — and the three on the real
+machine had been created minutes before the sweep. On the stand each read as quiet for a second or
+so against a 1800 s window; the figures are run-local, so what the test asserts is the PROPERTY
+(`0 <= quiet_for_seconds < _REAP_GRACE_SECONDS`) rather than any of them.
+
+**THE CONTROL, in the same round.** Age every marker past the window and the IDENTICAL sweep reaps
+all three (`released` names them; nothing left on disk). So for these trees the reap was POSTPONED,
+never cancelled, while the card's other half ("nothing on the board would ever say so") was exactly
+true. That matters because a reader who thinks the trees were leaking reaches for the tempting fix,
+which is shortening or waiving the window for review trees.
+
+**BUT DO NOT PROMOTE THAT CONTROL INTO "REVIEW TREES NEVER ACCUMULATE" — one round of this card
+did, and its own second pass refuted it by construction.** The control measured a CLEAN review
+tree. A review tree holding an IN-TREE COMMIT is a different shape and it accumulates for real:
+measured on the same stand, three consecutive sweeps past the window each answered
+`expected: [(id, "unreachable-head")]` with the directory still on disk, and one holding a stray
+untracked file answers `kept: [(id, "dirty")]` the same way. Neither is new and neither is a defect
+— `references/drain.md` already says such a tree "stays forever" and that its record grades into
+the do-not-look list — but it means the card's accumulation sentence is TRUE for those shapes and
+false only for the clean one. The distinction is not cosmetic: it is the difference between "the
+window deferred it" (expires by itself) and "a release guard refuses it" (does not), which is
+exactly the line `deferred` was added to draw.
+
+**WHAT WAS FIXED: the silence, and nothing else.** `--gc` gained an OPTIONAL fourth key,
+`deferred`, present only when non-empty — the `main_checkout` idiom, so "present ⇒ read it". Each
+entry names a tree that IS ours, IS dead by the board, and that the sweep chose not to INSPECT:
+`{released: false, task_id, role, path, code, quiet_for_seconds, reason}`. `deferred` is to a SKIP
+what `expected` is to a REFUSAL — reported, no action, expires by itself.
+
+Why a new key and not a new member of an existing list, since both were considered:
+
+- `kept` is out because its VMCP-68 promise is "empty means nothing to read", and a deferral
+  arrives on every tick for up to half an hour per tree, and the number of trees is NOT bounded by
+  `wip_limit` — a review tree takes no slot at all, so the worst case is higher than the limit. That
+  is precisely #516's never-read-signal disease, and reintroducing it would end with the next human
+  turning the guard off — the same price that made HOLDING on unrecognised ignored content a NO.
+- `expected` is out by a boundary this module had already written down: it is for a refusal that
+  WAS made and is routine, never for a tree gc declined to inspect. A deferral reaches no guard, so
+  there is no verdict to grade.
+- Optionality does LESS than it looks: it keeps a QUIET tick clean and nothing more — under a
+  parallel drain `deferred` will be present on most busy ticks. What actually keeps it out of
+  #516's disease is the bullet above — it is a separate key that is explicitly no-action, rather
+  than a member of the list a human is told to read in full.
+
+**THE CODE IS `DEFER_YOUNG`, DELIBERATELY NOT A `CODE_*`.** That prefix is the CLOSED vocabulary
+`_keep_is_expected` grades cell by cell, so a new member there reddens the pins that ENUMERATE it
+until it is graded — right for a refusal, wrong for something that never reaches the grader. How
+many pins is TWO — the grading grid and the policy-comment enumeration — against the "three
+separate ways" the neighbouring `MAIN_SYNC_*` note claims. Two independent readings, and they
+agree. STRUCTURAL, checked here: exactly three tests enumerate `CODE_*` via
+`startswith("CODE_")`, and one of them only asserts DISJOINTNESS with another prefix, which a new
+`CODE_*` cannot violate. MEASURED, by this card's second independent pass on its own clone: one
+bare ungraded `CODE_ZZ`, selection `tests/unit`, 1321 collected — control 0 failed; mutation 2
+failed. The inherited number is corrected HERE rather than edited out of the note that landed with
+it; what it does not change is the conclusion, which holds at two.
+Same reasoning, same shape as `MAIN_SYNC_*`, and pinned the same way by
+`test_defer_codes_are_not_part_of_the_graded_worktree_vocabulary` (names AND values, since the
+grader keys on values).
+
+**THE SAFETY INVARIANT IS UNTOUCHED, BY CONSTRUCTION AND NOT BY CARE.** Push OK → remove, push FAIL
+→ KEEP. The branch this card changed did nothing to the tree before and does nothing now; not one
+tree is reaped that was not reaped before, and not one that was kept is now destroyed. That is the
+whole reason this shape was chosen over the obvious alternative. **The window is NOT shortened, and
+specifically not for review trees** — that would widen the reaper into exactly the VMCP-71 race the
+window exists for, on the ONE role whose agent typically writes nothing and therefore has no other
+protection at all (VMCP-84 left that exposure documented and open on purpose; it is not reopened
+here). A review tree is detached with no branch, so "unpushed" does not mean for it what it means
+for a build tree, and that alone should stop anyone widening this without measuring first.
+
+**WHAT STILL REPORTS NOTHING, AND WHY THAT IS CORRECT — the question the card asked and this is the
+answer.** Reporting "every skip" is NOT the rule that was adopted. Three skips above the deferral
+stay silent, and each is a non-event rather than a deferral: a LIVE tree (there is no news in a
+tree that is working, and the ordering that gives it this branch is itself a fix — the `--gc`
+card's OWN round-2 review, `66fac88`, before VMCP-68 existed, where a healthy self-tree landed in
+`kept` on every sweep); a worktree outside
+`worktree_root` (hand-made, not ours — and `workspace_cmd.py`'s own Minor 12a note records, with
+its own constructed measurement, that the ABSENCE of a bogus entry for it is the only thing that
+guard buys); and a directory under our root whose name is not
+`task-<id>`/`review-<id>` (likewise not ours). The rule adopted is narrower and states its own
+scope: **report a skip of a tree that is OURS, is DEAD, and that we chose not to inspect.**
+
+**ONE SHAPE CHANGED WHAT IT COSTS, and the direction is deliberately NOT stated as a comparison.**
+The `0 <=` lower bound on the window — the guard against an mtime in the FUTURE (clock skew, a
+restored backup, an unpacked archive) — used to be described as protecting against "the one
+combination that leaks a tree with nothing to notice". After this card that same input leaks
+something else instead: a `deferred` line on EVERY tick that can never clear, i.e. #516's disease
+in the one shape that does not expire by itself. An earlier round of this card wrote that the bound
+is therefore "MORE load-bearing than before", and its second pass sent that back — nobody measured
+the two against each other, and they are different failures rather than more and less of one. Both
+are unacceptable; the bound stays for either.
+
+**PINNED BY MUTATION.** One selection throughout — the whole of `tests/unit/test_workspace_cmd.py`,
+237 collected in every round — run in a clone with `__pycache__` cleared, `PYTHONDONTWRITEBYTECODE=1`
+and `vikunja_mcp.__file__` printed each round: control 0 failed / 0 errors; delete the
+`deferred.append(...)` report so the skip goes silent again -> 5 failed; make the key unconditional
+(`if deferred:` -> `if True:`) -> 4 failed; re-value `DEFER_YOUNG` to a graded refusal's value
+(`"dirty"`) -> 1 failed; neuter the grace window itself so the reaper WIDENS -> 9 failed. The last
+round is the one that matters for the invariant: a card that only adds a report still owes proof
+that loosening the reaper is LOUD, and it is.
+
+**THE RULEBOOK PIN HAS A MEASURED BLIND HALF, recorded rather than left to be inherited.** A second
+sweep over `tests/unit/test_skill_contract.py`, 57 collected in every round, same conditions:
+control 0 failed; delete the `deferred` bullet from the CORE rulebook alone -> 0 failed, i.e.
+BLIND; delete the deferral's code citation from `references/gc-report.md` -> 1 failed; delete the
+explanation from BOTH halves -> 1 failed. That is not a defect in the new pin but the SHAPE of
+`_gc_section`, which is core + reference on purpose — so read it as "the section as a WHOLE still
+explains the key", never as "the tick step still mentions it". The `CODE_*` pin beside it has the
+same bound, and inheriting that silently is what the measurement exists to prevent.

@@ -667,9 +667,12 @@ def _grace_markers(tree: Path) -> list[Path]:
 def _quiesce(tree: Path) -> None:
     """Age every marker so a DEAD tree reads as "gone quiet" and is eligible for the reaper NOW.
 
-    VMCP-71 gave `--gc` a grace window: a dead tree touched within `_REAP_GRACE_SECONDS` is
-    skipped, silently, so its agent cannot have its cwd removed between `advance(to='review')`
-    and `--release`. Every test below that asserts a REAP (or a `kept` line, which is also a
+    VMCP-71 gave `--gc` a grace window: a dead tree touched within `_REAP_GRACE_SECONDS` is not
+    inspected, so its agent cannot have its cwd removed between `advance(to='review')` and
+    `--release`. (Until VMCP-300 that skip was also SILENT; it is now reported in `deferred`, and
+    the tests below that assert three empty verdict lists say so explicitly.)
+
+    Every test below that asserts a REAP (or a `kept` line, which is also a
     verdict only reached past the window) works on a tree created milliseconds earlier, so it has
     to say out loud that the tree has gone quiet. Call this AFTER the last git call in the tree —
     a commit or a `git status` rewrites the index and un-quiesces it.
@@ -863,8 +866,9 @@ def test_gc_from_inside_a_dead_tree_completes_the_whole_sweep(repo, tracker):
     merely 'a red test'), and must not abort the sweep before reaping the OTHER dead tree.
 
     VMCP-71: the self tree is left YOUNG on purpose, so this test also pins the guard ORDER — the
-    self-guard must run BEFORE the grace window. Flip them and a dead-and-young self tree is
-    skipped silently, `kept` comes back empty, and this goes red. That order is the deliberate
+    self-guard must run BEFORE the grace window. Flip them and a dead-and-young self tree never
+    reaches the self-guard at all — since VMCP-300 it lands in `deferred` instead of `kept`, so
+    `kept` comes back empty and this goes red either way. That order is the deliberate
     one: this guard KNOWS a process is standing in the tree, the window only suspects it, so the
     report a human can act on must win."""
     api, wf = tracker
@@ -1848,8 +1852,12 @@ def test_gc_grace_window_sees_top_level_churn_through_the_directory(repo, tracke
 def test_gc_does_not_skip_forever_on_an_mtime_in_the_future(repo, tracker):
     """The window is bounded BELOW as well as above. A timestamp in the future — clock skew, a
     restored backup, an unpacked archive — would otherwise read as "younger than N" on every
-    sweep for as long as it lasts, and this skip is SILENT: the one combination that leaks a tree
-    with nothing anywhere to notice. Anything outside the window falls through to the ordinary
+    sweep for as long as it lasts. Before VMCP-300 that skip was also SILENT, which made this
+    "the one combination that leaks a tree with nothing anywhere to notice"; it is now a
+    `deferred` line instead — one that would arrive on EVERY tick and never clear, which is a
+    different failure and not a smaller one, so the bound is what stops both.
+
+    Anything outside the window falls through to the ordinary
     release guards, which still refuse to destroy work. Drop the `0 <=` and this goes red."""
     api, wf = tracker
     path = Path(ensure_workspace(42, cwd=repo)["path"])           # dead: nothing on the board
@@ -3208,8 +3216,14 @@ def test_gc_still_defers_to_a_real_write_in_a_tree_it_has_already_inspected(repo
     (`unpushed`), then the agent — still standing in it between `advance(to='review')` and
     `--release` — pushes, which satisfies the last guard, and runs the `git status` SKILL.md's own
     recipe has it run. The directory is aged back afterwards so the INDEX is the only fresh marker
-    left, i.e. the one an hour-old tree really has. Sweep 2 must skip it silently, in neither list.
-    Drop the index from `_last_activity` and this does not merely fail — the tree is destroyed."""
+    left, i.e. the one an hour-old tree really has. Sweep 2 must NOT INSPECT and NOT REMOVE it.
+    Drop the index from `_last_activity` and this does not merely fail — the tree is destroyed.
+
+    VMCP-300 (1183) changed how sweep 2 SAYS that, and made this test stronger rather than
+    weaker. The skip used to be silent, so "the window fired" could only be inferred from three
+    empty lists — which is also what a sweep that never saw the tree looks like. It is now
+    reported in `deferred`, so the window firing is asserted POSITIVELY, and the three
+    verdict-carrying lists staying empty still says the tree was never inspected."""
     api, wf = tracker
     path = _unpushed_build_tree(repo, 42)
     first = gc_workspaces(cwd=repo, workflow=wf)
@@ -3227,12 +3241,17 @@ def test_gc_still_defers_to_a_real_write_in_a_tree_it_has_already_inspected(repo
     # VMCP-238 (801) relaxed this from an exact-dict equality, and the reason is that the push
     # above is REAL: it advances `origin/main` past the main checkout, so `--gc`'s new
     # fast-forward legitimately has work to do and reports it. The assertion this test exists
-    # for is untouched — all THREE lists still empty, i.e. the tree is in NEITHER list — and the
-    # "gc returns exactly these keys when there is nothing else to say" half did not go
+    # for is untouched — the three VERDICT lists still empty, i.e. no guard ran on this tree —
+    # and the "gc returns exactly these keys when there is nothing else to say" half did not go
     # unpinned: it moved to test_gc_says_nothing_about_a_main_checkout_that_is_already_current,
     # which asserts it on the only path where it is honestly true.
-    assert {k: v for k, v in second.items() if k != "main_checkout"} == {
+    assert {k: v for k, v in second.items() if k not in ("main_checkout", "deferred")} == {
         "released": [], "kept": [], "expected": []}
+    assert [(d["task_id"], d["code"]) for d in second["deferred"]] == [
+        (42, workspace_cmd.DEFER_YOUNG)], (
+        "the window did not fire — with the index dropped from `_last_activity` this tree is not "
+        "merely un-reported, it is inspected and destroyed"
+    )
     assert path.is_dir() and (path / "feature.txt").exists()
 
 
@@ -8043,3 +8062,212 @@ def test_a_plain_gitlink_DELETE_is_not_the_shape_and_destroys_nothing(repo, trac
     assert _git(repo, "-C", "sub", "status", "--porcelain") == "?? precious.txt", (
         "the submodule is still a working repository, not a husk"
     )
+
+
+# --- VMCP-300 (1183): a DEFERRED tree used to be reported nowhere at all ---------------------
+
+
+def _dead_review_tree(api, wf, repo, head, title, *, bounce=False) -> tuple[int, Path]:
+    """A card taken all the way to Review, given a review worktree, then moved OUT of Review —
+    the two real ways that happens: a human moves it to Done, or a `needs_work` verdict sends it
+    back to Build. Returns (task_id, tree). The tree is left YOUNG, as on the real machine."""
+    task = api.add_task(title, "Queue")
+    wf.claim(task["id"])
+    wf.advance(task["id"], to="build", spec="approach")
+    wf.advance(task["id"], to="review", worklog="done", evidence="abc1234")
+    tree = Path(ensure_workspace(task["id"], role="review", at=head, cwd=repo)["path"])
+    if bounce:
+        wf.review_task(task["id"], verdict="needs_work", report="repro'd; cause not addressed")
+    else:
+        api.task_bucket[task["id"]] = api.bucket_id("Done")   # the HUMAN moves it; no tool can
+    return task["id"], tree
+
+
+def test_gc_reports_the_dead_trees_it_deferred_instead_of_answering_three_empty_lists(repo,
+                                                                                      tracker):
+    """VMCP-300's whole subject: the SILENCE, not the loss.
+
+    The stand is the live observation of #1183 rebuilt — three review trees whose cards have all
+    LEFT Review (two moved to Done by the human, one bounced to Build by a `needs_work` verdict),
+    every one of them created moments earlier, plus one legitimately live build tree. Before this
+    card the sweep answered `{"released": [], "kept": [], "expected": []}`, which is
+    byte-identical to a sweep that had nothing to do — so the three deferrals were unobservable
+    from the pump, on the one command it runs every tick.
+
+    Nothing here asserts a REAP. That is the point: the three trees must still be on disk
+    afterwards, because the fix is a report and not a widening of the reaper.
+
+    The live build tree is the control that keeps this test honest about WHICH skip is reported:
+    it is young too, and it must NOT appear, because a live tree is a non-event rather than a
+    deferral. Drop the `alive[role]` short-circuit and it turns up in `deferred`.
+
+    THE SWEEP THAT PINS THIS CARD, one selection throughout — this whole FILE, 237 collected in
+    every round, run in a clone with `__pycache__` cleared, PYTHONDONTWRITEBYTECODE=1 and
+    `vikunja_mcp.__file__` printed each round: control 0 failed / 0 errors; delete the
+    `deferred.append(...)` report so the skip goes silent again -> 5 failed; make the key
+    unconditional (`if deferred:` -> `if True:`) -> 4 failed; re-value `DEFER_YOUNG` to a graded
+    refusal's value (`"dirty"`) -> 1 failed; and, the round that matters most, neuter the grace
+    window itself so the reaper WIDENS -> 9 failed. That last one is here deliberately: this card
+    adds a report, and the only way to be sure it did not also loosen the reaper is to check that
+    loosening the reaper is still LOUD."""
+    api, wf = tracker
+    head = _git(repo, "rev-parse", "HEAD")
+
+    dead = dict(
+        _dead_review_tree(api, wf, repo, head, "human moved it to Done") for _ in (1,)
+    )
+    dead.update([_dead_review_tree(api, wf, repo, head, "also Done")])
+    dead.update([_dead_review_tree(api, wf, repo, head, "bounced back", bounce=True)])
+
+    live_card = api.add_task("live build work", "Queue")
+    wf.claim(live_card["id"])
+    live_tree = Path(ensure_workspace(live_card["id"], cwd=repo)["path"])
+
+    assert wf.review_task_ids() == [], "the board must read all three review cards as dead"
+
+    res = gc_workspaces(cwd=repo, workflow=wf)
+
+    assert res["released"] == [] and res["kept"] == [] and res["expected"] == []
+    assert sorted(e["task_id"] for e in res["deferred"]) == sorted(dead)
+    assert all(tree.exists() for tree in dead.values()), (
+        "a deferred tree was REMOVED — this card adds a report, it does not widen the reaper"
+    )
+    assert live_tree.exists()
+    assert live_card["id"] not in {e["task_id"] for e in res["deferred"]}, (
+        "a LIVE tree was reported as deferred — a working tree is a non-event, not a skip"
+    )
+    for entry in res["deferred"]:
+        assert entry["code"] == workspace_cmd.DEFER_YOUNG
+        assert entry["released"] is False
+        assert entry["role"] == "review"
+        assert 0 <= entry["quiet_for_seconds"] < workspace_cmd._REAP_GRACE_SECONDS
+        assert "a later sweep inspects it" in entry["reason"], entry["reason"]
+
+
+def test_the_deferred_key_is_absent_when_the_sweep_declined_nothing(repo, tracker):
+    """OPTIONAL, the `main_checkout` idiom — "present ⇒ read it".
+
+    This is what keeps VMCP-68's cure intact: a key that is on EVERY payload is a key nobody
+    reads, which is the disease that forced `kept` to be split in two. A tick that deferred
+    nothing must return the payload it always returned, and so must a sweep whose only tree is
+    alive.
+
+    Pinned, same selection and same conditions as the flagship above: control 0 failed; make the
+    key unconditional -> 4 failed, this test among them. Note WHICH four, because it says
+    something this test alone does not: the pre-existing
+    test_gc_says_nothing_about_a_main_checkout_that_is_already_current is one of them, so the
+    optionality of the payload was already somebody else's promise before this card added a key
+    to it."""
+    api, wf = tracker
+    assert "deferred" not in gc_workspaces(cwd=repo, workflow=wf)      # no worktrees at all
+
+    task = api.add_task("live work", "Queue")
+    wf.claim(task["id"])
+    ensure_workspace(task["id"], cwd=repo)
+    assert "deferred" not in gc_workspaces(cwd=repo, workflow=wf)      # one, and it is alive
+
+
+def test_a_deferred_tree_is_reaped_by_a_later_sweep_and_stops_being_reported(repo, tracker):
+    """POSTPONED, NEVER CANCELLED — the control that makes the report above readable, and the
+    refutation of the card's own framing.
+
+    #1183 reasoned that review trees "accumulate across a session and nothing on the board would
+    ever say so". The second half was true and is what this card fixed. The first half is false
+    FOR THE SHAPE THIS TEST BUILDS — a CLEAN review tree, which is what the observation was — and
+    that matters, because a reader who thinks these trees were leaking reaches for the tempting
+    fix, shortening or waiving the grace window for review trees, which widens the reaper into
+    exactly the VMCP-71 race the window exists for, on the one role whose agent typically writes
+    nothing and so has no other protection (see VMCP-84's note above `_REAP_GRACE_SECONDS`).
+
+    DO NOT GENERALISE IT FURTHER — one round of this card did, and its own second pass refuted
+    that by construction. A review tree holding an IN-TREE COMMIT genuinely does accumulate:
+    measured on this same stand, three consecutive sweeps past the window each answered
+    `expected: [(id, "unreachable-head")]` with the directory still there, and one holding a
+    stray untracked file answered `kept: [(id, "dirty")]` twice over. Both are pre-existing,
+    documented behaviour (`references/drain.md` says such a tree stays forever), and both are the
+    OTHER side of the line this card draws: a deferral expires by itself, a refusal does not.
+
+    Same trees, same sweep, one difference: age every marker past the window.
+
+    Pinned, same selection and conditions as the flagship above: control 0 failed; neuter the
+    grace window so the reaper widens -> 9 failed, this test among them (it then reaps on the
+    FIRST sweep, so the deferral it asserts never happens); delete the report -> 5 failed, also
+    including this one."""
+    api, wf = tracker
+    head = _git(repo, "rev-parse", "HEAD")
+    dead = dict([_dead_review_tree(api, wf, repo, head, "done a"),
+                 _dead_review_tree(api, wf, repo, head, "bounced", bounce=True)])
+
+    first = gc_workspaces(cwd=repo, workflow=wf)
+    assert sorted(e["task_id"] for e in first["deferred"]) == sorted(dead)
+    assert first["released"] == []
+
+    for tree in dead.values():
+        _quiesce(tree)
+
+    second = gc_workspaces(cwd=repo, workflow=wf)
+
+    assert sorted(r["task_id"] for r in second["released"]) == sorted(dead)
+    assert not any(tree.exists() for tree in dead.values())
+    assert "deferred" not in second, (
+        "the deferral must stop being reported the moment it is acted on — a standing line over "
+        "a tree that is gone is the never-read signal all over again"
+    )
+
+
+def test_defer_codes_are_not_part_of_the_graded_worktree_vocabulary(repo, tracker):
+    """The boundary asserted rather than promised, mirroring the `MAIN_SYNC_*` pin above.
+
+    `CODE_*` is the CLOSED enumeration of per-worktree REFUSALS that `_keep_is_expected` grades
+    cell by cell, pinned three separate ways, so a new member there reddens those pins until it
+    is graded deliberately. A deferral is not a refusal — no guard ran, no verdict was reached —
+    and it never reaches the grader, so it must not wear the grader's prefix. Both halves are
+    asserted: the NAMES cannot overlap, and neither can the VALUES, since the grader keys on
+    values and a colliding one is exactly what the separate prefix exists to prevent.
+
+    Pinned, same selection and conditions as the flagship above: control 0 failed; re-value
+    `DEFER_YOUNG` to `"dirty"`, a graded refusal's value -> 1 failed, and this is the ONLY test
+    in the file that notices — which is the whole argument for writing it, since a colliding
+    value is otherwise invisible until `_keep_is_expected` silently grades a deferral."""
+    declared_codes = {n: v for n, v in vars(workspace_cmd).items()
+                      if n.startswith("CODE_") and isinstance(v, str)}
+    declared_defer = {n: v for n, v in vars(workspace_cmd).items()
+                      if n.startswith("DEFER_") and isinstance(v, str)}
+    assert declared_defer, "the deferral vocabulary vanished"
+    assert not set(declared_codes) & set(declared_defer)
+    assert not set(declared_codes.values()) & set(declared_defer.values())
+
+    # ...and structurally: in a sweep that both defers a tree and refuses one, the two stay apart.
+    api, wf = tracker
+    head = _git(repo, "rev-parse", "HEAD")
+    _dead_review_tree(api, wf, repo, head, "young and dead")           # -> deferred
+    kept_tree = Path(ensure_workspace(42, cwd=repo)["path"])           # nothing on the board
+    (kept_tree / "UNSAVED.txt").write_text("an agent's work\n")        # -> kept: dirty
+    _quiesce(kept_tree)
+
+    res = gc_workspaces(cwd=repo, workflow=wf)
+
+    assert [e["code"] for e in res["kept"]] == [workspace_cmd.CODE_DIRTY], res["kept"]
+    assert [e["code"] for e in res["deferred"]] == [workspace_cmd.DEFER_YOUNG]
+    for entry in res["kept"] + res["expected"] + res["released"]:
+        assert entry.get("code") not in set(declared_defer.values()), entry
+    assert kept_tree.exists(), "the dirty tree was destroyed"
+
+
+def test_the_cli_gc_line_carries_the_deferred_key(repo, tracker, monkeypatch, capsys):
+    """The payload is a cross-process contract — the pump reads the JSON LINE, not the dict — so
+    the key has to survive the CLI, and the ABSENT case has to stay absent there too."""
+    api, wf = tracker
+    monkeypatch.setattr(workspace_cmd, "_build_workflow", lambda root: (wf, None))
+    monkeypatch.chdir(repo)
+
+    assert run_workspace(["--gc"]) == 0
+    assert "deferred" not in json.loads(capsys.readouterr().out)
+
+    head = _git(repo, "rev-parse", "HEAD")
+    task_id, _tree = _dead_review_tree(api, wf, repo, head, "young and dead")
+
+    assert run_workspace(["--gc"]) == 0
+    entries = json.loads(capsys.readouterr().out)["deferred"]
+    assert [e["task_id"] for e in entries] == [task_id]
+    assert entries[0]["code"] == workspace_cmd.DEFER_YOUNG

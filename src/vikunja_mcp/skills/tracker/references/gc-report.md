@@ -373,12 +373,36 @@
        `unreachable-head` on a build tree would go to `kept`. In practice a build tree no longer
        reports that code — a detached build tree is cut off earlier and arrives as `detached-build`
        (see `kept` above) — but the role stayed in the grading as a backstop.
+     - **`deferred` — an OPTIONAL key, and it is NOT a list of trees the sweep failed on.** Present
+       means the sweep DECLINED TO INSPECT those trees: each one is dead by the board but was
+       written in less than a grace window (30 min) ago, so gc left it alone in case its agent is
+       still standing in it. Nothing was inspected, nothing was refused, nothing was removed — no
+       guard ran at all, which is exactly why these are not in `kept` or `expected` (`expected` is
+       for a refusal that WAS made and is routine). **NO ACTION: a later sweep INSPECTS the tree**,
+       and removes it unless a release guard then refuses (a stray file -> `dirty` in `kept`, an
+       in-tree commit -> `unreachable-head` in `expected`). Entries carry the code `young`,
+       `quiet_for_seconds` and the usual `task_id`/`role`/`path`. The `DEFER_*` codes are a
+       separate vocabulary from the `CODE_*` refusals for that reason and never reach the grading.
+       Why it exists at all (#1183): this used to be a SILENT skip, so a sweep that declined three
+       trees answered `{"released": [], "kept": [], "expected": []}` — byte-identical to a sweep
+       with nothing to do. That was observed live on three review trees whose cards had all left
+       Review, and read, reasonably, as a reaper that had stopped working. It had not. It is NOT a
+       review-only effect — a build tree dead at `advance(to='review')` is deferred in exactly the
+       same way — but a review tree reaches this state from BIRTH, because a reviewer who only
+       READS moves neither mark the window is measured from, so its count runs from creation.
+       Do NOT "fix" a `deferred` entry by removing the tree by hand, and do not read a run of them
+       across consecutive ticks as an accumulation: measured, a CLEAN tree is reaped by the first
+       sweep after the window expires. A tree that turns out to hold work is a different story and
+       gets a different key — `kept`/`expected`, and THOSE do stand indefinitely (a review tree
+       with an in-tree commit is refused forever; see `unreachable-head` above).
      - An unfamiliar `code` lands in `kept` and not in `expected` — deliberately: better to call the
        human once too often than to lose a record quietly.
      - **A standing record arrives on EVERY sweep (a sweep = one `--gc` per tick) while nobody is
        writing in the tree.** The count runs from the LAST WRITE in the tree, not from the task's
        death: a tree the sweep already considers dead but written to less than a grace window
-       (30 min) ago it skips silently, putting it in neither list; the rest of the time `dirty`,
+       (30 min) ago it does not inspect at all, and reports it in `deferred` rather than in either
+       verdict list (before #1183 it was skipped SILENTLY, in no list at all); the rest of the
+       time `dirty`,
        `unpushed`, `unreachable-head` and any other code arrive on every consecutive sweep, and the
        sweep itself does NOT extend the window (`--gc` does its own inspection without
        optional-locks and does not touch the index; it used to — `git status` rewrote the index,

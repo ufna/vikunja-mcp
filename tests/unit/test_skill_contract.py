@@ -602,6 +602,41 @@ def test_the_gc_report_split_the_skill_teaches_is_the_one_the_code_produces():
         "the --release recipe no longer explains the no-worktree refusal"
 
 
+def test_the_deferred_key_the_skill_teaches_is_the_one_the_code_produces():
+    """VMCP-300 (#1183): the fourth key is worthless unless the pump is told to read it.
+
+    `--gc` gained an OPTIONAL `deferred` list — trees it DECLINED TO INSPECT because the grace
+    window says their agent may still be standing in them. That key exists only to close a
+    SILENCE, so it fails in exactly the way the silence did if the rulebook never mentions it: a
+    payload key nobody was taught to read is indistinguishable from one that is not there. Same
+    auto-propagating contract as the two lists above — anchored on the CONSTANT and on the key as
+    `gc_workspaces` actually spells it, and scoped to the `--gc` section so DELETING the
+    explanation fails rather than coasting on prose elsewhere.
+
+    `DEFER_YOUNG`'s value is an ordinary English word, so it gets the tighter backticked anchor
+    for `CODE_LOCKED`'s measured reason: a bare `young` is satisfiable by prose that has nothing
+    to do with the code.
+
+    WHAT THIS PIN DOES NOT CATCH, measured rather than assumed, because a pin nobody watched fail
+    is not a pin: control 0 failed / 57 collected; delete the `deferred` bullet from the CORE
+    rulebook alone -> 0 failed, i.e. BLIND; delete the deferral's code citation from
+    `references/gc-report.md` -> 1 failed; delete the explanation from BOTH halves -> 1 failed
+    (same selection every round, `__pycache__` cleared and PYTHONDONTWRITEBYTECODE=1, in a clone).
+    The blindness is not a defect here but the SHAPE of `_gc_section`, which is core + reference
+    ON PURPOSE — the codes and payload keys live in the reference half now, so either half
+    satisfies either anchor. Read this pin as "the section as a WHOLE still explains the key",
+    never as "the tick step still mentions it"; the `CODE_*` pin above has exactly the same
+    bound, and inheriting it silently is what this paragraph exists to prevent."""
+    text = _skill_text()
+    section = _gc_section(text)
+    gc_src = inspect.getsource(workspace_cmd.gc_workspaces)
+    assert 'result["deferred"] = deferred' in gc_src, \
+        "SKILL.md tells the pump to read `deferred` but gc_workspaces stopped returning it"
+    assert "`deferred`" in section, "SKILL.md's --gc rule no longer names the `deferred` key"
+    assert f'`{workspace_cmd.DEFER_YOUNG}`' in section, \
+        "SKILL.md's --gc rule no longer cites the deferral's own code"
+
+
 def _standing_record_bullet(text: str) -> str:
     """The bullet that tells the pump HOW OFTEN a standing `--gc` refusal is reported.
 
@@ -825,7 +860,7 @@ def test_the_standing_gc_record_is_reported_under_the_conditions_the_rulebook_na
 
     young = [_codes_for(sweep(), parked) for _ in range(2)]
     assert young == [{"kept": [], "expected": [], "released": []}] * 2, \
-        "a just-written dead tree is reported — the rulebook says the window skips it silently"
+        "a just-written dead tree is reported — the rulebook says the window leaves it uninspected"
 
     _quiesce_for_gc(tree)
     quiet = [_codes_for(sweep(), parked) for _ in range(3)]

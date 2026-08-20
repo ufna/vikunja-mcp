@@ -240,8 +240,10 @@ returns one line of JSON.
      "Two returns, two trees"). It returns THREE lists:
      `{"released": [...], "kept": [...], "expected": [...]}`, and you must act on TWO of them:
      read `kept` in full and scan `released` for `branch_deleted: false` and for
-     `removed_ignored`. Plus an OPTIONAL fourth key, `main_checkout` — it is not about trees but
-     about the MAIN checkout; its breakdown is below, in a bullet of its own.
+     `removed_ignored`. Plus TWO OPTIONAL keys, each absent when it has nothing to say:
+     `deferred` — trees the sweep DECLINED TO INSPECT because they are dead but were written in
+     moments ago (no action: a later sweep inspects them) — and `main_checkout`, which
+     is not about trees at all but about the MAIN checkout; both get a bullet of their own below.
      - **Reading the `--gc` RESPONSE is in `references/gc-report.md`; open it the moment the
        response is non-empty.** Every form is worked through there: `main_checkout` (the
        `MAIN_SYNC_*` codes, what to do on `updated: false`), every `code` in `kept`, the fields
@@ -252,6 +254,12 @@ returns one line of JSON.
          tree — that is not a warning, it is a record of loss).
        * **The `main_checkout` key is OPTIONAL: present ⇒ read it.** Absent means there was
          nothing to fast-forward.
+       * **`deferred` is OPTIONAL too, and it needs NO action** — it is to a SKIP what `expected`
+         is to a refusal. Each entry is a tree that is dead by the board but inside the grace
+         window, so gc did not touch it; a later sweep INSPECTS it, and removes it unless a
+         release guard then refuses. It exists because three empty lists over three skipped trees
+         used to be indistinguishable from "nothing to do" (#1183). Do NOT read a `deferred`
+         entry as a reaper that has stopped, and do NOT go into the tree to "help".
        * **An unfamiliar `code` goes to `kept`, not to `expected`**, deliberately: better one
          look too many than one swallowed.
      `--gc` goes ALONE: it combines with neither a task id, nor `--release`, nor `--role`, nor

@@ -82,6 +82,25 @@ CODE_POPULATED_GITLINK = "populated-gitlink"   # VMCP-266 — see _populated_git
 CODE_SELF_TREE = "self-tree"          # --gc only: the tree gc itself is standing in
 CODE_RELEASE_ERROR = "release-error"  # --gc only: _release_locked raised, sweep continued
 
+# A DEFERRAL IS NOT A REFUSAL, AND IT GETS ITS OWN PREFIX FOR THE SAME REASON `MAIN_SYNC_*` DOES
+# (VMCP-300, tracker #1183). Everything above is a verdict `_release_locked` REACHED on a tree it
+# inspected, and `_keep_is_expected` grades every one of them cell by cell. What is below is the
+# other thing a sweep can do: decline to inspect a tree at all. It never reaches the grader, so it
+# must never wear the grader's prefix — a `CODE_*` with no cell in that grid reddens the pins that
+# ENUMERATE that vocabulary, which is exactly right for a refusal and exactly wrong for this. Same
+# boundary, same pin shape: test_defer_codes_are_not_part_of_the_graded_worktree_vocabulary.
+# HOW MANY pins is TWO and not the three the `MAIN_SYNC_*` note below says, and the number is
+# checked rather than inherited. Structurally: exactly three tests enumerate `CODE_*`
+# (`startswith("CODE_")`), and one of them — test_main_sync_codes_are_not_part_of_the_graded_
+# worktree_vocabulary — only asserts DISJOINTNESS with another prefix, which a new `CODE_*` cannot
+# violate; so a new ungraded constant can only redden the grading grid and the policy-comment
+# enumeration. Measured to the same number by this card's second independent pass (one bare
+# ungraded `CODE_ZZ`, selection `tests/unit`, 1321 collected: control 0 failed; mutation 2
+# failed), and this file's own older records agree, quoting 1 and 2 for narrower attacks. The
+# neighbouring note is left as it landed rather than silently corrected — the CONCLUSION both
+# notes draw survives at two.
+DEFER_YOUNG = "young"                 # --gc only: dead on the board, but inside the grace window
+
 # Review Important 2: EVERY git call in this module can run while `_repo_lock` is HELD (the
 # network one — `git fetch origin` in _ensure_locked — provably does, before the idempotency
 # early-return), so a call that blocks forever does not merely hang ITS caller: it wedges every
@@ -3887,8 +3906,10 @@ def gc_workspaces(cwd: Path | None = None, workflow=None) -> dict:
 
     VMCP-71: the self-guard above covers only a --gc invoked from INSIDE the tree, and the pump
     invokes it from the MAIN checkout — so a dead tree that was TOUCHED moments ago is skipped
-    too, silently and in neither list, and reaped on a later sweep (`_REAP_GRACE_SECONDS`,
-    `_last_activity`). That is the same overlap seen from the other side: a task leaves Build at
+    too, and a later sweep is what inspects it (`_REAP_GRACE_SECONDS`, `_last_activity`). That
+    skip used to be SILENT and in neither list; since VMCP-300 it is reported in `deferred` —
+    see that paragraph below, and do not read this one as the current contract. That skip is the
+    same overlap seen from the other side: a task leaves Build at
     `advance(to='review')` and a card leaves Review at a `needs_work` verdict, both while the
     agent that did it is still standing in the tree.
 
@@ -3903,9 +3924,47 @@ def gc_workspaces(cwd: Path | None = None, workflow=None) -> dict:
     later, the test to write is "on a healthy board, `kept` is empty".
 
     The two compose in one direction only, and it is the right one: a tree skipped as YOUNG never
-    reaches a release guard, so it produces no refusal to grade and appears in NEITHER list —
-    `expected` is for a refusal that WAS made and is routine, never for a tree gc declined to
-    inspect.
+    reaches a release guard, so it produces no refusal to GRADE — `expected` is for a refusal that
+    WAS made and is routine, never for a tree gc declined to inspect. That boundary stands; what
+    changed under VMCP-300 is where such a tree goes INSTEAD of nowhere.
+
+    VMCP-300 (#1183) — THE `deferred` KEY, AND WHAT IT IS FOR. The sentence above used to
+    end "and appears in NEITHER list", and that was the defect, not an aside. A sweep that
+    declines to inspect three trees and answers `{"released": [], "kept": [], "expected": []}` is
+    byte-identical to a sweep with nothing to do, and this payload is the pump's only window onto
+    its own housekeeping — so the deferral was unobservable from the outside, on the one command
+    the orchestrator runs every tick. It cost a card: three review trees, all dead by the board
+    (two cards moved to Done, one bounced to Build by a `needs_work` verdict) and all created
+    minutes earlier, produced those three empty lists on a live drain, and the observer — reading
+    SKILL.md's own statement of the rule, correctly — filed it as a reaper that had stopped
+    reaping. REPRODUCED on a constructed stand before anything was changed, and the CONTROL in the
+    same round is what settles it: age those same trees past the window and the identical sweep
+    reaps all three. The reap was postponed, never cancelled, and nothing said so.
+
+    Why it was OBSERVED on the review side — and that is "observed", not "only bites there",
+    which nothing measured. The role's LIVENESS works (`_read_liveness` keys `alive["review"]`
+    off `Workflow.review_task_ids`, and on the stand it correctly reported all three as dead);
+    what differs is where the window is measured FROM. VMCP-84 measured that a read-only reviewer
+    moves neither marker `_last_activity` looks at, so for a review tree the count runs from
+    CREATION, and a review tree therefore reads young from birth — unless every marker reads in
+    the FUTURE, which the `0 <=` bound below refuses to honour. A BUILD tree is not exempt and
+    was never claimed to be: its count runs from its LAST WRITE, which is moments before
+    `advance(to='review')`, so it is deferred just as silently and for longer. The silence was
+    never role-specific; the three trees in front of the observer happened to be review ones.
+
+    `deferred` is to a SKIP what `expected` is to a REFUSAL: reported, no action needed, expires
+    by itself. It is OPTIONAL and absent when empty (the `main_checkout` idiom), so `kept`'s
+    VMCP-68 promise — empty means nothing to read — is untouched, and a tick that deferred
+    nothing carries no `deferred` key at all. It changes NOTHING about what is removed: the
+    branch it reports did nothing to the tree before and does nothing now.
+
+    WHAT STAYS SILENT, deliberately, so the next reader does not "finish the job". Three skips
+    above this one report nothing and should not: a LIVE tree (there is no news in a tree that is
+    working), a worktree outside `worktree_root` (hand-made, not ours — and the ABSENCE of a bogus
+    entry for it is the only thing that guard buys, see its own note), and a directory under our
+    root whose name is not `task-<id>`/`review-<id>` (likewise not ours). The rule this card
+    settles is narrower than "report every skip": report a skip of a tree that IS ours and IS dead
+    and that we chose not to inspect. Everything else is not a deferral, it is a non-event.
 
     THE CADENCE THAT COMES OUT OF THAT COMPOSITION, measured across consecutive sweeps rather than
     reasoned about, because a report is read tick by tick: a standing refusal is reported on EVERY
@@ -3936,7 +3995,9 @@ def gc_workspaces(cwd: Path | None = None, workflow=None) -> dict:
     `parked` set — a third consumer of the same fetch, and the one that made "Your Call" drive
     pagination too — is inside the budget rather than beside it.
 
-    VMCP-238 (801) adds a FOURTH key, `main_checkout`, and it is about the shared checkout
+    VMCP-238 (801) adds a further key, `main_checkout` (it was the FOURTH when it landed; VMCP-300
+    later inserted `deferred` ahead of it, so in payload order it is now the fifth), and it is
+    about the shared checkout
     rather than about any worktree. This command is where it belongs because it is the one call
     the pump already makes every tick, already canonicalises to the main worktree, already goes
     to the network and already returns a payload the rulebook tells the pump to READ — so the
@@ -3952,7 +4013,7 @@ def gc_workspaces(cwd: Path | None = None, workflow=None) -> dict:
     wf, deadline = (workflow, None) if workflow is not None else _build_workflow(root)
     wt_root = worktree_root(root)
 
-    released, kept, expected = [], [], []
+    released, kept, expected, deferred = [], [], [], []
     # ONE lock for the whole sweep: _repo_lock is not reentrant, so call the _locked core, never
     # the public release_workspace wrapper (that would deadlock on its own flock).
     with _repo_lock(root):
@@ -4008,15 +4069,43 @@ def gc_workspaces(cwd: Path | None = None, workflow=None) -> dict:
                 })
                 continue
             last = _last_activity(wt["path"])
-            if last is not None and 0 <= time.time() - last < _REAP_GRACE_SECONDS:
+            quiet_for = time.time() - last if last is not None else None
+            if quiet_for is not None and 0 <= quiet_for < _REAP_GRACE_SECONDS:
                 # VMCP-71's grace window: this tree is dead but was touched moments ago, so its
                 # agent may still be standing in it between `advance(to='review')` and
                 # `--release`. Defer to a later sweep — the reap is postponed, never cancelled.
                 #
-                # SILENTLY, in NEITHER list, deliberately: `kept` means "a human should look", and
-                # a tree that is merely YOUNG is not that. A previous round already had to fix
-                # `kept` becoming never-empty; the pump's every tick would otherwise carry an
-                # entry for every tree that finished in the last half hour.
+                # IN `deferred`, ITS OWN OPTIONAL KEY, AND NOT IN `kept` — VMCP-300 (#1183), and
+                # the distinction is the whole of that card. This branch used to `continue`
+                # SILENTLY, in NEITHER list, and the reasoning was sound as far as it went: `kept`
+                # means "a human should look", a merely-YOUNG tree is not that, and a previous
+                # round had already had to fix `kept` becoming never-empty. All of that still
+                # holds — which is why the fix is a FOURTH key and not a fourth kind of `kept`
+                # entry. What the old reasoning missed is that a sweep which declines to inspect
+                # N trees and answers `{"released": [], "kept": [], "expected": []}` is
+                # INDISTINGUISHABLE from a sweep that had nothing to do, and the payload is the
+                # pump's only window onto its own housekeeping. Measured cost of that ambiguity:
+                # this card exists because three review trees, all dead by the board and all
+                # minutes old, produced three empty lists — and the observer, correctly reading
+                # the rulebook's own statement of the rule, filed it as a reaper that had stopped
+                # working. It had not; it had postponed. `deferred` says so.
+                #
+                # WHY IT DOES NOT REBUILD #516's DISEASE. The key is OPTIONAL and absent when
+                # empty (the `main_checkout` idiom: present ⇒ read it), so `kept`'s "empty means
+                # nothing to read" is untouched and a tick that deferred nothing carries no
+                # `deferred` key at all — the payload it reads is the one it always read.
+                # `expected` is untouched too, and deliberately NOT reused: this docstring's
+                # own boundary is that `expected` is for a refusal that WAS made and is routine,
+                # never for a tree gc declined to inspect. `deferred` is to a SKIP what `expected`
+                # is to a REFUSAL — reported, no action, expires by itself.
+                #
+                # WHAT IT DOES NOT CHANGE: anything about what is REMOVED. This branch did
+                # nothing to the tree before and does nothing now; the sweep's reaping behaviour
+                # is byte-for-byte what it was. The window is NOT shortened, and specifically not
+                # for review trees — see the note above `_REAP_GRACE_SECONDS`, where VMCP-84
+                # measured that a read-only reviewer moves neither marker, so the window runs
+                # from CREATION there and is that role's ONLY protection. Widening the reaper to
+                # cure a reporting defect would trade a silent no-op for a vanished cwd.
                 #
                 # AFTER the self-guard above, also deliberately: "gc was invoked from inside this
                 # worktree" is the stronger and more specific statement about the same tree (that
@@ -4027,15 +4116,31 @@ def gc_workspaces(cwd: Path | None = None, workflow=None) -> dict:
                 #
                 # `0 <=` bounds the window BELOW as well as above: an mtime in the FUTURE (clock
                 # skew, a restored backup, an unpacked archive) would otherwise read as young on
-                # every sweep forever, and this skip is silent — the one combination that leaks a
-                # tree with nothing to notice. Out-of-window in either direction falls through to
-                # the release guards, which still refuse to destroy anything that holds work.
+                # every sweep FOREVER. VMCP-300 CHANGED WHAT THAT COSTS rather than removing
+                # it, and the direction is not a comparison anyone measured — it is two different
+                # failures: before, an unbounded skip leaked a tree with nothing anywhere to
+                # notice; now it would leak a `deferred` line on every tick that can never clear,
+                # which is #516's never-read-signal disease in the one shape that does not expire
+                # by itself. Neither is acceptable, so the bound stays either way. Out-of-window
+                # in either direction falls through to the release guards, which still refuse to
+                # destroy anything that holds work.
                 #
                 # It decides only the case where EVERY marker is future (VMCP-84). While one real
                 # marker survives, `_last_activity` no longer offers the future one at all — this
                 # bound used to be reached with a MAX taken over both, so a skewed mtime masked a
                 # fresh one and the tree was reaped mid-turn. The two now split the job cleanly:
                 # which markers count is the reader's, what an all-bad reading means is this line's.
+                deferred.append({
+                    "released": False, "task_id": task_id, "role": role,
+                    "path": str(wt["path"]), "code": DEFER_YOUNG,
+                    "quiet_for_seconds": int(quiet_for),
+                    "reason": (
+                        f"dead on the board, but something wrote here {int(quiet_for)}s ago — "
+                        f"inside the {int(_REAP_GRACE_SECONDS)}s grace window, so its agent may "
+                        f"still be standing in it. NOT inspected and NOT removed; a later "
+                        f"sweep inspects it, and removes it unless a release guard refuses"
+                    ),
+                })
                 continue
             try:
                 result = _release_locked(root, task_id, role)
@@ -4065,6 +4170,12 @@ def gc_workspaces(cwd: Path | None = None, workflow=None) -> dict:
     # a wedged fetch (WorkspaceError from the timeout), an unreadable repo, a git that is not
     # there. The one thing it must never do is cost a verdict already decided above.
     result = {"released": released, "kept": kept, "expected": expected}
+    if deferred:
+        # OPTIONAL, exactly like `main_checkout` below: absent means the sweep declined nothing,
+        # so a quiet tick's payload is unchanged and "present ⇒ read it" is the whole rule an
+        # agent has to learn. Placed BEFORE `main_checkout` so the per-worktree keys stay
+        # together — this one is about trees, that one is about the shared checkout.
+        result["deferred"] = deferred
     try:
         main_state = sync_main_checkout(root)
     except Exception as e:  # noqa: BLE001 — see above: report it, never raise past the sweep
