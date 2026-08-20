@@ -307,6 +307,74 @@ the refusal then shows the human (`… in 'unknown — the token cannot read pro
 card exists to remove, and re-introducing it one level down would be worse, because there it
 would look like a considered decision.
 
+**THE ADVICE UNDER THAT STRING HAD TO BECOME BRANCH-CONDITIONAL (#1190), and the blocking
+decision did not move an inch.** Both REFUSALS that render a blocker list used to end in one
+generic tail — `A predecessor becomes ready only at Review or Done; finish that one first` on
+`claim`, and `Finish that predecessor's rework and get it back to Review first` on the
+`advance(to='review')` latch. (`_starving_tail` renders a blocker list too and ended with its
+last waiting line and nothing else; it is the third site the clause had to reach, not a fourth
+copy of this tail.) That generic tail is right for an ordinary blocker in Build on a readable
+board, and on a card that will not become claimable again without a human it was the only thing
+printed.
+
+**It is NOT unactionable on all three fail-closed branches, and getting that wrong was this
+card's own first draft.** The three differ, and each difference is measured on a live `Workflow`
+over `FakeAPI`:
+
+- **403 on the task** — no form of finishing releases the card. `get_task` raises before `done`
+  is ever read, so even setting the flag leaves the refusal exactly where it was.
+- **Unreadable board** — HALF of "Review or Done" works. `_foreign_stages` answers None whatever
+  the far card's stage, so moving the predecessor to Review does NOT release the card; marking
+  it `done` DOES, because `done` is read before any board read. Both halves are one test, one
+  round: the same card refuses at Review over there and claims after the update.
+- **No bucket** — the board READS. Moving the predecessor into Review releases the card, so
+  "finish that one first" is CORRECT advice there and the escape is ADDITIVE, not a replacement.
+
+So the switch is a `finishable` flag per blocker, not "was anything unresolvable". Keying it off
+the mere presence of an escape — which the first draft did — replaces true advice with an escape
+on exactly the third branch, and nothing in the suite would have said so.
+
+**What carries it is two optional keys on the blocker dict, `escape` and `finishable`, ABSENT
+whenever the stage resolved normally.** That absence is what keeps the ordinary refusal what it
+was, and "byte-for-byte" here is a measurement rather than a manner of speaking: the same
+ordinary blocker driven through `048d1f9` and through this tree, `vikunja_mcp.__file__` printed
+in both, prints identical bytes for the `claim` refusal AND the `advance` latch. It is also
+exactly the thing a draft got wrong — the shared constant briefly carried a sentence-final period
+the old f-string did not, and nothing in the repo pinned that text, so the suite stayed green
+while the message had moved. The pin is now `endswith`, not `in`. `_predecessor_advice` then has
+three shapes: no escape → the generic tail; some blocker still finishable → generic first, then
+the escapes; NOTHING finishable → the escapes alone.
+
+**The escapes name what gets the card MOVING, which is not the same as what RELEASES it**, and
+the two are not interchangeable: making the neighbour's board readable turns the unknown into a
+knowable stage — measured, the same card then refuses with `Build (project 107)` — while
+`update_task(pred, done=True)` releases it outright. The `done` half of that comes from #1179's
+independent reviewer, measured on a live 2.3.0 for the unreadable-BOARD branch; the no-bucket
+branch has been driven on `FakeAPI` only.
+
+**The third rendering site is the one that is easy to miss, and it is the one an autonomous drain
+actually hits.** `next_task` SKIPS a gated card rather than refusing it, so a card parked by
+`handoff` behind an unresolvable predecessor produces NO refusal at all under an ordinary /loop
+tick — `_starving_tail`'s message is the only place its human is ever told anything. The clause
+there is conditional and sits beside `needs_retriage`, which is the same shape for the same
+reason (a tail that does not self-clear), and the conditionality is load-bearing rather than
+tidy: `tests/unit/test_workflow_sequence_gate.py` pins that message WHOLESALE — headline,
+lead-in and waiting lines and nothing else — and an unconditional clause reddens it.
+
+**The two board branches word their escape around the PROJECT, not the task, and the dedup is
+why.** Two predecessors on one unreadable board is the ordinary shape of a handoff-heavy chain;
+naming the task in the escape would print the same actions once per predecessor, while the ref of
+every blocker is already printed above the clause. Deduping is by exact text in first-seen order,
+so a per-task wording collapses nothing — the first draft did exactly that and its dedup test
+measured 2 where it asserted 1. The 403-on-the-task branch keeps a per-task wording and is right
+to: its escape is about that one task.
+
+**And the lead says nothing about WHO can act, deliberately.** A draft read "that half will NEVER
+clear by itself and no agent can unblock it — a human has to act", which is true of the two
+fail-closed-forever branches and false of the no-bucket one, where an agent moving the
+predecessor into Review clears the card. It now says only that nothing on THIS board changes the
+unknown, which holds on all three.
+
 ## `handoff` / `transfer_task` (#1179)
 
 **Two tools, because there are two questions.** `handoff` is the DEPENDENCY ("my card cannot

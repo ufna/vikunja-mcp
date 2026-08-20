@@ -707,6 +707,7 @@ class Workflow:
                             for bucket in resolve_full() for t in (bucket.get("tasks") or [])
                         }
                     found = full_stage_by_id.get(pid)
+                advice: dict = {}
                 if found is None:
                     # #1179: absence from OUR board is not deletion either. Vikunja relations are
                     # task-to-task and cross projects freely (measured: a task moved to another
@@ -714,14 +715,23 @@ class Workflow:
                     # simply live on a NEIGHBOUR's board. Before this, that case fell into the
                     # "gone" branch below and the gate released the card with its blocker
                     # untouched — silently, which is the whole defect.
-                    found = self._offboard_predecessor(pid, foreign_boards)
+                    offboard = self._offboard_predecessor(pid, foreign_boards)
+                    if offboard is not None:
+                        found, advice = (offboard[0], offboard[1]), offboard[2] or {}
                 if found is None or found[1] in READY_STAGES:
                     continue  # genuinely gone (absent even from the full board) or already ready
                 pred_task, pred_stage = found
-                unfinished.append({
+                entry = {
                     "id": pid, "ref": self._ref(pred_task),
                     "title": pred_task["title"], "stage": pred_stage,
-                })
+                }
+                # #1190: `escape`/`finishable` are ABSENT whenever the stage resolved normally,
+                # so every caller that renders a blocker keeps its old shape and its old prose on
+                # the ordinary path; only an unresolvable one carries them. `finishable` defaults
+                # to True where it is absent, which is what makes that silence mean "the generic
+                # advice still applies". See _predecessor_advice.
+                entry.update(advice)
+                unfinished.append(entry)
         return unfinished
 
     def _foreign_stages(self, project_id: int) -> dict[int, str] | None:
@@ -749,13 +759,32 @@ class Workflow:
 
     def _offboard_predecessor(
         self, pid: int, foreign_boards: dict[int, dict[int, str] | None],
-    ) -> tuple[dict, str] | None:
+    ) -> tuple[dict, str, dict | None] | None:
         """Resolve a predecessor that is on no bucket of THIS project's board (#1179).
 
-        Returns (task, stage) when it still BLOCKS, or None when it does not. Every ambiguous
-        outcome returns a blocking pair with the reason spelled into the stage string, because
-        the failure this closes is precisely an unknown being rendered as "gone": noisy beats
-        quiet, and the card's human reads that string in the refusal.
+        Returns (task, stage, advice) when it still BLOCKS, or None when it does not. Every
+        ambiguous outcome returns a blocking triple with the reason spelled into the stage
+        string, because the failure this closes is precisely an unknown being rendered as
+        "gone": noisy beats quiet, and the card's human reads that string in the refusal.
+
+        `advice` is None on the one branch that resolved a real stage; on each of the three
+        that could not it carries two keys merged onto the blocker dict (#1190) —
+
+          `escape`     a sentence naming what can get this card MOVING again. Only the
+                       `done=True` action releases it outright; making the board readable turns
+                       the unknown into a knowable stage (measured: the same card then refuses
+                       with `Build (project N)`), and removing the relation drops the gate.
+          `finishable` whether the generic "a predecessor is ready at Review or Done; finish
+                       that one first" tail is still TRUE of this blocker.
+
+        `finishable` is the whole reason the advice is per-branch rather than one sentence
+        appended to all three, and it is measured on each. NO-BUCKET is finishable: that board
+        READS, so moving the predecessor into Review releases the card and the generic tail is
+        correct advice — the escape is additive there. UNREADABLE BOARD is not: `_foreign_stages`
+        answers None whatever the far card's stage, so Review does NOT release it and only the
+        `done` half of "Review or Done" works — `done` is read here BEFORE any board read.
+        403-ON-THE-TASK is not either, and there no form of finishing works at all: `get_task`
+        raises before `done` is looked at.
 
         Three cheap answers come before any board read. A 404 on the task itself means it was
         deleted between the successor's relation read and this one — a narrow race, since
@@ -773,6 +802,15 @@ class Workflow:
                     {"id": pid, "title": f"task {pid}"},
                     f"unknown — the token got 403 reading task {pid}, so whether it is "
                     f"finished cannot be established",
+                    {
+                        "escape": (
+                            f"task {pid} is unreadable by this token, so finishing it cannot "
+                            f"release this card at all — not even marking it done, since the "
+                            f"read fails BEFORE `done` is looked at. Share its project with "
+                            f"this token, or remove the follows/blocked relation on this card"
+                        ),
+                        "finishable": False,
+                    },
                 )
             raise
         if pred.get("done"):
@@ -788,16 +826,97 @@ class Workflow:
                 pred,
                 f"unknown — project {proj} has no readable tracker board for this token "
                 f"(403/404), so whether it is finished cannot be established",
+                {
+                    "escape": (
+                        f"moving the predecessor to Review will NOT release this card while "
+                        f"project {proj}'s board is unreadable — marking it done WILL, because "
+                        f"`done` is read before the board. Otherwise give this token a readable "
+                        f"board (share project {proj}, or run `vikunja-mcp setup` against it if "
+                        f"its kanban view is missing), which makes the stage knowable rather "
+                        f"than releasing the card, or remove the follows/blocked relation"
+                    ),
+                    "finishable": False,
+                },
             )
         stage = stages.get(pid)
         if stage is None:
             return (
                 pred,
                 f"unknown — not in any bucket of project {proj}'s board",
+                {
+                    "escape": (
+                        f"project {proj}'s board READS — the predecessor is simply in none of "
+                        f"its buckets, so put it in one (Review or Done releases this card) or "
+                        f"mark it done, which is checked before the board read either way"
+                    ),
+                    "finishable": True,
+                },
             )
         if stage in READY_STAGES:
             return None
-        return (pred, f"{stage} (project {proj})")
+        return (pred, f"{stage} (project {proj})", None)
+
+    @staticmethod
+    def _predecessor_advice(blockers: list[dict], generic: str) -> str:
+        """The advice tail under a rendered blocker list (#1190).
+
+        The generic tail ("finish that one first", "get it back to Review first") is right for
+        an ordinary blocker sitting in Build on a readable board and UNACTIONABLE for the three
+        fail-closed branches of `_offboard_predecessor`: nobody can finish a card on a board
+        they cannot read, and those are exactly the branches that never clear by themselves. So
+        the tail is keyed off WHICH branch produced each stage, via the optional `escape` key
+        `_unfinished_predecessors` carries on a blocker it could not resolve.
+
+        The switch is `finishable`, NOT the mere presence of an escape, and that distinction is
+        measured rather than tidy: the no-bucket branch reads a board that WORKS, so moving its
+        predecessor to Review really does release the card and the generic tail is correct
+        advice there. Dropping the generic tail whenever anything was unresolvable would have
+        replaced true advice with an escape on exactly that branch.
+
+        So: no escape at all -> the generic tail, byte for byte, so the ordinary refusal did not
+        move (the separator below is what keeps that literally true — the generic sentences carry
+        their own terminal punctuation, or not, exactly as they did before this). Some blocker
+        still finishable -> generic first, then the escapes, because the finishable half
+        genuinely does want finishing. NOTHING finishable -> the escapes ALONE, which is the case
+        the card is about: there the generic sentence is the one action that cannot be taken and
+        it was the only one printed."""
+        unresolvable = Workflow._predecessor_escapes(blockers)
+        if not unresolvable:
+            return generic
+        if not any(blocker.get("finishable", True) for blocker in blockers):
+            return unresolvable
+        separator = "" if generic.rstrip().endswith((".", "!", "?")) else "."
+        return f"{generic}{separator} {unresolvable}"
+
+    @staticmethod
+    def _predecessor_escapes(blockers: list[dict]) -> str:
+        """The escape clause alone, or "" when every blocker resolved to a real stage (#1190).
+
+        Split out of _predecessor_advice because `_starving_tail` needs the clause WITHOUT any
+        generic tail to append it to — next_task skips a gated card rather than refusing it, so
+        there is no refusal sentence there — and the wording must not be written twice. Escapes
+        are deduped in first-seen order: two predecessors on the same unreadable board yield one
+        sentence, not two — the two board branches word their escape around the PROJECT, not
+        the task, precisely so that dedup has something to collapse (the ref of every blocker
+        is already printed ABOVE this clause; in `_starving_tail` that is all the waiting lines,
+        not the one line before it). The 403-on-the-task branch is the exception and is right to
+        be: its escape is about that one task.
+
+        The lead says nothing about who can act, deliberately. An earlier wording claimed the
+        blocker "will NEVER clear by itself and no agent can unblock it", which is true of the
+        two fail-CLOSED-forever branches and FALSE of the no-bucket one, where an agent moving
+        the predecessor into Review clears it."""
+        escapes: list[str] = []
+        for blocker in blockers:
+            escape = blocker.get("escape")
+            if escape and escape not in escapes:
+                escapes.append(escape)
+        if not escapes:
+            return ""
+        return (
+            "At least one of those stages could NOT be established, and nothing on THIS board "
+            "changes that. What does: " + "; ".join(escapes)
+        )
 
     @staticmethod
     def _assignee_ids(task: dict) -> list[int]:
@@ -1523,6 +1642,15 @@ class Workflow:
                 f"Backlog (return_task) — a human must re-triage the head before the tail "
                 f"can resume."
             )
+        # #1190: the same clause shape as `retriage` above, for the same reason, on the other
+        # kind of tail that does NOT self-clear. next_task SKIPS a gated card rather than
+        # refusing it, so a card parked by `handoff` behind an unresolvable predecessor never
+        # produces claim's refusal under an ordinary /loop drain — this message is the only
+        # place its human is ever told anything. Conditional, so the plain starving message is
+        # byte-for-byte what it was (pinned wholesale in test_workflow_sequence_gate).
+        escapes = self._predecessor_escapes([b for w in waiting for b in w["blocked_by"]])
+        if escapes:
+            message += f". {escapes}"
         return {
             "task": None,
             "starving": True,
@@ -1681,8 +1809,11 @@ class Workflow:
             joined = "; ".join(f"{b['ref']} in '{b['stage']}'" for b in blockers)
             raise WorkflowError(
                 f"can't claim {self._ref(task)} yet — it's waiting on an unfinished "
-                f"predecessor: {joined}. A predecessor becomes ready only at Review or Done; "
-                f"finish that one first"
+                f"predecessor: {joined}. "
+                + self._predecessor_advice(
+                    blockers,
+                    "A predecessor becomes ready only at Review or Done; finish that one first",
+                )
             )
         # WIP slot gate (generalises the #38 single-WIP flag): refuse a claim that would put this
         # token over its allowed number of simultaneously active tasks. It gates THIS transition
@@ -1943,9 +2074,12 @@ class Workflow:
                 joined = "; ".join(f"{b['ref']} in '{b['stage']}'" for b in blockers)
                 raise WorkflowError(
                     f"can't move {self._ref(task)} to Review yet — its predecessor is being "
-                    f"reworked below Review: {joined}. Finish that predecessor's rework and get "
-                    f"it back to Review first, then advance this one (a predecessor is 'ready' "
-                    f"only at Review or Done)."
+                    f"reworked below Review: {joined}. "
+                    + self._predecessor_advice(
+                        blockers,
+                        "Finish that predecessor's rework and get it back to Review first, then "
+                        "advance this one (a predecessor is 'ready' only at Review or Done).",
+                    )
                 )
             # #657: DISJUNCTIVE guard, so it must name WHICH field failed it. The old text
             # listed both whatever was actually wrong, which made two very different states
