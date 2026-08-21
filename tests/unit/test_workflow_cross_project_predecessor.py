@@ -671,9 +671,11 @@ def test_a_predecessor_whose_project_id_is_not_an_int_is_fail_OPEN(env):
     same as the one above and both are worth a pin, because between them they are the whole of
     what `_offboard_predecessor` lets through on the strength of the `project_id` ALONE. They are
     not the whole of what it answers before a board read: the 404 on the task and the `done` flag
-    also return early, and those two are ANSWERS (deleted, ready) rather than escapes from an
-    unknown. Control first, in the same round: with an int `project_id` the very same predecessor
-    BLOCKS."""
+    also return early, and those two are ANSWERS (deleted, ready). So is the OTHER escape — the
+    test above and `docs/dossier/workflow.md` both read `proj == self.project_id` as a
+    CONTRADICTION #126 settled, not as an unknown — which leaves THIS one as the only release
+    here that is an escape from an unknown rather than an answer (#1214). Control first, in the
+    same round: with an int `project_id` the very same predecessor BLOCKS."""
     api, wf = env
     _proj, far = _sibling_blocker(api, stage="Build")
     control = _blocked_card(api, far["id"])

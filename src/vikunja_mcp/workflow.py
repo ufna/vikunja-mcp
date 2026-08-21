@@ -778,10 +778,25 @@ class Workflow:
     ) -> tuple[dict, str, dict | None] | None:
         """Resolve a predecessor that is on no bucket of THIS project's board (#1179).
 
-        Returns (task, stage, advice) when it still BLOCKS, or None when it does not. Every
-        ambiguous outcome returns a blocking triple with the reason spelled into the stage
-        string, because the failure this closes is precisely an unknown being rendered as
-        "gone": noisy beats quiet, and the card's human reads that string in the refusal.
+        Returns (task, stage, advice) when it still BLOCKS, or None when it does not. PAST the
+        `project_id` check below, exactly ONE outcome stops the predecessor blocking, and it is
+        the far board reporting a stage for it that is READY; an ambiguous one either returns a
+        blocking triple with the reason spelled into the stage string or PROPAGATES (measured: a
+        board read that 500s or 401s does, by `_foreign_stages`, and that path has no triple to
+        return rather than a releasing one). The failure this closes is precisely an unknown being
+        rendered as "gone": noisy beats quiet, and the card's human reads that string in the
+        refusal. Scoped that way since #1198 in three other places — the dossier and this method's
+        own tests key it on the same `project_id` check, CLAUDE.md by enumerating the three
+        BLOCKING returns. TWO things sit outside that scope: the check itself, where the two
+        fail-OPEN returns live, and, in the STEADY state, a predecessor whose whole PROJECT the
+        token cannot read, which does not reach this method at all (last paragraph). That
+        qualifier is doing work: lose access BETWEEN the successor's relation read and this one
+        and the far card is still embedded, the guard IS reached and its 403 branch fires — the
+        race `tests/unit/fakes.py` models deliberately, and whose LIVE reachability the dossier
+        records as UNMEASURED. That 403 branch is also the one BLOCKING return answering BEFORE
+        the check, and the ordering is measured rather than read off the code — holding the far
+        card's `project_id` at OURS, the value that otherwise releases, and varying only the read:
+        read OK -> claim ALLOWED, read 403 -> claim REFUSED.
 
         `advice` is None on the one branch that resolved a real stage; on each of the three
         that could not it carries two keys merged onto the blocker dict (#1190) —
@@ -813,23 +828,29 @@ class Workflow:
         absent from our exhaustive board is self-contradictory, so it keeps the pre-#1179
         answer rather than inventing a blocking state out of a contradiction.
 
-        TWO of the early returns are fail-OPEN — escapes from an unknown rather than answers to
-        it — and together they are the whole asymmetry (#1198): `proj` not being an int, and
-        `proj == self.project_id`. Only the second is in the enumeration above; the non-int one
-        is not, and that is the pair, not a subset of those three. The second means the
-        IDENTICAL physical situation — a task in project P, absent from P's board — is
-        fail-CLOSED when P is a neighbour and fail-OPEN when P is ours. Deliberate and pinned
+        TWO of the early returns are fail-OPEN, and together they are the whole asymmetry (#1198):
+        `proj` not being an int, and `proj == self.project_id`. Only the second is in the
+        enumeration above; the non-int one is not, and that is the pair, not a subset of those
+        three. What they share is the `project_id` check — between them they are the whole of what
+        this method lets through on the strength of that field ALONE — and WHY each releases is
+        where they part (#1214): the non-int one IS an escape from an unknown, the our-project one
+        an ANSWER to a contradiction. That second reading is the tree's rather than this
+        paragraph's: the enumeration above carries it as one of the three cheap answers, and
+        `docs/dossier/workflow.md` and the asymmetry test's own docstring both put it on #126. The
+        second means the IDENTICAL physical situation — a task in project P, absent from P's board
+        — is fail-CLOSED when P is a neighbour and fail-OPEN when P is ours. Deliberate and pinned
         with the neighbour case as its control: our exhaustive board is the same read
         claim/advance judge by, so absence from it is a contradiction rather than an unknown.
 
-        AND THE FAIL-CLOSED GUARANTEE COVERS ONLY WHAT REACHES THIS METHOD (#1198). Measured on
-        a live 2.3.0 with a two-reader control: when the token loses access to the neighbour
+        AND THE FAIL-CLOSED GUARANTEE COVERS ONLY WHAT REACHES THIS METHOD (#1198). Measured on a
+        live 2.3.0 with a two-reader control: when the token loses access to the neighbour
         PROJECT, the server strips the far card out of `related_tasks` altogether — the owner
         reads `{'blocked': [4]}` and the agent reads `{}` at the same moment — so
-        `_unfinished_predecessors` iterates nothing and this method is never called at all. That
-        card is released with its blocker untouched. It is an ACCEPTED limit rather than an
-        oversight: what the gate can read is this token's own side of a relation the server
-        will not show it. Do NOT read the three blocking returns below as covering it."""
+        `_unfinished_predecessors` iterates nothing and, in that steady state, this method is
+        never called at all. That card is released with its blocker untouched. It is an ACCEPTED
+        limit rather than an oversight: what the gate can read is this token's own side of a
+        relation the server will not show it. Do NOT read the three blocking returns below as
+        covering it."""
         try:
             pred = self.api.get_task(pid)
         except VikunjaError as exc:
