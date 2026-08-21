@@ -121,27 +121,79 @@ def test_a_float_target_is_still_refused_at_the_boundary():
     assert "valid string" in str(payload) or "valid integer" in str(payload), payload
 
 
-def test_a_json_boolean_becomes_project_1_on_BOTH_cross_project_doors():
-    """A CHARACTERISATION, not an endorsement — and the reason it asserts SAMENESS.
+def test_a_json_boolean_is_refused_on_ALL_THREE_cross_project_doors():
+    """The SAMENESS this used to assert, kept and widened — it is now a pin on the FIX (#1207).
 
-    Lax pydantic renders `true` as the integer 1, so `_resolve_sibling`'s explicit bool guard
-    (`isinstance(to, bool)` -> refusal) is unreachable from the wire: the tool body is handed a
-    plain 1 and cannot tell. That is not a hole this card opened: `file_task(project_id=true)`
-    arrives as project 1 in the same run, on a door annotated `int | None` since `f0e7aef` —
-    nothing is claimed about the years in between, since the boundary machinery was swapped at
-    `0543463`. Closing it while KEEPING the int shape means strict pydantic types at server.py
-    MODULE scope — a NEW import on the path #521 cleared (measured: importing that module today
-    loads no pydantic at all) — so it is filed as VMCP-307 (1207) rather than smuggled in here.
+    It was a characterisation: lax pydantic renders a JSON `true` as the integer 1 in the SDK's
+    validation, BEFORE the tool body, so `_resolve_sibling`'s `isinstance(to, bool)` guard was
+    handed a plain 1 and every door filed onto project 1 with `is_error=False`. Closed by
+    `server._refuse_boolean_targets`, a before-validator attached at `_server()` time.
 
-    Asserting that the two doors agree is what makes this useful: fix one and this goes red,
-    asking whether the other was meant to stay behind."""
+    THREE doors in ONE run and not two, and the sameness is still the point: fix or break one
+    and leave another behind, and this goes red asking about the others. `transfer_task` is here
+    because it is a door too — the old two-door version was written when `to` had only just
+    become `str | int` and it left the third measured but unpinned.
+
+    THE LAST ROW IS THE CONTROL, and it is what the cheap fix would have cost. `StrictInt` on
+    `file_task.project_id` refuses the boolean as well, and stops a QUOTED id working with it;
+    a before-validator refuses the boolean alone. Measured in the same run, so "nothing else
+    moved" is a row rather than a belief.
+
+    MUTATION SWEEP — see the docstring of test_the_boolean_refusal_is_not_advertised_anywhere.
+    """
     results = _drive_probe_server([
         ("handoff", {"task_id": 1200, "to": True, "title": "x"}),
+        ("transfer_task", {"task_id": 1200, "to": True, "reason": "wrong board"}),
         ("file_task", {"title": "x", "project_id": True}),
+        ("file_task", {"title": "x", "project_id": "17"}),
     ])
-    assert [err for err, _ in results] == [False, False], results
-    handoff_payload, file_task_payload = (payload for _, payload in results)
-    assert (handoff_payload["to"], handoff_payload["to_type"]) == (1, "int"), handoff_payload
-    assert (
-        file_task_payload["project_id"], file_task_payload["project_id_type"]
-    ) == (1, "int"), file_task_payload
+    refusals, control = results[:3], results[3]
+    assert [err for err, _ in refusals] == [True, True, True], results
+    for _err, payload in refusals:
+        assert "true/false" in str(payload), payload
+    is_error, payload = control
+    assert not is_error, control
+    assert (payload["project_id"], payload["project_id_type"]) == (17, "int"), control
+
+
+def test_the_boolean_refusal_is_not_advertised_anywhere():
+    """The published schema must keep saying what the validator now enforces, on all three.
+
+    The tempting one-line fix is to widen the union with `bool` so that `_resolve_sibling`'s
+    existing guard becomes reachable from the wire. It works, and it makes the server ADVERTISE
+    a type it always refuses — the disagreement `_forbid_unknown_tool_arguments`'s "WHY BOTH
+    LINES" is about, pointing the other way. So the schema is pinned beside the behaviour.
+    `file_task.project_id` is in here for the first time: the sibling assertion above it has
+    only ever read the two `to` doors.
+
+    MUTATION SWEEP for both tests, run in a CLONE of this tree with `__pycache__` deleted and
+    PYTHONDONTWRITEBYTECODE=1 per round, `vikunja_mcp.__file__` printed and resolving inside the
+    clone every round. Selection: this file plus tests/unit/test_advance_report_arguments.py, 30
+    collected in every round including the control — that figure moves with every landing that
+    touches either file, so re-measure it rather than reusing it. Rounds read by COUNTING lines
+    beginning `FAILED `, with `ERROR ` counted separately and 0 throughout. The second file is in
+    the selection because `_refuse_boolean_targets` rebuilds the very arg models
+    `_forbid_unknown_tool_arguments` had already mutated and #720's pins live there, including
+    the one asserting every published schema still carries `additionalProperties: false` — a
+    round that broke that interaction has to be visible rather than inferred.
+
+      control 0 failed   drop the `_refuse_boolean_targets` call from `_server()`  -> 1 failed
+      control 0 failed   drop `file_task` from `_TARGET_PROJECT_ARGUMENTS`         -> 1 failed
+      control 0 failed   `_not_a_boolean` returns the value instead of raising     -> 1 failed
+      control 0 failed   add `bool` to handoff's `to` annotation, fix left in      -> 2 failed
+      control after restore 0 failed
+
+    The first three kill the sameness test above and nothing else, which is the point of writing
+    it as one run over three doors. The last round is the one worth reading: the boolean is still
+    REFUSED there (the validator does not care what the union admits), so what dies is the pair of
+    SCHEMA assertions — this test and test_the_wire_schema_and_the_docstring_promise_agree[handoff]
+    — i.e. exactly the "advertises what it always refuses" state, caught by shape rather than by
+    behaviour.
+    """
+    for tool, argument, expected in (
+        ("handoff", "to", {"string", "integer"}),
+        ("transfer_task", "to", {"string", "integer"}),
+        ("file_task", "project_id", {"integer", "null"}),
+    ):
+        schema = _tools()[tool].input_schema["properties"][argument]
+        assert _accepted_types(schema) == expected, (tool, schema)

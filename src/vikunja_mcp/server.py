@@ -60,6 +60,7 @@ def _server():
         for fn in _DEFERRED_TOOLS:
             _mcp_server.tool()(fn)
         _forbid_unknown_tool_arguments(_mcp_server)
+        _refuse_boolean_targets(_mcp_server)
     return _mcp_server
 
 
@@ -160,6 +161,96 @@ def _forbid_unknown_tool_arguments(server) -> None:
                 "published schema still allows them, or it already REFUSES them while its "
                 "published schema still allows them. Never the reverse — the published "
                 "schema is assigned last, so it cannot deny ahead of validation",
+                file=sys.stderr,
+            )
+        except Exception:
+            pass
+
+
+# The THREE cross-project doors and the argument naming the TARGET board on each (#1207). A
+# wrong value here does not fail loudly — it writes onto SOMEBODY ELSE'S board — which is what
+# separates these three from every other int-typed argument on the surface.
+_TARGET_PROJECT_ARGUMENTS = {"handoff": "to", "transfer_task": "to", "file_task": "project_id"}
+
+
+def _not_a_boolean(value):
+    """The refusal itself. Raised INSIDE pydantic, so an agent gets it named by argument."""
+    if isinstance(value, bool):
+        raise ValueError(
+            'a project id is a number (17) or a quoted number ("17"), and handoff/'
+            "transfer_task's `to` also takes a sibling NAME from this repo's config — a JSON "
+            "true/false is none of those. Left alone it arrives as project 1 and files onto "
+            "THAT board. Nothing was changed."
+        )
+    return value
+
+
+def _refuse_boolean_targets(server) -> None:
+    """Stop a JSON `true` from silently addressing project 1 on a cross-project door (#1207).
+
+    WHAT IS BROKEN WITHOUT THIS, measured at the real boundary (real `MCPServer` over real
+    stdio, the echo Workflow of tests/unit/_stdio_arg_probe_server.py), all rows in one run:
+
+        handoff(to=true) -> is_error=False, the tool body receives int 1
+        transfer_task(to=true) -> the same    file_task(project_id=true) -> the same
+        CONTROL, same run: to=17 -> int | to="17" -> str | to="backend" -> str
+                           to=1.5 -> REFUSED | file_task(project_id="17") -> int 17
+
+    Lax pydantic renders a JSON boolean as the integer 1, and it does so in the SDK's
+    validation, BEFORE the tool body exists — so `Workflow._resolve_sibling`'s explicit
+    `isinstance(to, bool)` guard is handed a plain 1 and cannot tell the two apart. The
+    boundary is not simply permissive (a float dies there), and `config.py` refuses exactly
+    this shape for the toml `siblings` registry, so the wire was the one door left open.
+
+    WHY A BEFORE-VALIDATOR AND NOT A STRICT TYPE. A strict annotation closes it too, at two
+    prices. One is a pydantic import at MODULE scope, on the paths #521 cleared (re-measured
+    best-of-15 subprocess wall on one machine: `import vikunja_mcp.server` 67.7 ms against
+    79.0 ms with pydantic — an 11 ms increment, smaller than the card assumed but not nothing on
+    something hgdev-acp spawns per poll tick). The other is measured AT THE BOUNDARY and not in
+    raw pydantic, because #1200's whole finding is that those two layers disagree: one process,
+    the annotation swapped before registration, THIS fix as the control in the same run —
+
+        shipped:           project_id=true REFUSED | =17 -> int 17 | ="17" -> int 17
+        StrictInt | None:  project_id=true REFUSED | =17 -> int 17 | ="17" -> REFUSED
+
+    — so it also costs the quoted id, which works today and is a shape an agent plausibly emits.
+    Both schemas were identical throughout. A `pydantic.Strict()` appended HERE instead of a
+    validator does not work at all, and the reason is worth recording rather than
+    re-discovering: `RuntimeError: Unable to apply constraint 'strict' to schema of type
+    'union'`.
+
+    WHY THE PUBLISHED SCHEMA IS NOT REASSIGNED, where its sibling above assigns it explicitly.
+    Nothing in `tool.parameters` ever advertised a boolean — `to` is `anyOf [string, integer]`,
+    `project_id` is `anyOf [integer, null]` — so the two ends AGREE both before and after, and
+    there is nothing to re-publish. Measured: regenerating the schema after this mutation
+    returns it unchanged, `additionalProperties: false` included.
+
+    BEST-EFFORT, on the same terms as `_forbid_unknown_tool_arguments` and with its OWN
+    try/except deliberately: folding the two together would let one failure disable the other
+    gate, and that function's #778 post-mortem enumerates ITS part-way states, not a merged
+    one's. A failure here degrades to the pre-#1207 behaviour and writes one line to stderr; it
+    never raises, because a stdio server that refuses to start is worse for every consumer than
+    one that keeps the hole. It reaches into no private this module does not already depend on.
+    """
+    try:
+        from pydantic import BeforeValidator
+
+        tools = getattr(server._tool_manager, "_tools", None)
+        if not tools:
+            raise RuntimeError("no tool registry on the tool manager")
+        for name, argument in _TARGET_PROJECT_ARGUMENTS.items():
+            arg_model = tools[name].fn_metadata.arg_model
+            arg_model.model_fields[argument].metadata.append(BeforeValidator(_not_a_boolean))
+            arg_model.model_rebuild(force=True)
+    except Exception as exc:                      # noqa: BLE001 — see BEST-EFFORT above
+        if sys.stderr is None:                    # print(file=None) would go to STDOUT
+            return
+        try:
+            print(
+                "vikunja-mcp: could not refuse boolean project targets "
+                f"({exc.__class__.__name__}: {exc}); a JSON true on handoff/transfer_task's "
+                "`to` or on file_task's project_id will address project 1 instead of being "
+                "refused, as before #1207 — on every door this failed to reach",
                 file=sys.stderr,
             )
         except Exception:
