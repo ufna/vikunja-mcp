@@ -542,3 +542,74 @@ def test_claim_keeps_a_PER_CALL_memo_so_nothing_is_cached_ACROSS_calls(env):
     with pytest.raises(WorkflowError):
         wf.claim(succ["id"])
     assert len([c for c in seen if c[0] == proj["id"]]) == 2, seen
+
+
+# --- #1198: what the fail-closed guarantee covers, and the ASYMMETRY inside it -------------
+#
+# "Unknown must never be spelled gone" is true of every path THROUGH `_offboard_predecessor`
+# and says nothing about a predecessor that never reaches it. The one that never reaches it
+# was measured by #1179's independent reviewer on a live 2.3.0 with a two-reader control: when
+# the token loses access to the neighbour PROJECT, the server strips the far card out of
+# `related_tasks` entirely — owner reads {'blocked': [4]}, agent reads {} at the same moment —
+# so `_unfinished_predecessors` iterates nothing and the card is released with its blocker
+# untouched. That is an ACCEPTED limit and there is nothing here to pin it with: it is a
+# property of the SERVER's read filtering, above every line of ours. The prose that used to
+# state the guarantee without that caveat is narrowed in CLAUDE.md and
+# `docs/dossier/workflow.md`. What CAN be pinned is the pair below.
+#
+# MUTATION SWEEP over exactly that pair, in a CLONE, `__pycache__` deleted and
+# PYTHONDONTWRITEBYTECODE=1 per round, `vikunja_mcp.__file__` printed per round and resolving
+# inside the clone, selection this file plus `test_workflow_sequence_gate.py`, 92 collected in
+# every round including the control:
+#
+#   control 0 failed   round: make OUR-project-id fail-CLOSED       -> 2 failed
+#   control 0 failed   round: make a non-int project id fail-CLOSED -> 1 failed
+#   control 0 failed   round: remove BOTH escapes                   -> 3 failed
+#
+# The extra kill in rows one and three is `test_next_task_deleted_predecessor_still_not_a_blocker`
+# in the sequence-gate file, and it is why the OUR-project escape is not cosmetic. That test
+# models #126's "genuinely gone" case as an ORPHAN — the predecessor is still fetchable, claims
+# OUR project id, and sits in no bucket of our exhaustive board — which is EXACTLY the shape this
+# escape releases. (A literally deleted card is a different door: `get_task` 404s and the branch
+# above answers first.) Close the escape and #126's own case starts blocking.
+
+
+def test_a_predecessor_claiming_OUR_project_id_is_fail_OPEN_where_a_neighbours_is_fail_CLOSED(
+    env,
+):
+    """The asymmetry, as ONE round carrying its own control. The identical physical situation —
+    a task in project P, absent from P's board — releases the card when P is OURS and blocks it
+    when P is a neighbour. Deliberate: our exhaustive board is the same read `claim`/`advance`
+    judge by, so absence from it is a CONTRADICTION rather than an unknown, and #126 already
+    settled that answer. On a neighbour's board nothing licenses that inference."""
+    api, wf = env
+    ours = api.add_task("ours", "Build")
+    del api.task_bucket[ours["id"]]              # on OUR board, in no bucket of it
+    open_succ = api.add_task("open succ", "Queue")
+    api.add_relation(open_succ["id"], ours["id"], "blocked")
+    assert wf.claim(open_succ["id"])["claimed"] is True
+
+    proj, far = _sibling_blocker(api, stage="Build")
+    del api.task_bucket[far["id"]]               # the SAME shape, one project over
+    closed_succ = _blocked_card(api, far["id"])
+    with pytest.raises(WorkflowError) as exc:
+        wf.claim(closed_succ["id"])
+    assert f"not in any bucket of project {proj['id']}'s board" in str(exc.value)
+
+
+def test_a_predecessor_whose_project_id_is_not_an_int_is_fail_OPEN(env):
+    """The SECOND fail-open escape, and the one the author of #1179 recorded. It is not the
+    same as the one above and both are worth a pin, because between them they are the whole of
+    what `_offboard_predecessor` lets through on the strength of the `project_id` ALONE. They are
+    not the whole of what it answers before a board read: the 404 on the task and the `done` flag
+    also return early, and those two are ANSWERS (deleted, ready) rather than escapes from an
+    unknown. Control first, in the same round: with an int `project_id` the very same predecessor
+    BLOCKS."""
+    api, wf = env
+    _proj, far = _sibling_blocker(api, stage="Build")
+    control = _blocked_card(api, far["id"])
+    with pytest.raises(WorkflowError):
+        wf.claim(control["id"])
+    api.tasks[far["id"]]["project_id"] = None
+    succ = _blocked_card(api, far["id"])
+    assert wf.claim(succ["id"])["claimed"] is True

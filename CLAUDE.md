@@ -149,11 +149,15 @@ measured shape of both exemptions.
   "genuinely gone -> not a blocker" branch and the card was released with its blocker untouched.
   Measured with a same-project control in the same round: control REFUSED/withheld, cross
   ALLOWED/OFFERED. Off-board predecessors now resolve via `get_task` + that project's board, and
-  **every unresolvable one BLOCKS rather than vanishes** (403, no kanban view, not in any bucket):
-  unknown must never be spelled "gone". `handoff` and `transfer_task` are the two ways a card
-  crosses the boundary — `[handoff]` parks YOUR card in Queue blocked on a new one in the
-  neighbour's Backlog (no `blocked` LABEL: the label suppresses the offer permanently and would
-  defeat the self-clearing resume), `[moved]` carries the card itself over. **Both land in the
+  **every unresolvable one that REACHES the guard BLOCKS rather than vanishes** (403, no kanban
+  view, not in any bucket): unknown must never be spelled "gone". **A predecessor whose whole
+  PROJECT is invisible to the token never reaches it** (tracker #1198) — measured with a
+  two-reader control, the server strips it from `related_tasks` first, so that card is released
+  with its blocker untouched. Accepted limit, not a defect to fix quietly.
+  `handoff` and `transfer_task` are the two ways a card crosses the boundary —
+  `[handoff]` parks YOUR card in Queue blocked on a new one in the neighbour's Backlog (no
+  `blocked` LABEL: the label suppresses the offer permanently and would defeat the self-clearing
+  resume), `[moved]` carries the card itself over. **Both land in the
   target's BACKLOG, never its Queue**, and both are shut from Review and Your Call, where
   something is pending on THIS board.
   **Behavior changes belong here, with a unit test per gate.**

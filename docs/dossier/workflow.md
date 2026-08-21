@@ -354,7 +354,7 @@ it fetches, and the required set drives only when the paging LOOP stops. So the 
 a Done deep enough to fall outside the pages the required buckets already forced, which is exactly
 the Done #43 exists because of. `FakeAPI` models that truncation as `tasks[:page_size]`, so page
 one is the floor there rather than the rule; the shape of the defect is the same and its threshold
-is the server's, not the fake's"
+is the server's, not the fake's.
 
 `done` IS checked before the board read, but that is the task's `done` FLAG and not its bucket:
 a card moved into a Done bucket keeps `done` false, and what releases it is `READY_STAGES`
@@ -364,13 +364,103 @@ still passes and only the flag test fails — control 0 failed, that round 2 fai
 in both. Narrowing the read is therefore a separate design question, not a smaller version of
 this one.
 
-**UNKNOWN IS NOT GONE — the rule the whole card turns on.** Three outcomes cannot establish
-a stage: 403 on the task, 403/404 on the neighbour's board, and a task that is on no bucket
-of it. All three return a BLOCKING pair with the reason spelled into the stage string, which
-the refusal then shows the human (`… in 'unknown — the token cannot read project 107's board
-(403)…'`). Fail-closed is the whole point: rendering an unknown as "gone" is the defect this
-card exists to remove, and re-introducing it one level down would be worse, because there it
-would look like a considered decision.
+**UNKNOWN IS NOT GONE — the rule the whole card turns on, AND IT COVERS ONLY WHAT REACHES THE
+GUARD (#1198).** Three outcomes cannot establish a stage: 403 on the task, 403/404 on the
+neighbour's board, and a task that is on no bucket of it. All three return a BLOCKING triple with
+the reason spelled into the stage string, which the refusal then shows the human — with the
+project id substituted, `unknown — project 107 has no readable tracker board for this token
+(403/404), so whether it is finished cannot be established`. Fail-closed is the whole point:
+rendering an unknown as "gone" is the defect this card exists to remove, and re-introducing it one
+level down would be worse, because there it would look like a considered decision.
+
+*(That quotation was wrong in this file through three landings — it arrived with #1179 and
+survived #1190 and #1199, both of which edited this section. It read `… in 'unknown — the token
+cannot read project 107's board (403)…'`, which occurs nowhere else in the tree and nowhere in
+the code at all: a paraphrase wearing quotation marks.
+`tests/unit/test_repo_quotation_claims.py` never saw it, because the sentence carried none of the
+assertive idioms that gate reads — that gate as scoped today cannot see this class of quotation,
+which is why it was fixed by hand.)*
+
+**THE UNIVERSAL WAS WIDER THAN THE GUARANTEE, and its counterexample sits one layer ABOVE this
+code (#1198).** CLAUDE.md said "every unresolvable one BLOCKS rather than vanishes", full stop,
+and this file said the same in its own words under the heading above — the quoted form was only
+ever CLAUDE.md's. Either way it is true of `_offboard_predecessor`'s three BLOCKING returns and
+false of the predecessor a reader most naturally pictures — one whose project the token cannot
+read — because that predecessor never reaches them. Measured by #1179's independent reviewer on
+a throwaway vikunja/vikunja:2.3.0, with a two-reader control in the same moment: home project
+and neighbour both shared with the agent token, `handoff` creates the cross-project `blocked`
+relation, then the neighbour is unshared (`DELETE /projects/6/users/agent1` -> 200).
+
+    SHARED:    agent sees `blocked: [4]`; claim REFUSES; next_task withholds with starving: true
+    UNSHARED:  agent's get_task(home_card)["related_tasks"] == {} ; claim ALLOWED; card OFFERED
+    CONTROL:   same card, same moment — owner reads {'blocked': [4]}, agent reads {}
+
+The row that closes the "the unshare deleted the relation row" alternative is the third: the row
+is intact, the READ is filtered. So state the guarantee at its real width, which takes two clauses
+and not one: unknown is never spelled "gone" for a predecessor that REACHES the guard carrying an
+integer `project_id` that is not ours — the two fail-OPEN escapes below are the other exceptions
+and they are inside the guard, not above it — and a predecessor whose whole project is invisible
+to the token does not reach the guard at all, because the server removes it from the relation
+payload before our code sees it. The first clause is what this section used to leave out; the
+second is what this card is about. `workflow.py`'s own heading states the necessary condition
+("COVERS ONLY WHAT REACHES THIS METHOD") and is right as it stands, and CLAUDE.md's parenthetical
+(403, no kanban view, not in any bucket) is what scopes "unresolvable" there to the three
+BLOCKING returns.
+
+**AND ONE FAIL-CLOSED BRANCH IS NOT UNREACHABLE — the opposite worry, also measured, and about
+ONE branch rather than three.** #1179 asked whether those three branches could manufacture
+never-claimable cards. The unshare route above says they cannot be reached THAT way, and that is
+one route rather than all of them. The route that reaches the UNREADABLE-BOARD branch needs no
+permission change at all: DELETE the neighbour's kanban view. Measured by the same reviewer on a
+throwaway 2.3.0 with a control in the same round:
+
+    CONTROL (view intact): relation visible | far task readable | far board readable
+                           claim REFUSED -> "#1 (94) in 'Backlog (project 78)'"
+    ROUND   (view DELETEd, 200): relation visible | far task readable | far board 404
+                           claim REFUSED -> "… in 'unknown — project 78 has no readable
+                           tracker board for this token (403/404) …'"
+
+The card is then unclaimable until somebody acts OFF this board, with its relation fully
+visible — not permanently, since #1190's own measurement shows `update_task(pred, done=True)`
+releases it, which is exactly why the refusal now names that escape. `api.py`'s own 404 text for
+this case tells the reader to run `vikunja-mcp setup`, a hint that a project WITHOUT a canonical
+board is an expected state here rather than an exotic one. None of it argues for softening the
+branch, since releasing the card is the defect it exists to prevent; it is why #1190, about the
+refusal's ADVICE, is the load-bearing follow-up rather than a nicety. The other two branches'
+live reachability is UNMEASURED: the 403-on-the-task branch was left open by #1179's reviewer
+(no permission change was landed between the relation read and the board read) and the no-bucket
+branch has never been exercised against a server at all.
+
+**TWO fail-OPEN escapes, not one, and the asymmetry is deliberate.** `_offboard_predecessor`
+returns None — not a blocker — both when `project_id` is not an int and when it EQUALS our own
+project id. The second means the identical physical situation, a task in project P that is absent
+from P's board, is fail-CLOSED when P is a neighbour and fail-OPEN when P is ours. That is right
+and stays: on OUR board the exhaustive read is the same one `claim` and `advance` judge by, so
+"absent from it while claiming to be on it" is a contradiction rather than an unknown, and #126
+already fixed the answer to it. Both escapes are pinned in
+`tests/unit/test_workflow_cross_project_predecessor.py` with the neighbour case as the CONTROL in
+the same round, which is what makes the asymmetry a measurement rather than a reading of the code.
+
+**THE RESIDUAL GAP IS ACCEPTED AND DOCUMENTED, NOT CLOSED.** A card whose blocker lives on a
+project this token cannot read is released with its blocker untouched, and nothing THE GATE READS
+says so. (Something on the BOARD may: `handoff` writes a `[handoff]` comment naming the far card
+and its project, and #1179's reviewer measured that comment as the only board-visible signal —
+but no gate reads comments.) Closing the gap means the gate can no longer key off `related_tasks`
+alone, since the only thing the token can read is its own side of a relation it can no longer
+see. The options are then a durable MARKER on the card at `handoff` time — whose write half
+already exists as that comment, so what is missing is a reader, and it would only ever cover
+relations WE created — or a mirror of the relation kept somewhere the server will not filter.
+Neither was built, on #1198's own recommendation.
+
+**Do not read the failure mode as narrow — read it as SILENT and one-directional.** The condition
+is simply "this token cannot read the blocker's project at read time", and unshare-after-`handoff`
+is the route that was MEASURED, not the definition. Two others need no removal and no "after": a
+human links a card here to a card in a project this token was never shared (relations are made by
+whoever can see both ends, and the human can), and a human moves the predecessor INTO an
+unreadable project — #1179 measured that relations survive a project move. Neither of those was
+measured here, and neither was the frequency of any of them. What IS one-directional is the
+outcome: the gap fails toward work continuing in the wrong order rather than toward work
+stalling.
 
 **THE ADVICE UNDER THAT STRING HAD TO BECOME BRANCH-CONDITIONAL (#1190), and the blocking
 decision did not move an inch.** Both REFUSALS that render a blocker list used to end in one

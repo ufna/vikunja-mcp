@@ -807,7 +807,25 @@ class Workflow:
         deleting a card takes its relation rows with it — and there "gone" is simply true.
         `done` is ready by definition. And a predecessor claiming OUR project id while being
         absent from our exhaustive board is self-contradictory, so it keeps the pre-#1179
-        answer rather than inventing a blocking state out of a contradiction."""
+        answer rather than inventing a blocking state out of a contradiction.
+
+        TWO of the early returns are fail-OPEN — escapes from an unknown rather than answers to
+        it — and together they are the whole asymmetry (#1198): `proj` not being an int, and
+        `proj == self.project_id`. Only the second is in the enumeration above; the non-int one
+        is not, and that is the pair, not a subset of those three. The second means the
+        IDENTICAL physical situation — a task in project P, absent from P's board — is
+        fail-CLOSED when P is a neighbour and fail-OPEN when P is ours. Deliberate and pinned
+        with the neighbour case as its control: our exhaustive board is the same read
+        claim/advance judge by, so absence from it is a contradiction rather than an unknown.
+
+        AND THE FAIL-CLOSED GUARANTEE COVERS ONLY WHAT REACHES THIS METHOD (#1198). Measured on
+        a live 2.3.0 with a two-reader control: when the token loses access to the neighbour
+        PROJECT, the server strips the far card out of `related_tasks` altogether — the owner
+        reads `{'blocked': [4]}` and the agent reads `{}` at the same moment — so
+        `_unfinished_predecessors` iterates nothing and this method is never called at all. That
+        card is released with its blocker untouched. It is an ACCEPTED limit rather than an
+        oversight: what the gate can read is this token's own side of a relation the server
+        will not show it. Do NOT read the three blocking returns below as covering it."""
         try:
             pred = self.api.get_task(pid)
         except VikunjaError as exc:
