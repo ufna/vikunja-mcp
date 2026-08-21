@@ -215,13 +215,90 @@ class FakeAPI:
         untested."""
         self._vanished[task_id] = self.tasks.pop(task_id)
 
-    def get_task(self, task_id):
-        # 1:1 with the server: an unknown id is a 404, not a KeyError. The fake used to raise
-        # KeyError, which no production `except VikunjaError` can catch — so every "the task
-        # went away under us" branch read as untestable and was written blind.
+    def drop_kanban_view(self, project_id):
+        """Make a NEIGHBOUR's board unreadable while its project and its TASKS stay readable.
+
+        The route is not invented: measured on a live 2.3.0 (#1198, control in the same round)
+        by `DELETE /projects/<pid>/views/<kanban>` -> 200, no permission changed. After it the
+        relation is still visible on the successor, the far TASK still reads, and only the board
+        read fails — which is exactly the state `_offboard_predecessor`'s unreadable-board branch
+        is written against, and the one route into it anyone has MEASURED. It is NOT the only
+        route: `_foreign_stages` renders 403-on-the-project, 404-on-the-project and no-kanban-view
+        identically as None, and the refusal's own escape names the second of those ("run
+        `vikunja-mcp setup` against it if its kanban view is missing"). What the OTHER permission
+        route cannot do is reach this branch: an unshared project 403s the TASK one branch earlier.
+        Before #1200 that branch was driven through `forbidden=True`, which modelled a permission
+        the fake then failed to apply to `get_task` at all — so the fixture was a state nothing
+        measured produces, and fixing `get_task` would have re-routed those tests to a different
+        branch in silence."""
+        self.other_projects[project_id]["view"] = None
+
+    def forbid_project(self, project_id):
+        """Close an ALREADY-BUILT project to the token, the way life does it: shared, populated,
+        then unshared. `add_project(forbidden=True)` cannot express that order.
+
+        Returns the UNDO — what a human granting this token access to that project looks like
+        here — because "share it and see what changes" is a measurement two gates want (#1190:
+        sharing makes an unknown stage KNOWABLE without releasing the card) and re-opening by
+        poking `_forbidden` from a test spells the same act two ways."""
+        self._forbidden.add(project_id)
+
+        def share():
+            self._forbidden.discard(project_id)
+
+        return share
+
+    def _read_task(self, task_id):
+        """The guard `get_task` and `update_task` SHARE — the two task-scoped calls production
+        reads a task through, and `update_task` going through it is the point rather than a
+        convenience.
+
+        NOT every task-scoped method: `add_assignee`, `remove_assignee`, `add_label` and
+        `remove_label` still index `self.tasks[task_id]` directly, so an unknown id is still a
+        bare `KeyError` there and a forbidden project is still invisible. That is the same
+        divergence class, left standing deliberately — those mirror endpoints the real client does
+        NOT read-modify-write, so what a real 2.3.0 answers there is unmeasured and copying this
+        shape across on an analogy is how a fake stops matching a server. Filed as VMCP-308 (1211)
+        with what to measure; named here so this docstring's guarantee is read as stopping where
+        it stops.
+
+        1:1 with the client, structurally: `VikunjaAPI.update_task` is read-modify-write, and its
+        FIRST statement is `self.get_task(task_id)`. So on the real client an unknown id and an
+        unreadable one raise from the READ, before any POST is ever sent, and both tools answer
+        with the same status get_task would.
+
+        404 — an unknown id. The fake used to raise KeyError here, which no production
+        `except VikunjaError` can catch, so every "the task went away under us" branch around an
+        update read as untestable and was written blind (#1200; get_task was fixed for this in
+        #1179 and its neighbour was left standing).
+
+        403 — the task belongs to a project in `_forbidden`, i.e. one that EXISTS but was never
+        shared with this token. Measured on real 2.3.0 (#1198): such a read is
+        `{"message":"You don't have the permission to see this"}`, not a 404 — the split
+        `_offboard_predecessor` keys "gone" against "unknown" on. Before #1200 `_forbidden` was
+        consulted by project-scoped calls only, so the fake could not produce a 403 on a TASK at
+        all: #1179 shipped that branch with no fixture of any kind, and #1190 reached it by
+        hand-rolling a wrapper around `api.get_task` in the test file (`git log -S'_forbid_task'`
+        names `5f26333` and nothing earlier).
+
+        KNOWN, DELIBERATE, STILL OPEN: `get_task` embeds a related task UNCONDITIONALLY, while
+        real 2.3.0 filters `related_tasks` by the READER's permission (measured, two readers on
+        the same card in the same moment: the owner reads `{'blocked': [4]}`, an agent without
+        access to the far project reads `{}` — #1198). So a forbidden project whose card is still
+        embedded in a successor models the RACE (access lost between the relation read and this
+        one), not the steady state. Teaching the fake to filter is NOT a free fidelity win — it
+        would make this 403 unreachable by any permission route and need a third, race-shaped
+        knob beside `vanish()` — and what to do about the production gap underneath it is the
+        human decision parked on #1198."""
         if task_id in self._vanished or task_id not in self.tasks:
             raise VikunjaError(404, "task does not exist")
-        t = self._snapshot(self.tasks[task_id])
+        task = self.tasks[task_id]
+        if task.get("project_id") in self._forbidden:
+            raise VikunjaError(403, "You don't have the permission to see this")
+        return task
+
+    def get_task(self, task_id):
+        t = self._snapshot(self._read_task(task_id))
         # related_tasks — дикт по kind, выведен из relations "на лету" (не хранится на таске) ->
         # add_relation сразу видно в get_task. Реальная 2.3.0 авто-создаёт ОБРАТНУЮ связь на другой
         # задаче (записали "P precedes S" — на S видно "follows: P"); add_relation не трогаем
@@ -272,7 +349,9 @@ class FakeAPI:
         return {"errors": None, "success": [att]}
 
     def update_task(self, task_id, **fields):
-        t = self.tasks[task_id]
+        # read-modify-write, exactly like the real client: the READ is what refuses an unknown
+        # (404) or unreadable (403) id, and it happens before anything is written. See _read_task.
+        t = self._read_task(task_id)
         # A project_id change is a MOVE, and real 2.3.0 re-indexes on it: measured on a live
         # container, FRNT-2 became BACK-3 when it landed in a project already holding BACK-2 —
         # the target's own counter assigns the next free index, so no collision and the OLD
@@ -350,10 +429,17 @@ class FakeAPI:
             self.shares.append((project_id, username, permission))
 
     def views(self, project_id):
-        return [dict(self._project_state(project_id)["view"])]
+        view = self._project_state(project_id)["view"]
+        return [dict(view)] if view is not None else []
 
     def kanban_view(self, project_id):
-        return dict(self._project_state(project_id)["view"])
+        # Derived from views() and refusing with the client's own words, not short-circuited on
+        # the stored view: that is what makes drop_kanban_view() reach the same branch production
+        # does (VikunjaAPI.kanban_view scans views() and raises this 404 when none is kanban).
+        for v in self.views(project_id):
+            if v["view_kind"] == "kanban":
+                return v
+        raise VikunjaError(404, "project has no kanban view — run `vikunja-mcp setup`")
 
     def buckets(self, project_id, view_id):
         found = self._project_state(project_id)["buckets"]

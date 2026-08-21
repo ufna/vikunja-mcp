@@ -291,3 +291,44 @@ What the gate does NOT reach is written where it lives rather than promised here
 working tree, so a commit message or a card description is outside it. This
 paragraph's own author committed the class while writing the guard, misquoting
 that commit subject by one letter, and the file records it.
+
+**A fake that diverges from the client makes a production branch untestable — and FIXING one
+can DELETE coverage without a single red test (#1200).** Two 1:1 gaps were closed in
+`tests/unit/fakes.py`: `update_task` raised a bare `KeyError` on an unknown id where the real
+client 404s, and `get_task` never consulted `_forbidden`, so the fake could not produce a 403 on
+a TASK at all — which is why #1179 shipped that branch with no fixture of any kind and #1190
+reached it only by hand-rolling a wrapper around `api.get_task` in the test file
+(`git log -S'_forbid_task'` names `5f26333` and nothing earlier). Both are one guard now,
+because the client has one:
+`VikunjaAPI.update_task` is read-modify-write and its FIRST statement is `self.get_task(...)`,
+so on the real client an unknown id and an unreadable one both raise from the READ, before any
+POST is built. A fake that answers 403 on the read and succeeds on the write is describing a
+server nobody has.
+
+**The interesting half is the second-order effect, and it is the reason this is written down.**
+NINE tests in `test_workflow_cross_project_predecessor.py` drove the UNREADABLE-BOARD branch
+through the fake's `forbidden` set — eight via the helper's flag, one inline — which, because of
+the very gap being fixed, left the far TASK readable. Teaching the fake to 403 the task moves
+every one of them to the 403-ON-THE-TASK branch, one branch EARLIER. Measured on that file
+alone, 18 collected in both rounds at `bd4b5b5`: control
+(pristine pre-#1200 fake, pre-#1200 fixtures) 0 failed; round (#1200 fake, pre-#1200 fixtures)
+-> 6 failed; control after restore 0 failed. The THREE SURVIVORS are the finding: they would have
+kept passing while measuring a different branch than their names and docstrings claim, and the
+unreadable-board branch would have lost that much of its coverage without one red test to say so.
+Read the two counts as SETS rather than arithmetic — the six reds include the inline fixture, so
+of the eight `forbidden=True` tests five went red and three survived. So
+the fake also learned the route #1198 measured live — `DELETE /projects/<pid>/views/<kanban>`
+-> 200, no permission change, after which the board read 404s while the project, the far card and
+the embedded relation all stay readable — and those tests now sit on `drop_kanban_view()`, which
+is the only route into that branch anyone has measured.
+
+**A fidelity fix is a scope decision, not a free win.** The same card declined a THIRD divergence
+it could see: real 2.3.0 filters `related_tasks` by the reader's permission (two readers, same
+card, same moment: the owner reads `{'blocked': [4]}`, an agent without access to the far project
+reads `{}`), while the fake embeds unconditionally. Teaching it that would make the 403-on-the-
+task branch unreachable by any permission route and need a third, race-shaped knob beside
+`vanish()`; worse, pinning "the blocker silently vanishes" as expected fake behaviour would
+pre-empt the human decision parked on VMCP-302 (1198) about whether that production gap is worth
+closing. It is named as an open divergence in `_read_task`'s docstring instead — a fake may be
+less capable than the server, never more generous, and "less capable AND says so" is the third
+option worth taking.

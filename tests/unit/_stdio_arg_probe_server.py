@@ -1,7 +1,10 @@
-"""Probe server for test_advance_report_arguments.py — NOT a test module (the leading
-underscore keeps pytest from collecting it); it is spawned as a SUBPROCESS.
+"""Probe server for test_advance_report_arguments.py and test_sibling_target_argument.py — NOT
+a test module (the leading underscore keeps pytest from collecting it); it is spawned as a
+SUBPROCESS.
 
-It builds the REAL MCPServer with the REAL twelve tools and runs it over the REAL stdio
+It builds the REAL MCPServer with the REAL tool roster — no number here on purpose, it moved
+from twelve to fourteen while this line still said twelve; the count is asserted in
+test_server.py, where it is checked rather than remembered — and runs it over the REAL stdio
 transport, replacing only the Workflow behind them with a stub that reports the length of
 the argument that ARRIVED.
 
@@ -40,6 +43,20 @@ class _ReportingWorkflow:
             "worklog_head": (worklog or "")[:24],
             "worklog_tail": (worklog or "")[-24:],
         }
+
+    # #1200 drives these two from test_sibling_target_argument.py. They echo the TYPE as well as
+    # the value because that is the whole question there: `to` crosses the boundary through a
+    # pydantic model, and "17 arrived" and "17 arrived AS AN INT" are different facts.
+    def handoff(self, task_id, to, title, description="", priority=0):
+        return {"task_id": task_id, "to": to, "to_type": type(to).__name__, "title": title}
+
+    def transfer_task(self, task_id, to, reason):
+        return {"task_id": task_id, "to": to, "to_type": type(to).__name__, "reason": reason}
+
+    def file_task(self, title, description="", priority=0, related_task_id=None,
+                  project_id=None, queue=False):
+        # The CONTROL for the two above: the cross-project door that already existed.
+        return {"project_id": project_id, "project_id_type": type(project_id).__name__}
 
     def review_task(self, task_id, verdict, report):
         return {

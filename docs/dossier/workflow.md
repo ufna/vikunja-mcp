@@ -592,3 +592,61 @@ ownerless-card sweep (`transfer_task` moves an unowned card, deliberately — a 
 no ownership, exactly as `file_task` does not). None of those were anticipated when the
 tools were written; each was surfaced by a test that re-derives its universe instead of
 remembering it.
+
+## `to` was refused at the boundary its own docstring advertised (#1200)
+
+**The defect in one line: the two tools' promise and their wire contract disagreed, and the
+wire won.** `server.py` declared `def handoff(task_id: int, to: str, ...)`, the MCP SDK builds
+a pydantic model from that signature, and so `handoff(to=17)` died with
+`Input should be a valid string` before the tool body existed — while the docstring said `to`
+takes "a sibling NAME … or a bare project id" and `Workflow.handoff` had accepted `str | int`
+all along. `_resolve_sibling`'s careful refusals (unknown name lists the configured ones;
+non-positive id; this project's own id) never ran FOR AN INT TARGET — for a STRING they were
+reachable all along, measured on a live `Workflow`: `'nope'` lists the configured siblings, `'0'`
+refuses as non-positive, `'3'` refuses as this project. So the one shape the docstring advertised
+was precisely the shape no refusal could ever explain.
+
+**Why no test saw it, and the answer is sharper than "no coverage".** There WAS coverage of an
+int target: `tests/unit/test_done_is_human_only.py` passes `handoff` a bare `{"to": 999}` and is
+green. It calls `server.handoff(...)` as an ordinary Python function, and an annotation validates
+nothing on that path — pydantic only runs inside the SDK's tool wrapper, which a direct call never
+reaches. The rest of the suite is one layer further down still, entering `Workflow` itself. So the
+whole suite agreed the int worked, and it does work everywhere except the one place an agent
+stands. The single test that does touch the wire side, `test_server.py`'s roster check, reads
+`list_tools()` for NAMES — never for an input schema. This is the LAYER gap #657 named — before
+that card nothing here round-tripped a tool
+argument across the wire — and the fix is the same shape: the new
+`tests/unit/test_sibling_target_argument.py` drives the REAL `MCPServer` over REAL stdio against
+the echo Workflow in `_stdio_arg_probe_server.py`.
+
+**Widening beat correcting the prose, and the CONTROL is what decided it.** Measured in one run
+at the real boundary: `file_task(project_id=17)` lands as an int and `file_task(project_id="17")`
+lands as an int too — the cross-project door that already existed takes BOTH shapes. So
+`to: str | int` makes all three doors take an id either way, where "quote the id" would have
+made this pair the odd one out. Not one SHAPE, and the distinction is worth keeping: read off
+`list_tools()`, `file_task.project_id` still advertises `{"anyOf": [{"type": "integer"},
+{"type": "null"}]}` and refuses a sibling NAME outright, accepting `"17"` only through lax
+coercion. The BEHAVIOUR agrees; the schemas do not. The shape an agent actually holds settles
+it further: `siblings` rides in
+every `next_task` payload as JSON NUMBERS (`{"backend": 17}`), so copying the id you were just
+handed is the natural motion, and a docstring asking for a quote is a quirk that will be got
+wrong repeatedly. The generated schema is now `{"anyOf": [{"type": "string"}, {"type":
+"integer"}]}` — and the schema, not our annotation, is what an agent reads.
+
+**What the union does NOT buy, measured rather than assumed.** Lax pydantic renders a JSON
+`true` as the integer 1, so `_resolve_sibling`'s `isinstance(to, bool)` guard is unreachable
+from the wire — the body is handed a plain 1. A float is still refused (it belongs to neither
+member). This is NOT new and not this card's doing: `file_task(project_id=true)` has arrived as
+project 1 on today's SDK, measured in the same run as its control, and its door has carried
+`project_id: int | None` since `f0e7aef` — no claim is made about the years in between, because
+the boundary machinery underneath was swapped wholesale at `0543463` (FastMCP -> MCPServer) and
+nobody measured the old one. The annotation that closes the hole WHILE KEEPING the int shape is
+`StrictInt | StrictStr` — measured in raw pydantic, NOT at the boundary, which is the one claim
+in this section not taken where the section itself insists claims must be taken. (`to: str`
+closes the bool hole too, by refusing everything non-string; that is what the card started
+from.) It needs pydantic at server.py MODULE scope, and that is a NEW import on the path #521
+cleared rather than the same one: measured, `import vikunja_mcp.server` today leaves `pydantic`
+out of `sys.modules` altogether, and it is a far cheaper import than the SDK's
+(~26-80 ms against ~0.43 s). Filed as
+VMCP-307 (1207) with the trade written out; the test asserts that both doors behave the SAME, so
+fixing one alone goes red and asks about the other.

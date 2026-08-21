@@ -27,8 +27,38 @@ def env():
     return api, Workflow(api, project_id=3)
 
 
-def _sibling_blocker(api, stage="Build", forbidden=False, title="add the endpoint"):
-    """A task on ANOTHER project's board, parked in `stage`. Returns the task dict."""
+def _sibling_blocker(api, stage="Build", dark_board=False, no_access=False,
+                     title="add the endpoint"):
+    """A task on ANOTHER project's board, parked in `stage`. Returns (project, task).
+
+    TWO ways to make it unresolvable, and they reach DIFFERENT branches — which is why they are
+    two arguments and not one flag (#1200):
+
+      `dark_board`  the project and its TASKS still read; only its kanban view is gone, so
+                    `_foreign_stages` answers None. Measured live on 2.3.0 (#1198) by
+                    `DELETE /projects/<pid>/views/<kanban>` -> 200, with NO permission change:
+                    the relation stays visible, the far card stays readable, and only the board
+                    read fails. This is how the UNREADABLE-BOARD branch is reached.
+      `no_access`   the project was never shared with this token, so `get_task` on the far card
+                    403s and the gate refuses before `done` or any board is looked at. This is
+                    the 403-ON-THE-TASK branch.
+
+    Before #1200 BOTH were spelled `forbidden=True`, because FakeAPI applied `_forbidden` to
+    project-scoped calls only and let `get_task` read straight through it — a state no server
+    produces. Nine fixtures here were riding on that gap — eight `forbidden=True` call sites plus
+    one inline `_forbidden.add` — and teaching the fake to 403 the task moves every one of them to
+    the 403-on-the-task branch, one branch EARLIER than the name on the test says. Measured on
+    this file alone, 18 collected in both rounds at `bd4b5b5`: control (pristine
+    pre-#1200 fake, pre-#1200 fixtures) 0 failed; round (#1200 fake, pre-#1200 fixtures)
+    -> 6 failed; control after restore 0 failed. The interesting number is the OTHER THREE.
+    `test_an_unreadable_sibling_predecessor_blocks_rather_than_vanishes` (it asked only for "403"
+    in the message, which both branches print),
+    `test_a_mixed_blocker_list_keeps_the_generic_tail_and_appends_the_escape` and
+    `test_the_advance_to_review_latch_carries_the_escape_too` stayed GREEN while measuring a
+    different branch than their names claim — which is why all nine were re-pointed rather than
+    left to the six reds to point out. Read the two counts as SETS and not as arithmetic: the six
+    reds include the inline fixture, so of the eight `forbidden=True` tests five went red and
+    three survived."""
     # built readable, then closed: the board has to be populated before the token loses
     # access to it, exactly as it happens in life (a project is shared, then unshared).
     proj = api.add_project("dogiators-backend", buckets=STAGES, identifier="BACK")
@@ -36,8 +66,10 @@ def _sibling_blocker(api, stage="Build", forbidden=False, title="add the endpoin
     task = api.create_task(proj["id"], title)
     bucket = next(b for b in entry["buckets"] if b["title"] == stage)
     api.move_task(proj["id"], entry["view"]["id"], bucket["id"], task["id"])
-    if forbidden:
-        api._forbidden.add(proj["id"])
+    if dark_board:
+        api.drop_kanban_view(proj["id"])
+    if no_access:
+        api.forbid_project(proj["id"])
     return proj, task
 
 
@@ -98,17 +130,23 @@ def test_a_predecessor_that_exists_nowhere_still_does_not_block(env):
 
 
 def test_an_unreadable_sibling_predecessor_blocks_rather_than_vanishes(env):
-    """Fail CLOSED. The token cannot see the neighbour's board (403), so the predecessor's
-    stage is UNKNOWN — and unknown must not be spelled "gone", which is exactly the silent
-    wrong answer this whole card is about. Noisy beats quiet: refuse, and say why."""
+    """Fail CLOSED. The neighbour's BOARD cannot be read — its kanban view is gone, while the
+    project and the far card still read (#1198's measured route) — so the predecessor's stage is
+    UNKNOWN, and unknown must not be spelled "gone", which is exactly the silent wrong answer
+    this whole card is about. Noisy beats quiet: refuse, and say why."""
     api, wf = env
-    _proj, blocker = _sibling_blocker(api, stage="Build", forbidden=True)
+    _proj, blocker = _sibling_blocker(api, stage="Build", dark_board=True)
     succ = _blocked_card(api, blocker["id"])
+    # the state this branch needs, asserted rather than assumed: the far card still READS, and
+    # the relation is still embedded — only the board is dark.
+    assert api.get_task(blocker["id"])["id"] == blocker["id"]
+    with pytest.raises(VikunjaError):
+        api.kanban_view(_proj["id"])
     with pytest.raises(WorkflowError) as exc:
         wf.claim(succ["id"])
     msg = str(exc.value)
     assert str(blocker["id"]) in msg
-    assert "403" in msg or "access" in msg.lower()
+    assert "no readable tracker board" in msg, msg
 
 
 def test_the_waiting_signal_names_a_cross_project_blocker(env):
@@ -179,32 +217,6 @@ _GENERIC = "A predecessor becomes ready only at Review or Done; finish that one 
 _ESCAPE_LEAD = "At least one of those stages could NOT be established"
 
 
-def _forbid_task(api, task_id):
-    """Make GET /tasks/<id> answer 403 for ONE id, and hand back the undo — the shape
-    `_offboard_predecessor`'s 403 branch is written against. NOT re-measured against a live
-    server here, and worth saying so: the one live measurement anyone has of this situation
-    points the other way. When the token
-    loses access to the neighbour PROJECT, a real 2.3.0 strips the far card out of
-    `related_tasks` altogether (two-reader control in the same moment: the owner reads
-    `{'blocked': [4]}`, the agent reads `{}`), so that route never reaches this branch at all.
-    FakeAPI models `forbidden` per PROJECT and `get_task` is task-scoped and never consulted
-    that set, so the branch had no fixture of any kind before this."""
-    inner = api.get_task
-
-    def guarded(tid):
-        if tid == task_id:
-            raise VikunjaError(403, "You don't have the permission to see this")
-        return inner(tid)
-
-    api.get_task = guarded
-
-    def share():
-        """Undo: what a human granting this token access to that project looks like here."""
-        api.get_task = inner
-
-    return share
-
-
 def test_an_ordinary_blocker_keeps_the_generic_tail_and_carries_no_escape(env):
     """THE CONTROL for every test below. A predecessor on a readable board in Build is
     finishable, so "finish that one first" is correct advice and must not move — and its
@@ -230,7 +242,7 @@ def test_the_unreadable_board_refusal_names_the_escapes_instead_of_the_impossibl
     """The card's own case. Every blocker is unresolvable, so the generic tail is REPLACED —
     it is the one action that cannot be taken and was the only one printed."""
     api, wf = env
-    proj, blocker = _sibling_blocker(api, stage="Build", forbidden=True)
+    proj, blocker = _sibling_blocker(api, stage="Build", dark_board=True)
     succ = _blocked_card(api, blocker["id"])
     with pytest.raises(WorkflowError) as exc:
         wf.claim(succ["id"])
@@ -251,7 +263,7 @@ def test_marking_an_unreadable_predecessor_done_really_does_release_the_card(env
     Round and control in one: the same card refuses before the update and claims after it,
     with nothing else touched."""
     api, wf = env
-    _proj, blocker = _sibling_blocker(api, stage="Build", forbidden=True)
+    _proj, blocker = _sibling_blocker(api, stage="Build", dark_board=True)
     succ = _blocked_card(api, blocker["id"])
     with pytest.raises(WorkflowError):
         wf.claim(succ["id"])                      # control: still blocked
@@ -265,11 +277,16 @@ def test_the_403_on_the_task_branch_says_done_will_not_help_because_it_cannot(en
     """The three fail-closed branches do NOT share one escape, and this is why the advice is
     per-branch rather than one sentence appended to all of them: here `get_task` raises before
     `done` is ever looked at, so "mark it done" is as impossible as "finish that one first".
-    Measured in the same test — the update lands and the card stays refused."""
+    Measured in the same test — and since #1200 the impossibility is measured at BOTH ends: the
+    fake now refuses the `done` write as well, because the real client's `update_task` is
+    read-modify-write and its first call is the `get_task` that 403s.
+
+    This test used to hand-roll a wrapper around `api.get_task` to reach this branch at all —
+    FakeAPI could not produce a 403 on a TASK. It drives the fake now, which is what #1200 item 3
+    bought; `no_access=True` is a project the token was never shared."""
     api, wf = env
-    _proj, blocker = _sibling_blocker(api, stage="Build")
+    _proj, blocker = _sibling_blocker(api, stage="Build", no_access=True)
     succ = _blocked_card(api, blocker["id"])
-    _forbid_task(api, blocker["id"])
     with pytest.raises(WorkflowError) as exc:
         wf.claim(succ["id"])
     msg = str(exc.value)
@@ -281,8 +298,10 @@ def test_the_403_on_the_task_branch_says_done_will_not_help_because_it_cannot(en
     # releases this card", and flipping `finishable` to True leaves the whole suite GREEN
     # (measured: control 0 failed, the flip 0 failed, 92 collected in both).
     assert _GENERIC not in msg, msg
-    api.update_task(blocker["id"], done=True)
-    with pytest.raises(WorkflowError):            # and it really does not release it
+    with pytest.raises(VikunjaError) as write:    # you cannot even SET done: the write reads first
+        api.update_task(blocker["id"], done=True)
+    assert write.value.status == 403
+    with pytest.raises(WorkflowError):            # and the card really is not released
         wf.claim(succ["id"])
 
 
@@ -310,7 +329,7 @@ def test_a_mixed_blocker_list_keeps_the_generic_tail_and_appends_the_escape(env)
     first half, so it stays — and comes first, because that half is the actionable one."""
     api, wf = env
     near = api.add_task("near", "Build")
-    _proj, far = _sibling_blocker(api, stage="Build", forbidden=True)
+    _proj, far = _sibling_blocker(api, stage="Build", dark_board=True)
     succ = api.add_task("succ", "Queue")
     api.add_relation(succ["id"], near["id"], "blocked")
     api.add_relation(succ["id"], far["id"], "blocked")
@@ -336,7 +355,7 @@ def test_two_predecessors_on_one_unreadable_board_yield_ONE_escape_sentence(env)
         task = api.create_task(proj["id"], title)
         api.move_task(proj["id"], entry["view"]["id"], build["id"], task["id"])
         fars.append(task)
-    api._forbidden.add(proj["id"])
+    api.drop_kanban_view(proj["id"])
     succ = api.add_task("succ", "Queue")
     for far in fars:
         api.add_relation(succ["id"], far["id"], "blocked")
@@ -360,7 +379,7 @@ def test_the_advance_to_review_latch_carries_the_escape_too(env):
     assert _ESCAPE_LEAD not in str(exc.value)
     assert "get it back to Review first" in str(exc.value)
 
-    _proj, far = _sibling_blocker(api, stage="Build", forbidden=True)
+    _proj, far = _sibling_blocker(api, stage="Build", dark_board=True)
     succ = api.add_task("succ", "Build", assignee=api.me_user)
     api.add_relation(succ["id"], far["id"], "follows")
     with pytest.raises(WorkflowError) as exc:
@@ -397,7 +416,7 @@ def test_the_starving_tail_message_names_the_escape_because_no_refusal_is_ever_r
     assert control.get("starving") is True
     assert _ESCAPE_LEAD not in control["message"]
 
-    _proj, far = _sibling_blocker(api, stage="Build", forbidden=True)
+    _proj, far = _sibling_blocker(api, stage="Build", dark_board=True)
     api.add_relation(api.add_task("far succ", "Queue")["id"], far["id"], "blocked")
     res = wf.next_task()
     assert res.get("starving") is True
@@ -409,7 +428,7 @@ def test_the_escape_rides_on_the_blocker_dict_so_a_caller_can_read_it_machine_si
     """`waiting[].blocked_by` is the pump's own payload, and the escape is a key on it rather
     than only prose — the same additive shape `stage` has. Absent on a resolvable blocker."""
     api, wf = env
-    _proj, far = _sibling_blocker(api, stage="Build", forbidden=True)
+    _proj, far = _sibling_blocker(api, stage="Build", dark_board=True)
     _blocked_card(api, far["id"])
     res = wf.next_task()
     blockers = [b for w in res["waiting"] for b in w["blocked_by"]]
@@ -435,7 +454,7 @@ def test_finishing_the_predecessor_releases_the_NO_BUCKET_card_and_NOT_the_unrea
     api.move_task(bucket_proj["id"], entry["view"]["id"], review["id"], no_bucket["id"])
     assert wf.claim(a["id"])["claimed"] is True               # finishing WORKED
 
-    _dark_proj, dark = _sibling_blocker(api, stage="Build", forbidden=True, title="dark")
+    _dark_proj, dark = _sibling_blocker(api, stage="Build", dark_board=True, title="dark")
     b = _blocked_card(api, dark["id"])
     dark_entry = api.other_projects[_dark_proj["id"]]
     dark_review = next(x for x in dark_entry["buckets"] if x["title"] == "Review")
@@ -649,7 +668,7 @@ def test_sharing_the_403_predecessors_project_makes_the_stage_KNOWABLE_not_relea
     api, wf = env
     proj, blocker = _sibling_blocker(api, stage="Build")
     succ = _blocked_card(api, blocker["id"])
-    share = _forbid_task(api, blocker["id"])
+    share = api.forbid_project(proj["id"])         # #1200: the fake's own 403, not a wrapper
     with pytest.raises(WorkflowError) as exc:
         wf.claim(succ["id"])
     assert f"the token got 403 reading task {blocker['id']}" in str(exc.value)
@@ -671,9 +690,8 @@ def test_sharing_the_403_predecessors_project_makes_the_stage_KNOWABLE_not_relea
 def test_removing_the_relation_clears_the_403_gate_outright(env):
     """The other half of the same escape, and the only action that works while the 403 holds."""
     api, wf = env
-    _proj, blocker = _sibling_blocker(api, stage="Build")
+    _proj, blocker = _sibling_blocker(api, stage="Build", no_access=True)
     succ = _blocked_card(api, blocker["id"])
-    _forbid_task(api, blocker["id"])
     with pytest.raises(WorkflowError):
         wf.claim(succ["id"])
     api.relations = [

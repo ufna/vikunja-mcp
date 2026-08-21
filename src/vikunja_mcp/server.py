@@ -764,17 +764,31 @@ def file_task(
     )
 
 
+# `to: str | int` on the two tools below is not decoration — the annotation IS the wire
+# contract (#1200). The MCP SDK builds a pydantic model from these signatures, so `to: str`
+# made `handoff(to=17)` a hard ValidationError at the boundary, BEFORE `_resolve_sibling`'s
+# careful refusals could run, while both docstrings advertised "a bare project id" and the
+# generated schema said `{"type": "string"}`. And the ids an agent has in hand arrive as JSON
+# NUMBERS: `siblings` rides in every next_task payload as `{"backend": 17}`. Measured at the
+# real boundary with the sibling of `file_task`'s door as control — `file_task(project_id=17)`
+# and `project_id="17"` BOTH land — so widening makes all three cross-project doors take an id
+# the same way rather than inventing a fourth. (Their SCHEMAS still differ: `file_task` advertises
+# integer-only. The behaviour is what an agent trips over.) `str | int` and not
+# `StrictInt | StrictStr`: strict would also refuse a JSON boolean, which lax pydantic renders as
+# project 1 — but it needs pydantic at MODULE scope, a NEW import on the path #521 cleared
+# (measured: importing this module today loads no pydantic at all). Filed as #1207.
 @_mcp_tool
 @_tool
 def handoff(
-    task_id: int, to: str, title: str, description: str = "", priority: int = 0,
+    task_id: int, to: str | int, title: str, description: str = "", priority: int = 0,
 ) -> dict:
     """Park YOUR active card and file the work it is waiting for onto a NEIGHBOUR project's
     board. WHEN: mid-task you find that the next step belongs to a DIFFERENT repo — the
     frontend card needs an endpoint the backend has not built yet. You cannot do that work
     (wrong repo) and must not silently drop the card.
     `to` is a sibling NAME from this repo's config (they arrive in every next_task response
-    under `siblings`, e.g. {"backend": 17}) or a bare project id. Unknown name -> refusal
+    under `siblings`, e.g. {"backend": 17}) or a bare project id — pass the id exactly as you
+    were handed it, as a number (17) or quoted ("17"); both work. Unknown name -> refusal
     that LISTS the configured ones; nothing is changed.
     WHAT HAPPENS: a new card is created in the NEIGHBOUR's Backlog (never their Queue —
     their human triages their own board), YOUR card is linked to it as blocked-by, then
@@ -793,14 +807,14 @@ def handoff(
 
 @_mcp_tool
 @_tool
-def transfer_task(task_id: int, to: str, reason: str) -> dict:
+def transfer_task(task_id: int, to: str | int, reason: str) -> dict:
     """Move a card, with its whole comment history, onto a NEIGHBOUR project's board.
     WHEN: the card was filed on the WRONG board — it is pure backend work sitting in the
     frontend project. Nothing stays behind and nothing new is created.
     NOT for a dependency: if YOUR card needs someone else's work first, that is handoff.
-    `to` takes a sibling name from next_task's `siblings` (or a project id), same as
-    handoff. `reason` is required — it is the only context the people over there will have
-    for a card arriving with a stranger's comment history attached.
+    `to` takes a sibling name from next_task's `siblings` (or a project id, as a number or
+    quoted — both work), same as handoff. `reason` is required — it is the only context the
+    people over there will have for a card arriving with a stranger's comment history attached.
     THE CARD'S REF CHANGES. The target project re-indexes it on arrival (a card moved into
     a project already holding BACK-2 comes out as BACK-3), so every ref quoted in earlier
     comments, worklogs or commit messages now names nothing. Use moved.ref from the result
