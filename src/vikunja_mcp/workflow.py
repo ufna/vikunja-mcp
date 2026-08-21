@@ -993,8 +993,9 @@ class Workflow:
         self.api.add_label(task_id, label["id"])
 
     def _remove_label(self, task: dict, title: str) -> None:
-        # снимаем только реально висящую на снапшоте метку — иначе DELETE по
-        # несуществующей связи вернул бы 404
+        # снимаем только реально висящую на снапшоте метку — иначе DELETE по несуществующей
+        # связи 403-ит (`Forbidden`), НЕ 404: измерено на живой 2.3.0 по ходу #1211, где эта
+        # строчка ещё утверждала 404. Ветка от этого не меняется — DELETE просто не уходит.
         lb = next((x for x in task.get("labels") or [] if x.get("title") == title), None)
         if lb:
             self.api.remove_label(task["id"], lb["id"])

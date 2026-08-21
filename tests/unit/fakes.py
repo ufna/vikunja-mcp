@@ -249,18 +249,77 @@ class FakeAPI:
         return share
 
     def _read_task(self, task_id):
-        """The guard `get_task` and `update_task` SHARE — the two task-scoped calls production
-        reads a task through, and `update_task` going through it is the point rather than a
-        convenience.
+        """The guard SIX task-scoped calls share: `get_task`, `update_task`, `add_assignee`,
+        `remove_assignee`, `add_label`, `remove_label` — and `update_task` going through it is the
+        point rather than a convenience.
 
-        NOT every task-scoped method: `add_assignee`, `remove_assignee`, `add_label` and
-        `remove_label` still index `self.tasks[task_id]` directly, so an unknown id is still a
-        bare `KeyError` there and a forbidden project is still invisible. That is the same
-        divergence class, left standing deliberately — those mirror endpoints the real client does
-        NOT read-modify-write, so what a real 2.3.0 answers there is unmeasured and copying this
-        shape across on an analogy is how a fake stops matching a server. Filed as VMCP-308 (1211)
-        with what to measure; named here so this docstring's guarantee is read as stopping where
-        it stops.
+        SIX, NOT ALL, and the count is the guarantee. `add_comment`, `comments`, `add_relation`,
+        `upload_attachment`, `download_attachment` and `move_task` are task-scoped on the real
+        client too and do NOT come through here — measured on this fake: `add_comment` and
+        `comments` on id 999999 return happily, `add_relation` returns None, `upload_attachment`
+        answers a success payload, all for a task that does not exist. #1211 closed the four
+        endpoints it MEASURED and did not widen past them; this sentence exists so the next reader
+        inherits the boundary rather than the word "every", which is what the pre-#1211 wording
+        was careful to say and this rewrite briefly lost.
+
+        THE FOUR ASSIGNEE/LABEL CALLS JOINED IN #1211, BY MEASUREMENT AND NOT BY THE ANALOGY.
+        They are the ones the real client does NOT read-modify-write — `PUT /tasks/{id}/assignees`
+        and `DELETE /tasks/{id}/assignees/{user_id}`, `PUT /tasks/{id}/labels` and
+        `DELETE /tasks/{id}/labels/{label_id}`, four single writes — so nothing
+        about the read below FOLLOWS from the two above it, and #1200 left them standing rather
+        than copy a shape across untested. Probed against a throwaway real 2.3.0:
+
+            case                          add_assignee  remove_assignee  add_label  remove_label
+            unknown task id                        404              404        404           404
+            task in an unshared project            403              403        403           403
+            happy-path control                     201              200        201           200
+
+        i.e. exactly the split spelled out below, which is why all six now share one guard.
+
+        WHICH TOKEN READ WHICH CELL, because it is not one token and the difference is not
+        cosmetic. Three columns were probed with a scoped token of the integration suite's own
+        AGENT_PERMS shape. The `remove_label` column could NOT be: that suite grants
+        `tasks_labels: ["create", "read_all"]` and no `delete`, so every DELETE on that endpoint
+        came back 401 `invalid token provided` — on the HAPPY PATH too, i.e. the endpoint was
+        never reached at all. Its column was re-probed twice, and the two agree cell for cell: a
+        full JWT (no scoping), and a scoped token minted WITH `tasks_labels: delete`, which is
+        what the production bootstrap actually grants.
+
+        The BODIES differ and the statuses do not, which is the whole reason this guard is keyed
+        on status. The 404 text differs across the pairs — `This project does not exist.` on
+        assignees, `This task does not exist` on labels — and the 403 text differs from the READ's:
+        all four write endpoints answer a bare `Forbidden`, while `_read_task` raises the GET's
+        `You don't have the permission to see this` for all six. `VikunjaError` carries the STATUS,
+        and the status is what a production `except` branches on, so none of that is mirrored.
+
+        MEASURED AND STILL NOT MIRRORED — but the two halves are open for DIFFERENT reasons, and
+        an earlier draft of this paragraph got the second one wrong, so read the split.
+
+        The REMOVE half is close to unreachable. Real 2.3.0 answers 403 `Forbidden` when a DELETE
+        names a label that is NOT on the task, where the fake is an idempotent no-op (pinned by
+        the `mirrors_client` test in `test_workflow_gates.py`). `api.remove_label` has exactly ONE
+        caller, `workflow._remove_label`, and it sends the DELETE only for a label present on the
+        snapshot in hand — so only snapshot staleness gets there, which is a race, not a route.
+
+        The ADD half is REACHABLE, and that was measured rather than reasoned. Real 2.3.0 answers
+        400 code 8001 `This label already exists on the task.` when a PUT adds a label the task
+        already carries; the fake appends a second copy and stays green. An earlier draft here
+        claimed `_add_label` runs behind a `_has_label` check — it does not. `_add_label` has
+        three call sites and only the epic-ready one is guarded (by its own idempotency read of a
+        re-fetched parent); `review_task`'s approve and needs_work branches are unguarded, and two
+        further sites call `api.add_label` DIRECTLY, bypassing `_add_label` altogether
+        (`return_task` adding `blocked`, `decompose` adding `epic`). Driven through the real
+        `Workflow` over this fake, agent tools only: a second `review_task(..., 'approve')` on a
+        card that already carries `reviewed` re-adds it, and a `return_task` on a card a human
+        already labelled `blocked` re-adds that. On a real server both are the 400 — and in the
+        approve case the `[review] APPROVE` comment is written BEFORE the label, so the refusal
+        would land on a verdict that is already half-applied. Filed as VMCP-311 (1216); NOT fixed
+        here, because the fix belongs in `workflow` and mirroring the 400 in the fake first would
+        turn a live suite red without closing anything.
+
+        `remove_assignee` needed no such decision: measured, the server answers 200 for a user
+        that is not assigned AND for one that does not exist, which is what the fake's filter
+        already does.
 
         1:1 with the client, structurally: `VikunjaAPI.update_task` is read-modify-write, and its
         FIRST statement is `self.get_task(task_id)`. So on the real client an unknown id and an
@@ -395,11 +454,13 @@ class FakeAPI:
         return entry
 
     def add_assignee(self, task_id, user_id):
+        # `_read_task` rather than a subscript: MEASURED on real 2.3.0 (#1211), see its docstring.
+        task = self._read_task(task_id)
         user = self.users.get(user_id, {"id": user_id, "username": f"u{user_id}"})
-        self.tasks[task_id]["assignees"].append(user)
+        task["assignees"].append(user)
 
     def remove_assignee(self, task_id, user_id):
-        t = self.tasks[task_id]
+        t = self._read_task(task_id)
         t["assignees"] = [a for a in t["assignees"] if a["id"] != user_id]
 
     def add_relation(self, task_id, other_task_id, kind):
@@ -515,12 +576,16 @@ class FakeAPI:
         return dict(lb)
 
     def add_label(self, task_id, label_id):
+        # the task is read FIRST, as on the server: measured, an unknown task id answers 404
+        # `This task does not exist` even when the label_id is valid (#1211).
+        task = self._read_task(task_id)
         lb = next(x for x in self._labels if x["id"] == label_id)
-        self.tasks[task_id]["labels"].append(dict(lb))
+        task["labels"].append(dict(lb))
 
     def remove_label(self, task_id, label_id):
-        # идемпотентно: фильтруем по id, отсутствующий id — no-op
-        t = self.tasks[task_id]
+        # идемпотентно по label_id: фильтруем по id, отсутствующий id — no-op. That HALF is a
+        # measured divergence, deliberately kept — see `_read_task`'s "MEASURED AND NOT MIRRORED".
+        t = self._read_task(task_id)
         t["labels"] = [lb for lb in t["labels"] if lb["id"] != label_id]
 
     def get_or_create_label(self, title):

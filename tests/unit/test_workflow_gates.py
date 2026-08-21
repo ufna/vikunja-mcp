@@ -1660,7 +1660,17 @@ def test_advance_review_epic_container_no_review_needed(env):
 
 
 def test_fake_remove_label_idempotent_and_mirrors_client(env):
-    """FakeAPI.remove_label зеркалит клиент и идемпотентен (отсутствующий id — no-op)."""
+    """FakeAPI.remove_label идемпотентен: отсутствующий id — no-op.
+
+    ЗАГОЛОВОК ЭТОГО ТЕСТА ОБЕЩАЕТ БОЛЬШЕ, ЧЕМ ТЕСТ ПРОВЕРЯЕТ, и с #1211 это ИЗМЕРЕНО, а не
+    подозревается: на живой 2.3.0 `DELETE /tasks/{id}/labels/{label_id}` по метке, КОТОРОЙ НА
+    ЗАДАЧЕ НЕТ, отвечает 403 `Forbidden` — то есть ровно в том случае, который здесь закреплён
+    как no-op, фейк и клиент РАСХОДЯТСЯ. Расхождение оставлено сознательно (`api.remove_label`
+    зовётся из единственного места, `workflow._remove_label`, а оно шлёт DELETE только по метке,
+    висящей на снапшоте) — разбор в докстринге `FakeAPI._read_task`. Имя теста не переименовано,
+    чтобы не ломать ссылки на него; читать его как "идемпотентен", а вторую половину — как
+    "зеркалит там, где это измерено", и не шире.
+    """
     api, wf, t = env
     lb = api.get_or_create_label("reviewed")
     api.add_label(t["id"], lb["id"])

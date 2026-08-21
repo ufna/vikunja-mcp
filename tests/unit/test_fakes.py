@@ -181,3 +181,103 @@ def test_drop_kanban_view_darkens_the_BOARD_and_leaves_everything_else_readable(
     assert api.update_task(far["id"], done=True)["done"] is True
     embedded = api.get_task(here["id"])["related_tasks"]["blocked"]
     assert [t["id"] for t in embedded] == [far["id"]]
+
+
+# --- #1211: the four task-scoped methods #1200 left indexing `self.tasks[task_id]` -------------
+#
+# `add_assignee`, `remove_assignee`, `add_label`, `remove_label`. #1200 routed only `get_task`
+# and `update_task` through `_read_task` and said so in its docstring, because those two are
+# 1:1 with the client for a STRUCTURAL reason (the client's `update_task` is read-modify-write,
+# so its first statement is a `get_task`) and these four are not — they are four single writes:
+# `PUT /tasks/{id}/assignees`, `DELETE /tasks/{id}/assignees/{user_id}`, `PUT /tasks/{id}/labels`,
+# `DELETE /tasks/{id}/labels/{label_id}`. So the 404/403 shape
+# could not be inherited by argument; it was measured against a throwaway real 2.3.0 first, and
+# the table is in `FakeAPI._read_task`'s docstring beside the guard it justifies.
+#
+# What the KeyError cost is the same thing it cost `update_task`: no production
+# `except VikunjaError` catches it, so every "the card went away under us" / "we lost access to
+# it" branch around a label or an assignee write was untestable and read as working.
+#
+# MUTATION SWEEP for the two pins below, run in a CLONE of this tree (never the tree being
+# edited), `__pycache__` deleted and PYTHONDONTWRITEBYTECODE=1 per round, `vikunja_mcp.__file__`
+# printed and confirmed to resolve inside the clone each round, `-q` dropped so `collected`
+# prints and can be cross-checked. Rounds are read by COUNTING lines that begin `FAILED `, with
+# `ERROR ` lines counted separately. Selection throughout: this file plus
+# tests/unit/test_workflow_claim.py — the file that CONSUMES the assignee half through the
+# assign-then-verify claim, so a mutation that only relocates coverage is visible. The control
+# was run before the first round AND again after the last restore; both are recorded below.
+# Each pin carries its own round, with the control's failed count in the same paragraph.
+
+
+def test_the_four_assignee_and_label_writes_404_on_an_unknown_task_id():
+    """Measured on real 2.3.0: an unknown task id answers 404 on all four endpoints (the assignee
+    pair says `This project does not exist.`, the label pair `This task does not exist` — the
+    status is what production branches on, and it is the same 404 `get_task` gives).
+
+    A `KeyError` does NOT satisfy `pytest.raises(VikunjaError)`; it escapes as an error, which is
+    exactly what a revert of the guard looks like — and it is the shape no production
+    `except VikunjaError` can catch, which is the whole cost being paid off here.
+
+    control 0 failed / 0 errors / 41 collected
+    round: all four back to `self.tasks[task_id]` -> 2 failed / 0 errors / 41 collected — this
+    pin and its 403 neighbour, and nothing else in the selection
+    """
+    api = FakeAPI(buckets=STAGES)
+    live = api.add_task("live one", "Queue")
+    lb = api.get_or_create_label("reviewed")
+    for call in (lambda: api.add_assignee(999999, api.me_user["id"]),
+                 lambda: api.remove_assignee(999999, api.me_user["id"]),
+                 lambda: api.add_label(999999, lb["id"]),
+                 lambda: api.remove_label(999999, lb["id"])):
+        with pytest.raises(VikunjaError) as err:
+            call()
+        assert err.value.status == 404, err.value
+    # CONTROL in the same round: a live id still writes, so the guard is not just a wall
+    api.add_assignee(live["id"], api.me_user["id"])
+    api.add_label(live["id"], lb["id"])
+    got = api.get_task(live["id"])
+    assert [a["id"] for a in got["assignees"]] == [api.me_user["id"]]
+    assert [x["title"] for x in got["labels"]] == ["reviewed"]
+    api.remove_assignee(live["id"], api.me_user["id"])
+    api.remove_label(live["id"], lb["id"])
+    got = api.get_task(live["id"])
+    assert got["assignees"] == [] and got["labels"] == []
+
+
+def test_the_four_assignee_and_label_writes_403_on_a_task_in_an_unshared_project():
+    """Measured on real 2.3.0: a task that EXISTS in a project never shared with the token answers
+    403 `Forbidden` on all four endpoints, and the write does not apply — read back as its owner,
+    the card's assignees and labels were untouched. Before this the fake let a token fully write a
+    card it cannot even read, which is the "fake more generous than the server" mode this whole
+    file exists to prevent.
+
+    403-not-404 is the same split `_offboard_predecessor` keys "gone" against "unknown" on, so the
+    two pins are deliberately separate: a guard that raised 404 here would satisfy the neighbour
+    above and still be wrong.
+
+    control 0 failed / 0 errors / 41 collected (re-run after the last restore: 0 failed too)
+    round: `_read_task`'s forbidden branch raises 404 instead of 403 -> 3 failed / 0 errors /
+    41 collected. Three because the mutation is on the SHARED guard: this pin plus #1200's two.
+    The narrower round above — reverting only the four methods — kills THIS pin without touching
+    those, so the coverage is this test's own and not inherited from its neighbours.
+    """
+    api = FakeAPI(buckets=STAGES)
+    # built readable, then closed — the order life uses (shared, populated, unshared), and the
+    # only order that works: a project-scoped write into an already-forbidden project 403s in
+    # the fixture itself.
+    secret = api.add_project("secret", buckets=STAGES)
+    hidden = api.create_task(secret["id"], "not yours")
+    share_back = api.forbid_project(secret["id"])
+    lb = api.get_or_create_label("reviewed")
+    for call in (lambda: api.add_assignee(hidden["id"], api.me_user["id"]),
+                 lambda: api.remove_assignee(hidden["id"], api.me_user["id"]),
+                 lambda: api.add_label(hidden["id"], lb["id"]),
+                 lambda: api.remove_label(hidden["id"], lb["id"])):
+        with pytest.raises(VikunjaError) as err:
+            call()
+        assert err.value.status == 403, err.value
+    # and NOTHING was written through the refusal — the same check the live probe made by
+    # re-reading the card as its owner
+    share_back()
+    reopened = api.get_task(hidden["id"])
+    assert reopened["assignees"] == [] and reopened["labels"] == []
