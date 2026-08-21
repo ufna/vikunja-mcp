@@ -477,7 +477,11 @@ card's own first draft.** The three differ, and each difference is measured on a
 over `FakeAPI`:
 
 - **403 on the task** — no form of finishing releases the card. `get_task` raises before `done`
-  is ever read, so even setting the flag leaves the refusal exactly where it was.
+  is ever read, so even setting the flag leaves the refusal exactly where it was. SHARING the
+  project does not release it either: the stage becomes KNOWABLE and the refusal then names the
+  far card's real stage (`Build (project 107)`), after which finishing it works. The escape said
+  "Share its project with this token" flat until the #1190 review, which is incomplete in exactly
+  the way this card was filed about.
 - **Unreadable board** — HALF of "Review or Done" works. `_foreign_stages` answers None whatever
   the far card's stage, so moving the predecessor to Review does NOT release the card; marking
   it `done` DOES, because `done` is read before any board read. Both halves are one test, one
@@ -488,6 +492,18 @@ over `FakeAPI`:
 So the switch is a `finishable` flag per blocker, not "was anything unresolvable". Keying it off
 the mere presence of an escape — which the first draft did — replaces true advice with an escape
 on exactly the third branch, and nothing in the suite would have said so.
+
+**AND THE FLAG ITSELF SHIPPED UNPINNED ON ONE BRANCH — found by this card's independent
+reviewer, not by its sweep.** `finishable: False` on the 403-on-the-task branch was held by
+nothing: the sweep row for that branch pins the escape TEXT, which is a different property.
+Flipping the flag to `True` makes the refusal print "finish that one first" and then "NOTHING
+done to the predecessor releases this card" — the card's own defect, restored — and against a
+control of 0 failed at 92 collected the flip came back 0 failed. The fix is one assertion, the
+one its SIBLING branch already carried a screen above (`assert _GENERIC not in msg`), and the
+isolating round is the point: with it, control 0 failed at 94 collected and the same flip is
+1 failed, naming that test alone. Two lessons worth keeping. A sweep row that kills something
+does not tell you WHICH property it pinned. And when two branches are written as siblings, the
+assertions should be siblings too — the asymmetry between them was the whole tell.
 
 **What carries it is two optional keys on the blocker dict, `escape` and `finishable`, ABSENT
 whenever the stage resolved normally.** That absence is what keeps the ordinary refusal what it

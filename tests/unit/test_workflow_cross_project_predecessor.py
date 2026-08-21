@@ -154,6 +154,20 @@ def test_the_waiting_signal_names_a_cross_project_blocker(env):
 #   control 0 failed   round: drop the guard on the starving clause      -> 10 failed
 #   control 0 failed   round: always insert a separator period           -> 1 failed
 #
+# ONE MORE ROUND, added on review (#1190 rework), and it is the reason the assertion in the 403
+# test below exists. `finishable: False` on that branch was pinned by NOTHING — the sweep row
+# above it pins the escape TEXT, which is a different property. Flipping that one flag to True
+# makes the refusal print "finish that one first" and then "NOTHING done to the predecessor
+# releases this card", i.e. it restores the exact defect this card was filed about, and:
+#
+#   BEFORE the fix  control 0 failed / 92 collected   flip `finishable` to True -> 0 failed
+#   AFTER  the fix  control 0 failed / 94 collected   flip `finishable` to True -> 1 failed
+#
+# and the single failure in that AFTER row is the 403 test below, by name. Restoring the flag put
+# the same selection back to control 0 failed / 94 collected, so the round measured the flag and
+# not drift. A pin nobody has seen fail is not a pin, and this one had never been run against its
+# own mutation.
+#
 # Two rows are worth reading twice. The 13 and the 10 are not this file's own doing: an
 # unconditional clause reddens the WHOLESALE pin on the plain starving message in
 # `test_workflow_sequence_gate.py`, which is why the clause in `_starving_tail` is guarded
@@ -166,9 +180,10 @@ _ESCAPE_LEAD = "At least one of those stages could NOT be established"
 
 
 def _forbid_task(api, task_id):
-    """Make GET /tasks/<id> answer 403 for ONE id — the shape `_offboard_predecessor`'s 403
-    branch is written against. NOT re-measured against a live server here, and worth saying so:
-    the one live measurement anyone has of this situation points the other way. When the token
+    """Make GET /tasks/<id> answer 403 for ONE id, and hand back the undo — the shape
+    `_offboard_predecessor`'s 403 branch is written against. NOT re-measured against a live
+    server here, and worth saying so: the one live measurement anyone has of this situation
+    points the other way. When the token
     loses access to the neighbour PROJECT, a real 2.3.0 strips the far card out of
     `related_tasks` altogether (two-reader control in the same moment: the owner reads
     `{'blocked': [4]}`, the agent reads `{}`), so that route never reaches this branch at all.
@@ -182,6 +197,12 @@ def _forbid_task(api, task_id):
         return inner(tid)
 
     api.get_task = guarded
+
+    def share():
+        """Undo: what a human granting this token access to that project looks like here."""
+        api.get_task = inner
+
+    return share
 
 
 def test_an_ordinary_blocker_keeps_the_generic_tail_and_carries_no_escape(env):
@@ -254,7 +275,12 @@ def test_the_403_on_the_task_branch_says_done_will_not_help_because_it_cannot(en
     msg = str(exc.value)
     assert f"the token got 403 reading task {blocker['id']}" in msg
     assert "not even marking it done" in msg
-    assert "Share its project with this token" in msg
+    assert "Sharing its project with this token does not release the card" in msg
+    # THE `finishable` HALF, and it was missing for a landing: without this line the branch
+    # renders "finish that one first" immediately followed by "nothing done to the predecessor
+    # releases this card", and flipping `finishable` to True leaves the whole suite GREEN
+    # (measured: control 0 failed, the flip 0 failed, 92 collected in both).
+    assert _GENERIC not in msg, msg
     api.update_task(blocker["id"], done=True)
     with pytest.raises(WorkflowError):            # and it really does not release it
         wf.claim(succ["id"])
@@ -612,4 +638,45 @@ def test_a_predecessor_whose_project_id_is_not_an_int_is_fail_OPEN(env):
         wf.claim(control["id"])
     api.tasks[far["id"]]["project_id"] = None
     succ = _blocked_card(api, far["id"])
+    assert wf.claim(succ["id"])["claimed"] is True
+
+
+def test_sharing_the_403_predecessors_project_makes_the_stage_KNOWABLE_not_released(env):
+    """The escape says sharing does NOT release the card, and that clause is measured here
+    rather than reasoned: it is the same distinction the unreadable-board branch already draws,
+    and the 403 branch shipped without it for a landing. Three states, one round, each read off
+    the refusal it produces."""
+    api, wf = env
+    proj, blocker = _sibling_blocker(api, stage="Build")
+    succ = _blocked_card(api, blocker["id"])
+    share = _forbid_task(api, blocker["id"])
+    with pytest.raises(WorkflowError) as exc:
+        wf.claim(succ["id"])
+    assert f"the token got 403 reading task {blocker['id']}" in str(exc.value)
+
+    share()                                        # a human grants access to that project
+    with pytest.raises(WorkflowError) as exc:
+        wf.claim(succ["id"])                       # still refused — but now with a REAL stage
+    msg = str(exc.value)
+    assert f"Build (project {proj['id']})" in msg, msg
+    assert _ESCAPE_LEAD not in msg                 # nothing unresolvable is left
+    assert _GENERIC in msg                         # and "finish that one first" is now TRUE
+
+    entry = api.other_projects[proj["id"]]
+    review = next(b for b in entry["buckets"] if b["title"] == "Review")
+    api.move_task(proj["id"], entry["view"]["id"], review["id"], blocker["id"])
+    assert wf.claim(succ["id"])["claimed"] is True  # finishing it NOW releases the card
+
+
+def test_removing_the_relation_clears_the_403_gate_outright(env):
+    """The other half of the same escape, and the only action that works while the 403 holds."""
+    api, wf = env
+    _proj, blocker = _sibling_blocker(api, stage="Build")
+    succ = _blocked_card(api, blocker["id"])
+    _forbid_task(api, blocker["id"])
+    with pytest.raises(WorkflowError):
+        wf.claim(succ["id"])
+    api.relations = [
+        r for r in api.relations if not (r[0] == succ["id"] and r[1] == blocker["id"])
+    ]
     assert wf.claim(succ["id"])["claimed"] is True

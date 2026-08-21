@@ -800,7 +800,11 @@ class Workflow:
         answers None whatever the far card's stage, so Review does NOT release it and only the
         `done` half of "Review or Done" works — `done` is read here BEFORE any board read.
         403-ON-THE-TASK is not either, and there no form of finishing works at all: `get_task`
-        raises before `done` is looked at.
+        raises before `done` is looked at. SHARING the project does not release that card either
+        — it makes the stage knowable and the refusal then names the far card's real stage, after
+        which finishing it does work. The escape says so since the #1190 review; it used to read
+        "Share its project with this token" flat, which is incomplete in the same way the generic
+        tail was.
 
         Three cheap answers come before any board read. A 404 on the task itself means it was
         deleted between the successor's relation read and this one — a narrow race, since
@@ -838,10 +842,13 @@ class Workflow:
                     f"finished cannot be established",
                     {
                         "escape": (
-                            f"task {pid} is unreadable by this token, so finishing it cannot "
-                            f"release this card at all — not even marking it done, since the "
-                            f"read fails BEFORE `done` is looked at. Share its project with "
-                            f"this token, or remove the follows/blocked relation on this card"
+                            f"task {pid} is unreadable by this token, so NOTHING done to the "
+                            f"predecessor releases this card while that holds — not even "
+                            f"marking it done, since the read fails BEFORE `done` is looked "
+                            f"at. Sharing its project with this token does not release the "
+                            f"card either: it makes the stage KNOWABLE, after which finishing "
+                            f"the predecessor does. Removing the follows/blocked relation on "
+                            f"this card clears the gate outright"
                         ),
                         "finishable": False,
                     },
