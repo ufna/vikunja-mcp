@@ -580,3 +580,55 @@ explanation from BOTH halves -> 1 failed. That is not a defect in the new pin bu
 `_gc_section`, which is core + reference on purpose — so read it as "the section as a WHOLE still
 explains the key", never as "the tick step still mentions it". The `CODE_*` pin beside it has the
 same bound, and inheriting that silently is what the measurement exists to prevent.
+
+**VMCP-306 (1203) CLOSED THAT HALF — for the KEYS, and deliberately not for the shapes.** The
+blindness above is not academic: `sync_installed_artifacts` is refresh-only, so a consumer who
+installed before the core/references split has the core healed on every server start and NO
+`references/` directory at all. Re-read on 2026-08-21, `~/.claude/skills/tracker/SKILL.md` was
+present and had been refreshed that morning while `~/.claude/skills/tracker/references/` did not
+exist — same under `~/.config/opencode/skills/tracker/`. The half nothing pinned was the only half
+an agent could read. So a SEPARATE pin now reads `_gc_step` ALONE — the core slice, not the union
+— over the seven payload keys a pump has to act on without opening anything (`released`, `kept`,
+`expected`, `deferred`, `main_checkout`, `branch_deleted: false`, `removed_ignored`), each still
+anchored on the function that emits it. The union pins are untouched: they are about the section as
+a whole and that question is still worth asking.
+
+**THE CODE-SIDE ANCHOR HAS TO BE THE ASSIGNMENT, NOT THE KEY — MEASURED, AND THE FIRST DRAFT GOT IT
+WRONG.** `inspect.getsource(gc_workspaces)` returns the function's DOCSTRING and comments as well as
+its statements, and both spell the literal `{"released": [], "kept": [], "expected": []}`. So a
+conjunct of the form `'"kept"' in gc_src` is satisfied by that prose AFTER the emitting statement
+has
+been renamed: measured, renaming `kept` and `expected` in the payload left the new pin GREEN. Three
+of its seven rows were blind on arrival, which is the same disease as the card that created it, one
+layer down. `"released"` was worse — besides the prose it occurs as the PER-ENTRY flag on refusal
+dicts, a different key of the same spelling, so no top-level rename could ever have reddened it. The
+fix is the tighter form the `CODE_*` pin above already used and already explained: match
+`'"kept": kept'` and `'result["deferred"] ='`, i.e. the assignment. Found by an independent second
+pass over the prose, not by the sweep — the sweep only mutated the rows that were already sound.
+
+It stops at the KEYS on purpose. Counted on the packaged rulebook, `_gc_step`'s core slice carries
+`deferred` 3 times against the reference's 3 and `expected` 3 against 8 — but a backticked `young`
+0 times against 1, and ALL TEN `CODE_*` values `workspace_cmd` defines 0 times. The codes live in
+the reference BY DESIGN, so a core-scoped conjunct over them is red on arrival (measured: 17 failing
+conjuncts) and the only way to green it would be to drag the payload table back into the core —
+undoing the split. The core says a key EXISTS and what to do about it; the reference owns the
+shapes.
+Two corollaries worth keeping, because both were over-stated once and then counted: the union is
+REAL for the payload keys (`deferred` and `expected` are in both halves) and only the SHAPES are
+reference-only; and `CODE_NO_WORKTREE` is in NEITHER half of the gc section — that pin asserts it
+against the whole bundle, and the string lives in the `--release` recipe.
+
+Third sweep, `tests/unit/test_skill_contract.py`, 58 collected in every round, same conditions plus
+the path `importlib.resources` resolves the PACKAGED SKILL.md to, printed each round (those pins
+read
+the packaged copy, so that print is the load-bearing one): control 0 failed / 0 errors; delete every
+`deferred` mention from the CORE rulebook alone, references untouched -> 1 failed, and the failure
+is
+the NEW pin while the union pin above stays green (the blindness reproduced beside its fix in one
+round); rename `removed_ignored` in the core slice alone -> 1 failed, the same test; make
+`gc_workspaces` emit `skipped_trees` instead of `deferred` -> 2 failed (both pins, i.e. the
+code-side
+anchor is live in each); rename `kept` -> `held` and `expected` -> `routine` in the payload
+statement
+-> 3 failed (the new pin, the `CODE_*` pin, the standing-record pin) where the pre-fix bare-key
+anchors left the new pin green; control after the last restore 0 failed / 0 errors.

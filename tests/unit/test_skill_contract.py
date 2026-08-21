@@ -623,10 +623,29 @@ def test_the_deferred_key_the_skill_teaches_is_the_one_the_code_produces():
     `references/gc-report.md` -> 1 failed; delete the explanation from BOTH halves -> 1 failed
     (same selection every round, `__pycache__` cleared and PYTHONDONTWRITEBYTECODE=1, in a clone).
     The blindness is not a defect here but the SHAPE of `_gc_section`, which is core + reference
-    ON PURPOSE — the codes and payload keys live in the reference half now, so either half
-    satisfies either anchor. Read this pin as "the section as a WHOLE still explains the key",
-    never as "the tick step still mentions it"; the `CODE_*` pin above has exactly the same
-    bound, and inheriting it silently is what this paragraph exists to prevent."""
+    ON PURPOSE — the payload shapes live in the reference half now. Read this pin as "the section
+    as a WHOLE still explains the key", never as "the tick step still mentions it"; the `CODE_*`
+    pin above has exactly the same bound, and inheriting it silently is what this paragraph exists
+    to prevent.
+
+    VMCP-306 (1203) NARROWED ONE SENTENCE HERE, and the replacement is counted rather than
+    reasoned — including the count that the first attempt at this very paragraph got wrong.
+    The sentence used to end "so either half satisfies either anchor", which is TRUE of some
+    anchors and FALSE of others, so as a blanket it licensed the wrong reading of both pins.
+    Counted on the packaged rulebook, `_gc_step`'s core slice against `references/gc-report.md`:
+
+        `deferred`      3 / 3   BOTH halves — this test's first anchor, and the union is real
+        `expected`      3 / 8   BOTH halves — the `CODE_*` pin above has one of these too
+        `young`         0 / 1   REFERENCE ONLY — this test's second anchor
+        every CODE_*    0 / n   REFERENCE ONLY, all TEN the module defines, without exception
+
+    So the honest statement is per-anchor, not per-pin: where the anchor is a payload KEY both
+    halves tend to carry it, and where it is a payload SHAPE only the reference does. And one
+    anchor of the `CODE_*` pin sits outside this frame entirely — `CODE_NO_WORKTREE` occurs 0
+    times in EITHER half, because that pin asserts it against the whole bundle `text` rather than
+    against `section`, and the string lives in the `--release` recipe. None of this is what 1203
+    changed; it is the map. What 1203 ADDED is a separate core-scoped pin below, over the keys a
+    pump acts on rather than over the shapes it looks up."""
     text = _skill_text()
     section = _gc_section(text)
     gc_src = inspect.getsource(workspace_cmd.gc_workspaces)
@@ -635,6 +654,111 @@ def test_the_deferred_key_the_skill_teaches_is_the_one_the_code_produces():
     assert "`deferred`" in section, "SKILL.md's --gc rule no longer names the `deferred` key"
     assert f'`{workspace_cmd.DEFER_YOUNG}`' in section, \
         "SKILL.md's --gc rule no longer cites the deferral's own code"
+
+
+def test_the_core_half_alone_still_names_the_gc_keys_a_pump_acts_on():
+    """VMCP-306 (1203): the `--gc` pins above read `_gc_section`, which is the core tick step
+    CONCATENATED with the whole of `references/gc-report.md` — so wherever BOTH halves carry an
+    anchor (and for the payload KEYS they mostly do, counted in the paragraph above), a deletion
+    from the CORE alone ships green. That union is deliberate and those pins stay as they are;
+    this one exists because the blind half is the half an agent actually has.
+
+    MEASURED, not assumed, and read TWICE. `setup_cmd.sync_installed_artifacts` is REFRESH-ONLY
+    by an explicit decision — it rewrites an installed copy that already exists and NEVER
+    provisions one — so a consumer who installed before the core/references split gets the core
+    healed on every server start and no `references/` directory, ever, until somebody re-runs
+    `install-skill`. Card VMCP-306 (1203) records that state on 2026-08-21 — core present at
+    118678 bytes, `~/.claude/skills/tracker/references/` absent — as found by 1183's reviewer.
+    Re-read later the SAME day: the core had
+    moved to 121877 bytes with an mtime of 09:56, i.e. the sync had run in between — and
+    `references/` still did not exist, identically under `~/.config/opencode/skills/tracker/`.
+    Whether those two readings are one machine or two is NOT established here and does not matter
+    to the conclusion; what the second one adds over the first is that a refresh HAPPENED and did
+    not create the directory, which is the refresh-only promise doing exactly what it says. So the
+    core's own bullet points at `references/gc-report.md`, that file is not on disk, and the only
+    half the agent can read is the one nothing pinned.
+
+    WHAT IS ASSERTED, and why it stops there. Only the payload keys a pump has to ACT on without
+    opening anything: the three lists, the two optional keys, and the two fields the rulebook
+    tells it to scan `released` for. Each is anchored on the function that actually emits it, so a
+    rename fails here the way it fails in the pins above.
+
+    WHAT IS DELIBERATELY NOT ASSERTED — and this is the half a future reader is likeliest to
+    "fix". Not one `CODE_*` value and not `DEFER_YOUNG`. Counted on the packaged rulebook: ALL TEN
+    `CODE_*` values `workspace_cmd` defines occur 0 times in `_gc_step`'s core slice (ten, not the
+    eight the pin above happens to loop over), and a backticked `young` occurs 0 times there
+    against 1 in the reference. They live in the reference BY DESIGN, which is what the
+    core/references split was for — measured, a core-scoped conjunct over them is red on arrival,
+    17 failing conjuncts, and the only way to green it would be to drag the payload table back
+    into the core. The line this pin draws is the card's own: the core must say the key EXISTS and
+    what to do about it, the reference owns the shapes.
+
+    The list is NOT exhaustive, and one omission is worth naming because it is not a shape:
+    `overwritten_ignored` is a loss key of the same class as `removed_ignored`, and it too occurs
+    0 times in the core slice (3 in the reference). It is left out because the core's own bullet
+    does not tell a pump to scan for it, so pinning it here would pin a sentence that is not
+    written rather than one that could be deleted; if the core ever grows that instruction, this
+    row belongs beside `removed_ignored`.
+
+    MUTATION SWEEP, in a clone, `__pycache__` cleared and PYTHONDONTWRITEBYTECODE=1 per round,
+    `vikunja_mcp.__file__` AND the path `importlib.resources` resolves the PACKAGED `SKILL.md` to
+    printed and confirmed inside the clone each round (these pins read the packaged rulebook, so
+    the second print is the one that matters), `-q` dropped so `collected` prints, rounds read by
+    counting lines beginning `FAILED ` with `ERROR ` counted separately. Selection
+    `tests/unit/test_skill_contract.py` throughout.
+    control 0 failed / 0 errors / 58 collected.
+    round 1, delete every `deferred` mention from the CORE `SKILL.md` alone, references untouched
+    (1183's reviewer measured the BULLET's removal as blind; this round removes the bullet AND the
+    tick-step sentence, 3 mentions -> 0, so it is that mutation widened, not that mutation)
+    -> 1 failed / 0 errors / 58 collected, and the one failure is THIS test —
+    `test_the_deferred_key_...` above stays green, which is the blindness reproduced beside its
+    fix in the same round.
+    round 2, rename `removed_ignored` in the CORE half alone -> 1 failed / 0 errors /
+    58 collected, again this test alone.
+    round 3, `gc_workspaces` emits `skipped_trees` instead of `deferred` -> 2 failed / 0 errors /
+    58 collected (this test and `test_the_deferred_key_...`), i.e. the code-side anchor is live in
+    both.
+    round 4 is the one that exists because a second pass caught this test being BLIND where it
+    claimed parity: rename `kept` -> `held` and `expected` -> `routine` in `gc_workspaces`' payload
+    statement -> 3 failed / 0 errors / 58 collected (this test, the `CODE_*` pin, and the standing-
+    record pin). With the earlier bare-`"<key>"` anchors the same mutation left THIS test green,
+    because `gc_workspaces`' own docstring and a comment both spell
+    `{"released": [], "kept": [], "expected": []}` and `inspect.getsource` hands those back too.
+    control re-run after the last restore 0 failed / 0 errors / 58 collected.
+    """
+    core_only = _gc_step(_skill_text())
+    gc_src = inspect.getsource(workspace_cmd.gc_workspaces)
+    release_src = inspect.getsource(workspace_cmd._release_locked)
+    # (emitting FRAGMENT, the source that emits it, how the core cites it).
+    #
+    # The fragment is the ASSIGNMENT, not a bare `"<key>"` substring, for the reason the `CODE_*`
+    # pin above already records having MEASURED: `inspect.getsource` hands back the function's
+    # DOCSTRING and comments too, and `gc_workspaces` spells the literal
+    # `{"released": [], "kept": [], "expected": []}` in both. A bare `"kept"` is therefore
+    # satisfied by that prose after the emitting statement has been renamed — measured, renaming
+    # `released`/`kept`/`expected` in the payload each left this test GREEN. `"released"` is worse
+    # still: it also occurs as the PER-ENTRY flag on refusal dicts, a different key of the same
+    # spelling, so no top-level rename could ever redden a bare substring.
+    #
+    # `branch_deleted` is cited by the core WITH its value attached, because `false` is the thing
+    # a pump scans for — a bare key would be satisfied by prose that never says which value means
+    # trouble.
+    for fragment, emitter, cited_as in (
+        ('"released": released', gc_src, "`released`"),
+        ('"kept": kept', gc_src, "`kept`"),
+        ('"expected": expected', gc_src, "`expected`"),
+        ('result["deferred"] =', gc_src, "`deferred`"),
+        ('result["main_checkout"] =', gc_src, "`main_checkout`"),
+        ('result["branch_deleted"] =', release_src, "`branch_deleted: false`"),
+        ('result["removed_ignored"] =', release_src, "`removed_ignored`"),
+    ):
+        assert fragment in emitter, (
+            f"the --gc payload no longer emits {fragment!r} — the rulebook teaches a dead key"
+        )
+        assert cited_as in core_only, (
+            f"the CORE half of SKILL.md's --gc step no longer names {cited_as} — and the core is "
+            "the only half a consumer without references/ can read (VMCP-306)"
+        )
 
 
 def _standing_record_bullet(text: str) -> str:
