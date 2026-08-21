@@ -560,6 +560,15 @@ def next_task(exclude: list[int] | None = None) -> dict:
     your own active tasks are offered (branch 1) BEFORE the slot check, so an unexpected resume
     at free:0 with no wip_saturated means your exclude is short, not that the board changed —
     check your exclude, not the board (the resume's own note says so at the moment it happens).
+    `exclude` is honoured on EVERY branch, the FREE QUEUE included (#1202) — it used to be read
+    by the other three only, so a free unclaimed card came back as a fresh offer despite being
+    named. When it empties the free queue the result is task:null PLUS all_excluded:true and
+    `withheld` naming what was held back, NOT the empty-queue result: the queue is not empty, it
+    is full of work you already hold. Only you can say what to DO with that, which is why the
+    payload says both — a live agent on each withheld id reads like wip_saturated (wait for one
+    to return, do not end the tick), while ids you excluded because claim REFUSED them mean
+    nothing here will change this tick. Never dispatch onto a withheld id, and never drop ids
+    from `exclude` to make work appear.
     """
     return _wf().next_task(exclude=exclude)
 

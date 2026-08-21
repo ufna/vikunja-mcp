@@ -1605,17 +1605,27 @@ class Workflow:
         # epic, НИКОГДА за наличие подзадач (тот же миграционный принцип, что у гейта
         # последовательности): у обычной задачи тоже может быть подзадача, и она обязана остаться
         # клеймабельной.
-        # No `excluded` check needed here (unlike the resume/stuck/review branches above): this
-        # filter already requires `not self._assignee_ids(t)`, and an excluded id is by
-        # definition a task the caller already holds — i.e. assigned. An excluded task therefore
-        # can never pass the assignee filter and reach this list. If that filter is ever loosened
-        # to admit assigned tasks, this reasoning breaks and `excluded` would need to be added here.
-        queue = [
+        # `excluded` IS read here (#1202), and the comment that used to say it need not be was
+        # the defect. It argued: an excluded id is by definition a task the caller already holds,
+        # i.e. ASSIGNED, so the assignee filter below drops it anyway. The premise is false —
+        # `exclude` states SUB-AGENT LIVENESS, not assignment, and SKILL.md itself instructs
+        # putting an UNASSIGNED Queue id into it ("claim REFUSED — the id goes into exclude until
+        # the end of the tick"); a human can also clear an assignee while an agent is live.
+        # MEASURED BY CONSTRUCTION over FakeAPI, one stand per branch, before anything changed: a
+        # free unassigned Queue card came BACK though it was excluded, while the SAME card
+        # claimed (Design), assigned-but-still-in-Queue, and in Review was withheld — so the
+        # discriminator is the BRANCH, never the id, the list length or its order.
+        offerable_queue = [
             t for t in board.get("Queue", [])
             if not self._assignee_ids(t)
             and not self._has_label(t, LABEL_BLOCKED)
             and not self._has_label(t, LABEL_EPIC)
         ]
+        # split rather than filtered in one pass: `withheld` must be exactly the candidates
+        # dropped BY `exclude` and by nothing else, or the signal below would report an assigned
+        # or blocked card as "you already have this one".
+        withheld = [t for t in offerable_queue if t["id"] in excluded]
+        queue = [t for t in offerable_queue if t["id"] not in excluded]
         queue.sort(key=lambda t: -t.get("priority", 0))
         # hard sequence gate (option C, epic #94) — free-queue half: a free task whose
         # predecessor is still unfinished (below Review) is NOT yet claimable; skip it and offer
@@ -1671,7 +1681,57 @@ class Workflow:
             if cycle is not None:
                 return with_wip(self._cycle_signal(cycle, full_board.get("board", raw)))
             return with_wip(self._starving_tail(gated))
+        # #1202: the free queue held candidates and EVERY one of them was in `exclude`. Reported
+        # BELOW the starving tail deliberately: a gated candidate is the human-facing fact (a
+        # chain has stalled), while these are the caller's own in-flight work and it already
+        # knows their ids. Reaching here means `gated` was empty, so the two signals never
+        # compete for one payload.
+        if withheld:
+            return with_wip(self._all_excluded(withheld))
         return with_wip({"task": None, "message": "the queue is empty — no work for the agent"})
+
+    def _all_excluded(self, withheld: list[dict]) -> dict:
+        """The free queue held only cards the CALLER itself named — NOT an empty queue (#1202).
+
+        WHAT WAS BROKEN. Three of the four task-bearing branches consulted `excluded`; the
+        free-queue one did not, on the reasoning quoted at its filter, so an excluded id came
+        back as a fresh offer. Measured by construction over `FakeAPI`, one stand per branch:
+        the same card came BACK when free and unassigned in Queue, and was WITHHELD when
+        claimed into Design, when assigned but still in Queue, and when in Review.
+
+        WHY A DISCRIMINATOR AND NOT THE EMPTY-QUEUE RESULT. Spelling this "the queue is empty"
+        would be the same class of lie the card is about — the queue is not empty, it is full of
+        work this caller already has in hand. The additive shape on a `task: null` payload is
+        what `wip_saturated`, `starving` and `cycle` already established here.
+
+        WHAT THE CALLER MUST DECIDE, because this tool cannot. Both readings are legitimate and
+        they differ in what the pump should DO: if an agent is live on each withheld id, this is
+        "wait for one to return", exactly like `wip_saturated`; if these are ids excluded because
+        `claim` REFUSED them, the tick is genuinely done and yielding is right. The tracker
+        cannot tell sub-agent liveness — that is the whole reason `exclude` is passed IN — so the
+        `note` states both and the caller reads its own set.
+
+        SAFE FOR THE CROSS-REPO CONTRACT. `claimable_cmd.classify_next` branches on `cycle` and
+        `starving` and otherwise answers kind "empty", so this adds a KEY and no KIND — and
+        `vikunja-mcp claimable` calls `next_task` with an EMPTY exclude, which makes this branch
+        structurally unreachable there. Both pinned rather than reasoned."""
+        return {
+            "task": None,
+            "all_excluded": True,
+            "withheld": [self._summary(t) for t in withheld],
+            "message": (
+                f"the free queue holds {len(withheld)} claimable task(s) and EVERY one of them "
+                f"is in your `exclude` — nothing left to offer. This is NOT an empty queue"
+            ),
+            "note": (
+                "you excluded all of it, so only YOU can say what this means. If a live agent "
+                "holds each of these ids: treat it like wip_saturated — wait for one to return "
+                "and call next_task again, do NOT end the tick. If they are ids you excluded "
+                "because claim REFUSED them, nothing here will change this tick: go on to the "
+                "rest of your tick and yield as on an empty queue. Do NOT dispatch onto a "
+                "withheld id, and do NOT drop ids from `exclude` to make work appear"
+            ),
+        }
 
     def _starving_tail(self, gated: list[tuple[dict, list[dict]]]) -> dict:
         """The distinguishable "everything is blocked" signal — NOT the empty queue.

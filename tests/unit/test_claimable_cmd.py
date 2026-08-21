@@ -40,6 +40,10 @@ from vikunja_mcp.workflow import STAGES, Workflow
      {"claimable": False, "kind": "empty", "task_id": None}),
     ({"task": None, "starving": True, "waiting_count": 2, "waiting": []},
      {"claimable": False, "kind": "starving", "task_id": None}),
+    # #1202: an added KEY, deliberately not an added KIND — the hub's enum is closed and
+    # nothing here is claimable, so "empty" is the honest verdict for it.
+    ({"task": None, "all_excluded": True, "withheld": [{"id": 9}]},
+     {"claimable": False, "kind": "empty", "task_id": None}),
     ({"task": None, "cycle": True, "cycle_tasks": []},
      {"claimable": False, "kind": "cycle", "task_id": None}),
 ])
@@ -704,6 +708,29 @@ def test_wip_saturation_is_unreachable_for_the_standalone_check():
     result = wf.next_task()
     assert "wip_saturated" not in result
     assert classify_next(result) == {"claimable": True, "kind": "resume", "task_id": task["id"]}
+
+
+def test_the_all_excluded_signal_is_unreachable_for_the_standalone_check():
+    """Same reasoning as wip_saturation above, and the same reason it is pinned rather than
+    argued (#1202): the free-queue branch now honours `exclude`, and the CLI passes NONE, so a
+    candidate can never be withheld here. If a future edit let the signal through, the verdict
+    would still read 'empty' — correct, since nothing is claimable — but the two facts are
+    separate and only this pin says the branch is unreachable at all.
+
+    The CONTROL is the second half: the same board, the same call, with the id excluded by hand
+    the way an agent would — that IS the signal, so the first assertion is not passing merely
+    because the shape does not exist."""
+    api = FakeAPI(buckets=STAGES)
+    wf = Workflow(api, project_id=3)
+    free = api.add_task("free", "Queue")
+
+    result = wf.next_task()
+    assert "all_excluded" not in result
+    assert classify_next(result) == {"claimable": True, "kind": "queue", "task_id": free["id"]}
+
+    withheld = wf.next_task(exclude=[free["id"]])
+    assert withheld["all_excluded"] is True
+    assert classify_next(withheld) == {"claimable": False, "kind": "empty", "task_id": None}
 
 
 # --- VMCP-295 (1169): require_review_independence reaches the exported verdict -------------------

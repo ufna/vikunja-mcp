@@ -202,6 +202,98 @@ def test_excluded_review_task_is_not_offered_for_review():
     assert "review" not in res
 
 
+def test_an_excluded_FREE_queue_task_is_not_handed_back():
+    """THE REGRESSION (#1202). Three of next_task's four task-bearing branches consulted
+    `excluded`; the free-queue one did not, so the one branch that hands out UNCLAIMED work
+    handed back a card the caller had just named.
+
+    The comment at that filter argued it need not: an excluded id is a task the caller already
+    holds, i.e. ASSIGNED, so the assignee filter drops it anyway. False — `exclude` states
+    SUB-AGENT LIVENESS, not assignment, and SKILL.md instructs putting an UNASSIGNED Queue id
+    into it on a claim refusal. Established by construction across all four branches before
+    anything changed: the SAME card came back when free and unassigned in Queue, and was
+    withheld when claimed into Design, when assigned but still in Queue, and when in Review.
+    The three siblings are pinned directly above and below this one; this is the fourth."""
+    api, wf = _env()
+    free = api.add_task("free queue card", "Queue")
+    res = wf.next_task(exclude=[free["id"]])
+    assert res["task"] is None, res
+    assert res["all_excluded"] is True
+
+
+def test_the_exclusion_emptying_the_free_queue_is_NOT_an_empty_queue():
+    """Its own discriminator, not the empty-queue message — which would be the same class of
+    lie the card was filed about: the queue is full, of work this caller already has in hand.
+
+    The `note` carries what the tool CANNOT know: whether a live agent holds these ids (wait,
+    like wip_saturated) or whether claim refused them (the tick is done). Both readings are
+    legitimate and they differ in what the pump does, so the payload states both rather than
+    picking one — the same reason #527 and #571 put their guidance in the note.
+
+    MUTATION SWEEP for the four #1202 tests here, in a CLONE of this tree, `__pycache__` deleted
+    and PYTHONDONTWRITEBYTECODE=1 per round, `vikunja_mcp.__file__` printed per round and
+    resolving inside the clone. Selection: this file plus tests/unit/test_claimable_cmd.py, 108
+    collected in every round including the control — that figure moves with any landing touching
+    either file, so re-measure rather than reuse. Rounds read by COUNTING lines beginning
+    `FAILED `, `ERROR ` counted separately and 0 throughout.
+
+      control 0 failed  free-queue filter blind to `exclude` again (pre-#1202) -> 4 failed
+      control 0 failed  the signal spelled as the ordinary empty queue         -> 3 failed
+      control 0 failed  withheld outranks the starving tail (order flipped)    -> 1 failed
+      control 0 failed  withheld built from the raw Queue, not the offerable   -> 1 failed
+      control after restore 0 failed
+
+    Row 1 is the pre-#1202 code and kills FOUR, which is worth reading rather than counting: with
+    the branch blind again the excluded card is OFFERED, so the starving-ordering test gets a
+    task where it expects a stalled chain, and the claimable-contract test sees no signal to
+    classify. Rows 3 and 4 kill exactly ONE each, and a DIFFERENT one each — which is what says
+    the ordering decision and the `withheld` split are pinned separately rather than riding on
+    the same assertion.
+    """
+    api, wf = _env()
+    a = api.add_task("free A", "Queue")
+    b = api.add_task("free B", "Queue")
+    res = wf.next_task(exclude=[a["id"], b["id"]])
+    assert res["task"] is None
+    assert res["all_excluded"] is True
+    assert [w["id"] for w in res["withheld"]] == [a["id"], b["id"]]
+    assert "NOT an empty queue" in res["message"]
+    assert "wip_saturated" in res["note"] and "claim REFUSED" in res["note"]
+    assert "starving" not in res and "wip_saturated" not in res
+
+
+def test_only_the_EXCLUSION_makes_a_free_queue_task_withheld():
+    """`withheld` must name the candidates dropped by `exclude` and by NOTHING else, or the
+    signal reports someone else's card as "you already have this one". A card that the filter
+    would drop anyway — assigned, `blocked`-labelled, an epic container — is not withheld, so
+    excluding one of those leaves an ordinary empty queue."""
+    api, wf = _env()
+    assigned = api.add_task("someone else's", "Queue", assignee={"id": 99, "username": "other"})
+    blocked = api.add_task("externally blocked", "Queue", labels=("blocked",))
+    epic = api.add_task("container", "Queue", labels=("epic",))
+    ids = [assigned["id"], blocked["id"], epic["id"]]
+    res = wf.next_task(exclude=ids)
+    assert res["task"] is None
+    assert "all_excluded" not in res, res
+    assert res["message"] == "the queue is empty — no work for the agent"
+
+
+def test_a_starving_tail_still_outranks_the_all_excluded_signal():
+    """Ordering, and it is a decision rather than an accident: a gated candidate is the
+    HUMAN-facing fact (a chain has stalled and nothing will clear it by itself), while a
+    withheld one is the caller's own in-flight work, whose ids it already holds. So when both
+    are present the starving tail is what comes back."""
+    api, wf = _env()
+    excluded_free = api.add_task("free, excluded", "Queue")
+    head = api.add_task("unfinished head", "Build")
+    gated = api.add_task("gated", "Queue")
+    api.add_relation(gated["id"], head["id"], "blocked")
+    res = wf.next_task(exclude=[excluded_free["id"]])
+    assert res["task"] is None
+    assert res["starving"] is True
+    assert "all_excluded" not in res
+
+
 def test_excluded_stuck_queue_task_is_not_handed_back():
     """An unfinished claim (assigned to me, still sitting in Queue) that another live
     sub-agent is already finishing must not be handed back as a second 'call claim' — the
