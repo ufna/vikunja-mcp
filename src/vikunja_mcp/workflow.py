@@ -1310,14 +1310,28 @@ class Workflow:
         mine = self._my_active_tasks(raw)
         # parallel drain: `exclude` names the tasks the CALLER already has a live
         # agent on. The tracker cannot know sub-agent liveness — that is a fact of the harness,
-        # not of the board — so the pump states it. It is consulted by the three branches that
-        # can offer an ALREADY-ASSIGNED task (resume / stuck-in-Queue / review offer); the
-        # free-queue branch never reads it and does not need to (see the note there: an excluded
-        # id is assigned to the caller, so its assignee filter already drops it). So `exclude` is
-        # NOT a queue filter — it never narrows WHICH free work is offered, and a caller learns
-        # nothing about the rest of the queue from passing it. An excluded id still OCCUPIES its
-        # slot, though: it is real work in progress. On a fresh tick after a killed turn the set
-        # is empty and the abandoned task correctly resurfaces as resume (the crash-recovery path).
+        # not of the board — so the pump states it. ALL FOUR task-bearing branches consult it —
+        # resume, stuck-in-Queue, the review offer, and (since #1202) the free queue — so an
+        # excluded id is never OFFERED by any of them, while still OCCUPYING its slot: it is real
+        # work in progress. On a fresh tick after a killed turn the set is empty and the
+        # abandoned task correctly resurfaces as resume (the crash-recovery path).
+        #
+        # THE FREE-QUEUE FILTER IS THE ONE THAT WILL LOOK REDUNDANT — do not re-derive it away.
+        # From #522 until #1202 this very paragraph argued that branch "never reads it and does
+        # not need to", because an excluded id is assigned to the caller and the assignee filter
+        # drops it anyway. That premise is REFUTED, and refuted BY CONSTRUCTION, one stand per
+        # branch (the measurement itself is at the split): `exclude` states SUB-AGENT LIVENESS,
+        # not assignment — SKILL.md instructs putting an UNASSIGNED Queue id into it ("claim
+        # REFUSED — the id goes into exclude until the end of the tick"), and a human can clear
+        # an assignee while an agent is live.
+        #
+        # SO `exclude` IS A QUEUE FILTER — a property #1202 BOUGHT knowingly, and the reverse of
+        # what this paragraph used to claim ("it never narrows WHICH free work is offered, and a
+        # caller learns nothing about the rest of the queue"). It does narrow it, and a caller
+        # can therefore ENUMERATE the free queue by excluding what it has already seen — which is
+        # exactly what #1202's reporter was doing when they hit the bug. Written HERE because it
+        # is written nowhere else: `docs/dossier/workflow.md` never mentions `exclude`, and
+        # server.py's `next_task` docstring addresses the AGENT, not whoever edits these filters.
         excluded = set(exclude or [])
         limit = self._effective_wip_limit()
         wip = {
@@ -1685,7 +1699,16 @@ class Workflow:
         # BELOW the starving tail deliberately: a gated candidate is the human-facing fact (a
         # chain has stalled), while these are the caller's own in-flight work and it already
         # knows their ids. Reaching here means `gated` was empty, so the two signals never
-        # compete for one payload.
+        # compete for one payload. But that ordering only ever decides between DISTINCT
+        # candidates: a card that is BOTH gated and excluded never reaches `gated` at all — the
+        # split above runs first — so it reports as withheld, and `_all_excluded`'s message calls
+        # it "claimable" where `claim` would refuse it on its predecessor. Measured on a stand:
+        # one gated free card, excluded -> all_excluded; add a SECOND gated card left un-excluded
+        # and the starving tail fires as before, so the stalled-chain report is lost only when
+        # EVERY gated candidate is also excluded. Left standing (#1202 review, non-blocking):
+        # both readings of the `note` lead the pump to a correct action, and a card gated on a
+        # predecessor the loop above can SEE is never OFFERED, so its id reaches `exclude` only
+        # by enumeration or by a human clearing an assignee.
         if withheld:
             return with_wip(self._all_excluded(withheld))
         return with_wip({"task": None, "message": "the queue is empty — no work for the agent"})
