@@ -591,21 +591,45 @@ def test_claim_keeps_a_PER_CALL_memo_so_nothing_is_cached_ACROSS_calls(env):
 
 # --- #1198: what the fail-closed guarantee covers, and the ASYMMETRY inside it -------------
 #
-# "Unknown must never be spelled gone" is true of every path THROUGH `_offboard_predecessor`
-# and says nothing about a predecessor that never reaches it. The one that never reaches it
-# was measured by #1179's independent reviewer on a live 2.3.0 with a two-reader control: when
-# the token loses access to the neighbour PROJECT, the server strips the far card out of
-# `related_tasks` entirely — owner reads {'blocked': [4]}, agent reads {} at the same moment —
-# so `_unfinished_predecessors` iterates nothing and the card is released with its blocker
-# untouched. That is an ACCEPTED limit and there is nothing here to pin it with: it is a
-# property of the SERVER's read filtering, above every line of ours. The prose that used to
-# state the guarantee without that caveat is narrowed in CLAUDE.md and
-# `docs/dossier/workflow.md`. What CAN be pinned is the pair below.
+# The rule CLAUDE.md states as `unknown must never be spelled "gone"` takes TWO conditions
+# here, not one, and both are load-bearing. It holds of a predecessor that REACHES
+# `_offboard_predecessor` AND gets past that guard's `project_id` check (an int, and not
+# ours): past the check exactly ONE outcome stops the predecessor blocking, and it is the far
+# board reporting a stage for it that is ready. The two fail-OPEN escapes pinned below are
+# that same check failing INSIDE the guard — paths that go THROUGH it and release without
+# ever resolving a stage — and a predecessor whose whole project is invisible to the token
+# does not reach the guard at all, because the server strips it from `related_tasks` before
+# our code sees it. That second condition is about the STEADY state and not about every
+# ordering: lose access BETWEEN the successor's relation read and this one and the far card
+# is still embedded, the guard IS reached, and its 403 branch fires — the race
+# `tests/unit/fakes.py` models deliberately, and says so where it models it. The one-clause
+# form this comment first carried — "true of every path THROUGH `_offboard_predecessor`" —
+# is refuted by the two escape tests below.
+#
+# MEASURED rather than read off the code: `_offboard_predecessor` instrumented to record every
+# entry and its return, then a live `Workflow` over `FakeAPI` driven through the whole branch
+# set past that check (clone, `__pycache__` cleared, PYTHONDONTWRITEBYTECODE=1,
+# `vikunja_mcp.__file__` resolving inside the clone). CONTROL, unmutated: unready stage BLOCKS,
+# unreadable board BLOCKS, in no bucket BLOCKS, a board read that 500s propagates — none of the
+# four releases, while a ready stage does, and both escapes ENTER the guard and release
+# (`claimed=True`), which is what says the probe can see a release at all. Round A, make the
+# unreadable-board branch fail-OPEN: that stand alone flips to RELEASED. Round B, the same for
+# the no-bucket branch: that stand alone flips. Closing control after restore: unchanged.
+#
+# The predecessor that never reaches the guard was measured by #1179's independent reviewer
+# on a live 2.3.0 with a two-reader control: when the token loses access to the neighbour
+# PROJECT, the server strips the far card out of `related_tasks` entirely — owner reads
+# {'blocked': [4]}, agent reads {} at the same moment — so `_unfinished_predecessors` iterates
+# nothing and the card is released with its blocker untouched. That is an ACCEPTED limit and
+# there is nothing here to pin it with: it is a property of the SERVER's read filtering, above
+# every line of ours. The prose that used to state the guarantee without that caveat is
+# narrowed in CLAUDE.md and `docs/dossier/workflow.md`. What CAN be pinned is the pair below.
 #
 # MUTATION SWEEP over exactly that pair, in a CLONE, `__pycache__` deleted and
 # PYTHONDONTWRITEBYTECODE=1 per round, `vikunja_mcp.__file__` printed per round and resolving
 # inside the clone, selection this file plus `test_workflow_sequence_gate.py`, 92 collected in
-# every round including the control:
+# every round including the control — 92 at `50b1e88`, and that figure moves with every
+# landing that touches either file, so re-measure it rather than reusing it:
 #
 #   control 0 failed   round: make OUR-project-id fail-CLOSED       -> 2 failed
 #   control 0 failed   round: make a non-int project id fail-CLOSED -> 1 failed
