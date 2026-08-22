@@ -59,9 +59,18 @@
   one endpoint and so cost 3 B each after the first (measured): that one grows the line slowly
   and without bound, which is the harder failure to see coming. Headroom, not a promise — measured against
   a board that never stops paging, one line reached 545 B over 123 requests.
-  **A THIRD grower arrived with #1179 and went unnamed through FOUR releases** (`b0ce2c6` is in
-  v0.2.332 through v0.2.335, and the "TWO things" enumeration was still in `claimable_cmd.py` in
-  all four): a gated Queue card whose predecessor lives on a NEIGHBOUR project adds a `get_task`,
+  **A THIRD grower arrived with #1179 and went unnamed through FIVE releases — 5 at `be22cb4`**
+  (`b0ce2c6` is in v0.2.332 and every tag since; `claimable_cmd.py` still said `TWO things GROW
+  it` at v0.2.332 through v0.2.336, and `THREE things GROW it` first appears at v0.2.337, whose
+  content commit `be22cb4` closed the window. Re-derive by intersecting those two — `git tag
+  --contains b0ce2c6`, then per tag `git show "${tag}:src/vikunja_mcp/claimable_cmd.py" | grep -o
+  '[A-Z]* things GROW it'`, the quotes load-bearing in zsh. Grep the WHOLE phrase: a bare `TWO`
+  also hits `TWO INDEPENDENT PROPERTIES` in that same file, so it reads 2 inside the window and 1
+  outside rather than 1 and 0. This sentence read FOUR until #1212, and WHY is not recoverable
+  from the tree — `be22cb4` is parented on v0.2.336's own bump commit and was authored five
+  minutes after that bump landed, so nothing here separates "right when derived, stale by the time
+  it landed" from a plain off-by-one): a gated Queue card whose predecessor lives on a NEIGHBOUR
+  project adds a `get_task`,
   a `kanban_view` and an exhaustive `view_tasks` of that project to the same line. #1199 narrowed
   the BOARD READS from per gated card to per distinct neighbour project — measured on FakeAPI, M
   cards gated on one neighbour cost 1/3/5 reads of its board at M = 1/3/5 before and 1 at all

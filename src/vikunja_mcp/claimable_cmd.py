@@ -200,7 +200,11 @@ after the first (measured 11, 3, 3, 3, 3, 3 through the real `_Trail`) — the c
 there is, not the dearest. "Bounded by pagination" is the wrong thing to remember, and so is
 "a Review-heavy board eats the budget fastest": it eats it slowly and without bound, which is
 the harder failure to see coming. THE THIRD ARRIVED WITH #1179 and is the NEIGHBOURS' boards, so
-this enumeration read as complete through FOUR releases while it was not. A free-Queue card whose
+this enumeration read as complete through FIVE releases while it was not — 5 at `be22cb4`, the
+#1199 landing that closed the window (v0.2.332 through v0.2.336 ship #1179's `b0ce2c6` beside an
+enumeration of two). Both this sentence and its twin in the dossier read FOUR until #1212; the
+tag-by-tag derivation, and the exact phrase to grep for — a bare word does NOT discriminate, it
+hits every tag — are in `docs/dossier/claimable.md`. A free-Queue card whose
 predecessor lives on another project costs a `get_task` for the predecessor plus — for each
 DISTINCT neighbour project — a `kanban_view` and an EXHAUSTIVE `view_tasks` of that project, the
 last being many requests on its own. #1199 is what makes "distinct project" the unit for the two
