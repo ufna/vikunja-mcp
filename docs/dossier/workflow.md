@@ -650,3 +650,92 @@ out of `sys.modules` altogether, and it is a far cheaper import than the SDK's
 (~26-80 ms against ~0.43 s). Filed as
 VMCP-307 (1207) with the trade written out; the test asserts that both doors behave the SAME, so
 fixing one alone goes red and asks about the other.
+
+## Duplicate `add_label` — four routes, and the cause was the BYPASS (#1216)
+
+**The defect in one line: real 2.3.0 refuses a label the task already carries, and `workflow`
+had no single place where "put a label on a card" happens, so four routes reached that refusal.**
+Measured through this package's own client on a throwaway container: `api.add_label` on a
+duplicate raises `VikunjaError status=400 message='{"code":8001,"message":"This label already
+exists on the task."}'`, and a third add answers the same — a STATE, not a once-off. A duplicate
+assignee answers the same class one endpoint over, `400 code 4021`; that one is already guarded
+(`claim`'s `self_heal` skips the PUT when I am the only assignee) and was measured in the same
+round as the precedent for the shape chosen here.
+
+**The four routes, driven end to end through the real `Workflow` over `FakeAPI` with agent tools
+only, then re-driven against the real server at the pre-fix commit `f7de8d7`.** A second
+`review_task(id,'approve')` — the only one needing NO human step, and reachable exactly as
+SKILL.md warns since #991, an orchestrator dispatching two reviewers onto one card within a tick.
+A `needs_work` on a card a human hand-dragged back to Review still wearing `review-failed`
+(`advance` clears verdict labels; a hand-drag fires no tool). A `return_task` on a card a human
+labelled `blocked`. A `decompose` on one already labelled `epic`. The card that filed this named
+two and said `_add_label` had three call sites; the real numbers are four and five.
+
+**Why a guard per site was the wrong fix, and this is the whole post-mortem.** `return_task` and
+`decompose` did not call `_add_label` at all — each INLINED its two lines, `get_or_create_label`
++ `api.add_label` — and the one guard that existed (epic-ready) was that site's own `continue`,
+not the helper. So the state everyone reads as "one site remembered and the others forgot" was
+really "there is no write path where the invariant COULD be stated", and a per-site guard would
+have reproduced it one round later. `_add_label` is now the single write path and carries the
+guard, and `test_api_add_label_has_exactly_one_caller_in_the_package` (in
+`tests/unit/test_workflow_duplicate_label.py`) reads the package source and goes red on the next
+inline copy, naming the file that did it.
+It takes the task SNAPSHOT (dict) rather than an id, mirroring `_remove_label` beside it — every
+call site already holds a fresh task dict, so idempotence costs ZERO extra requests, and two
+matched signatures are what makes the next bypass unlikely. Swallowing the 400 inside
+`api.add_label` was rejected: `VikunjaError` carries `r.text[:300]`, a TRUNCATED body, so a sniff
+on the message is not a sound discriminator, and it would put a workflow decision in the client.
+
+**What the guard closes is the STATE, not the RACE.** A label added by someone else between the
+board read and the PUT still 400s — the same residual `_remove_label` documents. What makes
+the snapshot trustworthy here was measured and not assumed: `api.view_tasks` against real 2.3.0
+returns the kanban copy with `labels` POPULATED (`["reviewed","blocked"]`), so this is not the
+#125 hollowing mode, where labels read as None off a `related_tasks` sub-dict and a check on them
+silently no-op'd in production while the too-generous fake stayed green.
+
+**The ORDER in `review_task` changed, and the measurement is what decided it.** It used to write
+the verdict COMMENT first and the label second, so a failed label write left the report on the
+card and the label absent. Constructed on the real server at `f7de8d7`: after the refused second
+approve the card carried 2 `[review]` comments — the second reviewer's report present — while
+the caller saw only a failure; and the `needs_work` route left `[review] NEEDS WORK` in the
+journal with the card STILL IN REVIEW, never moved. Which orphan is recoverable was then driven
+through the real `next_task`: a card with a `[review]` comment and no label is NOT offered again
+(the offering compares the last `[worklog]` against the last `[review]` COMMENT and never reads a
+verdict label), so nothing routes a reviewer back to it automatically — which is a narrower claim
+than "unrecoverable", since `review_task` gates on stage alone and a human handing someone the id
+still lands a verdict. A card with the label and no comment is offered exactly as it was before
+the failure. So labels go first
+and the comment last on both branches. The new failure mode is exactly that second state — a
+verdict label with no report — and it self-heals on the next tick. `_add_label` stays BEFORE
+`_remove_label` in the pair: if the add fails, the prior verdict label survives rather than being
+cleared for a verdict that never landed. `_mark_epic_if_children_complete` already wrote
+label-then-comment, for a neighbouring reason of its own: there the label IS the idempotency key,
+so a partial failure must leave the epic consistently marked. Same direction, different argument.
+
+**The fake was more generous than the server, and that is why a whole green unit suite (1367 at
+`f7de8d7`) coexisted with four live routes.** `FakeAPI.add_label` appended a second copy. It now raises the measured
+400. Two rounds price that mirror honestly, against a control of 0 failed / 0 errors / 130
+collected on the same selection: remove the mirror and leave the guard -> 1 failed, only the
+mirror's own pin, because the route tests assert the label COUNT and see a duplicate append as
+readily as an exception; remove BOTH -> 6 failed. So the mirror is a 1:1 rule this repo keeps,
+not the thing holding the route pins up. One blind spot is recorded rather than papered over, same
+control: handing the epic-ready site the hollowed `parent` sub-dict instead of the re-fetched
+`full_parent` -> 0 failed. There is nothing observable to catch — that site reaches `_add_label`
+only after its own `continue` has established the label is absent, so the helper's guard is
+belt-and-braces there. The full ten-round table lives in the test module's own docstring.
+
+**THE GUARD'S FIRST DRAFT LEAKED, AND THE SECOND INDEPENDENT PASS IS WHAT CAUGHT IT.** It read
+`if self._has_label(task, title): return`, which compares titles EXACTLY, while
+`api.get_or_create_label` resolves case- and whitespace-INSENSITIVELY on purpose (a bot typing
+`Bug`/`bug ` once forked a duplicate label; api.py records the date). The two therefore disagree
+about what "this label" means, and the gap is the whole defect again. Constructed on the real
+container: a card carrying `Vari906071` with no lowercase twin anywhere gave
+`_has_label(card,'vari906071') -> False`, `get_or_create_label('vari906071') -> that same label`,
+and the PUT `400 code 8001`. The guard now resolves FIRST and asks whether THAT LABEL ID is on
+the snapshot — the same question the server asks — after which the same construction is a clean
+no-op, re-measured on the same container. Two things went with it. `FakeAPI.get_or_create_label`
+was EXACT-match and is now 1:1 with the client, without which no unit test could see this at all
+(and it is not merely invisible under the old fake: the round that restores exact matching turns
+the new pin RED, because such a fake mints a second label where the server refuses). And the
+sentence in `_add_label` claiming the STATE was closed was narrowed, because it was not: what was
+closed was the exact-title state.

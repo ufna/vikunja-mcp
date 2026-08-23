@@ -988,9 +988,77 @@ class Workflow:
     def _has_label(task: dict, title: str) -> bool:
         return any(lb.get("title") == title for lb in task.get("labels") or [])
 
-    def _add_label(self, task_id: int, title: str) -> None:
+    def _add_label(self, task: dict, title: str) -> None:
+        """Put a label on a card — IDEMPOTENTLY, and this is the ONLY label write path in the
+        package.
+
+        Both halves of that sentence are the #1216 fix, and the second one is the cause. Real
+        2.3.0 answers `PUT /tasks/{id}/labels` with a label the task ALREADY carries as
+        `400 {"code":8001,"message":"This label already exists on the task."}` — measured through
+        this package's own client on a throwaway container, not inferred. Before #1216 FOUR routes
+        reached that 400, and in each of them the call that FAILS is an agent tool — but only one
+        needs no human step at all: a second `review_task(...,'approve')`. The other three run off
+        a state a human's hand left on the card — a `needs_work` on one hand-dragged back to Review
+        still carrying `review-failed`, a `return_task` on one already labelled `blocked`, and a
+        `decompose` on one already labelled `epic`.
+
+        THE FOUR ROUTES HAD TWO DIFFERENT CAUSES, and the fix needs both halves — which is why it
+        is a single write path AND a check on it, rather than either alone. TWO of them
+        (`review_task`'s approve and needs_work branches) did call this helper, so a check written
+        here would have closed them; the OTHER TWO never reached it — `return_task` and
+        `decompose` each INLINED its two lines, `get_or_create_label` + `api.add_label` — so no
+        check written here could have. And the one guard that did exist (epic-ready) was that
+        site's own `continue`, not this function, so there was no place the invariant was stated
+        at all. `api.add_label` now has exactly one caller, as `api.remove_label` already had.
+
+        TAKES THE SNAPSHOT, NOT AN ID — an exact mirror of `_remove_label` below, deliberately.
+        Every call site already holds a fresh task dict (`_find_task` for review_task/return_task/
+        decompose, a fresh `get_task` for epic-ready), so the idempotency costs ZERO extra
+        requests. The alternative shape considered on the card — re-reading the task inside this
+        helper — would have bought a NARROWER race window (one GET immediately before the PUT
+        rather than a snapshot taken at the top of the method) at one extra GET per label write.
+        That is the same trade this repo already declines for `_remove_label`, which reads the
+        caller's snapshot for exactly the same reason. Two matched
+        signatures are also what makes the next bypass unlikely: a reader reaching for "add a
+        label" now finds the same shape as the remove beside it, instead of an id-taking helper
+        that is easier to re-inline than to call. Skipping `get_or_create_label` on the no-op path
+        is a side benefit, not the point: that call is a PAGED list read of every label.
+
+        THE GUARD ASKS BY ID, NOT BY TITLE, AND THE FIRST DRAFT OF IT DID NOT — this is the one
+        place a `_has_label(task, title)` check would still have leaked, and it was caught by this
+        card's second independent pass and then MEASURED rather than reasoned. `_has_label`
+        compares titles EXACTLY (`lb["title"] == title`) while `api.get_or_create_label` resolves
+        case- and whitespace-INSENSITIVELY, on purpose (api.py: a bot typing `Bug`/`bug ` once
+        forked a duplicate label, real incident 2026-07-08). So the two disagree about what "this
+        label" means, and on a real 2.3.0 that gap is the whole defect again: a card carrying
+        `Vari906071`, no lowercase twin anywhere, `_has_label(card,'vari906071')` False,
+        `get_or_create_label('vari906071')` returning that very label — and the PUT answering
+        `400 code 8001`. Resolving FIRST and then asking whether THAT LABEL ID is on the snapshot
+        is the same question the server asks, so the disagreement cannot arise. The cost is that
+        the paged `labels()` read now happens on the no-op path too; skipping it was never the
+        point.
+
+        RESIDUAL, and what is closed is the STATE, not the RACE: a label added by somebody else
+        between the board read and this PUT still 400s. That residual is written up in
+        `FakeAPI._read_task`'s docstring, which is also where `_remove_label`'s (closer to
+        unreachable) half lives. What makes the snapshot trustworthy HERE was measured rather than
+        assumed — on real 2.3.0 the kanban copy `api.view_tasks` returns carries `labels`
+        POPULATED (`["reviewed","blocked"]`), so this is not the #125 hollowing mode, where labels
+        read as None off a `related_tasks` sub-dict and a check on them silently no-op'd in
+        production while the too-generous fake stayed green. That is ONE container measured, not a
+        law: #885 measured a live board copy coming back with EMPTY `assignees` on an assigned
+        card, so the same could happen to `labels`. The direction of that failure is the reason it
+        is survivable — a label-less copy makes the guard say "not there" and degrades to exactly
+        the pre-#1216 400, never to a wrong write. Precedent for the shape: `claim` decides its
+        `add_assignee` off the same kind of snapshot — `self_heal` ("I am already the only
+        assignee") skips the PUT, and anyone else among them is refused before it — so only the
+        same staleness race reaches the server's refusal there. And the server does refuse:
+        measured in the same round, `400 {"code":4021,"message":"This user is already assigned to
+        that task."}`."""
         label = self.api.get_or_create_label(title)
-        self.api.add_label(task_id, label["id"])
+        if any(lb.get("id") == label["id"] for lb in task.get("labels") or []):
+            return
+        self.api.add_label(task["id"], label["id"])
 
     def _remove_label(self, task: dict, title: str) -> None:
         # снимаем только реально висящую на снапшоте метку — иначе DELETE по несуществующей
@@ -2183,7 +2251,7 @@ class Workflow:
             # label FIRST (the idempotency key AND the board marker), THEN the comment: a partial
             # failure (label lands, comment doesn't) still leaves the epic consistently "marked", so
             # a later advance won't double-fire.
-            self._add_label(parent["id"], LABEL_EPIC_READY)
+            self._add_label(full_parent, LABEL_EPIC_READY)
             self.api.add_comment(
                 parent["id"],
                 f"[epic-ready] {card_text(self.language, 'epic_ready', children=len(siblings))}"
@@ -2371,17 +2439,38 @@ class Workflow:
             raise WorkflowError(f"only tasks in Review can be reviewed; this one is in {stage}")
         self._require_review_independence(task)
 
+        # LABELS FIRST, THE VERDICT COMMENT LAST — on BOTH branches, and the order is measured
+        # (#1216). It used to be the other way round, and that made a failed label write leave a
+        # HALF-APPLIED verdict: the report on the card, the label absent. Both orphan states were
+        # constructed and driven through the real `next_task`. UNDER THE OLD ORDER, label write
+        # fails (`[review]` comment present, no label): the card is NOT offered again — the
+        # offering branch above compares the last `[worklog]` against the last `[review]` COMMENT
+        # and never reads a verdict label, so the orphan comment takes the card out of the offering
+        # while the board still says un-reviewed. Nothing then routes a reviewer back to it
+        # AUTOMATICALLY — a narrower claim than "unrecoverable", and deliberately: `review_task`
+        # gates on stage alone, so a human handing someone the id still lands a verdict, exactly as
+        # the decompose site below already records. UNDER THIS ORDER, comment write fails (label
+        # present, no report): the card is offered exactly as it was BEFORE the failure, because
+        # nothing about a verdict label enters the offering at all — so the next tick dispatches a
+        # reviewer who writes the report. That is the new
+        # failure mode and it is the whole reason for the swap — it self-heals, and a verdict label
+        # with no report is not a lie, a verdict WAS reached. `_add_label` stays BEFORE
+        # `_remove_label` in the pair: if the add fails, the prior verdict label survives untouched
+        # rather than being cleared for a verdict that never landed.
+        # `_mark_epic_if_children_complete` already writes label-then-comment, for a neighbouring
+        # reason of its own — there the label IS the idempotency key, so a partial failure must
+        # leave the epic consistently marked. Same direction, different argument.
         if verdict == "approve":
-            self.api.add_comment(task_id, f"[review] APPROVE\n{report.strip()}")
-            self._add_label(task_id, LABEL_REVIEWED)
+            self._add_label(task, LABEL_REVIEWED)
             self._remove_label(task, LABEL_REVIEW_FAILED)
+            self.api.add_comment(task_id, f"[review] APPROVE\n{report.strip()}")
             return {
                 "verdict": "approve", "task_id": task_id,
                 "note": "verdict recorded; a human moves the task to Done",
             }
-        self.api.add_comment(task_id, f"[review] NEEDS WORK\n{report.strip()}")
-        self._add_label(task_id, LABEL_REVIEW_FAILED)
+        self._add_label(task, LABEL_REVIEW_FAILED)
         self._remove_label(task, LABEL_REVIEWED)
+        self.api.add_comment(task_id, f"[review] NEEDS WORK\n{report.strip()}")
         # An OWNERLESS card bounces to QUEUE, not Build (#705). Build means "someone is working
         # on this"; with no assignee there is no implementer to hand it back TO, and the card
         # measured UNREACHABLE there. Precisely: it can still be READ and commented on
@@ -2400,9 +2489,14 @@ class Workflow:
         # than by teaching the other tools to live with it. Same way means same WINDOW, too, and
         # that half was missing from this card's first draft: routing off `task` — the board
         # snapshot _find_task took at the top of this method — decides ownership up to four API
-        # calls before the move (measured sequence: view_tasks -> add_comment ->
-        # get_or_create_label -> add_label -> buckets -> move_task), so a human clearing the
-        # assignee in the web UI mid-call put the card in Build ownerless and reproduced #705
+        # calls before the move — the sequence, re-read after #1216 REORDERED it and re-read wider
+        # than the original listing, which omitted the conditional DELETE that was always there:
+        # view_tasks -> get_or_create_label -> [add_label, skipped when that label id is already on
+        # the snapshot] -> [remove_label, only for a verdict label the snapshot carries] ->
+        # add_comment -> get_task -> buckets -> move_task. The reorder changes the ORDER, not which
+        # calls happen; the guard can only REMOVE a call, never add one — so the window this
+        # paragraph rests on is no wider than it was. A human clearing
+        # the assignee in the web UI mid-call put the card in Build ownerless and reproduced #705
         # through this very method. claim pays for the same guarantee with TWO get_task re-reads
         # before ITS move; this pays one, here, and routes on the FRESH read. The price is one
         # extra GET on the needs_work path and one more place this method can fail after the
@@ -2564,8 +2658,12 @@ class Workflow:
         # with it: both are stale once the card is ownerless in Backlog awaiting a human's
         # re-triage.
         self._clear_verdict_labels(task)
-        label = self.api.get_or_create_label(LABEL_BLOCKED)
-        self.api.add_label(task_id, label["id"])
+        # #1216: was an INLINE copy of `_add_label` (get_or_create_label + api.add_label), which is
+        # how it missed the guard that helper now carries — a card a human had already labelled
+        # `blocked` made this a 400 on a real server. `_clear_verdict_labels` just above touches
+        # only the two verdict labels, so it cannot have changed whether THIS one is on the
+        # snapshot.
+        self._add_label(task, LABEL_BLOCKED)
         self.api.remove_assignee(task_id, self._me()["id"])
         self._move(task_id, "Backlog")
         return {"moved_to": "Backlog", "task_id": task_id, "labeled": LABEL_BLOCKED}
@@ -2693,8 +2791,9 @@ class Workflow:
         # other PARENT mutations instead of before the children: they are grouped here, and
         # clearing earlier would invent a half-applied state (verdict gone, never became an epic).
         self._clear_verdict_labels(task)
-        label = self.api.get_or_create_label(LABEL_EPIC)
-        self.api.add_label(task_id, label["id"])
+        # #1216: the second INLINE copy of `_add_label`, and the same 400 on a card a human had
+        # already labelled `epic`. Both are gone; `api.add_label` now has exactly one caller.
+        self._add_label(task, LABEL_EPIC)
         self.api.remove_assignee(task_id, self._me()["id"])
         self._move(task_id, "Backlog")
         result = {

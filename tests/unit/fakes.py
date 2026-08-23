@@ -292,30 +292,36 @@ class FakeAPI:
         `You don't have the permission to see this` for all six. `VikunjaError` carries the STATUS,
         and the status is what a production `except` branches on, so none of that is mirrored.
 
-        MEASURED AND STILL NOT MIRRORED — but the two halves are open for DIFFERENT reasons, and
-        an earlier draft of this paragraph got the second one wrong, so read the split.
+        THE TWO HALVES WERE OPEN FOR DIFFERENT REASONS, AND #1216 CLOSED EXACTLY ONE OF THEM.
 
-        The REMOVE half is close to unreachable. Real 2.3.0 answers 403 `Forbidden` when a DELETE
-        names a label that is NOT on the task, where the fake is an idempotent no-op (pinned by
-        the `mirrors_client` test in `test_workflow_gates.py`). `api.remove_label` has exactly ONE
-        caller, `workflow._remove_label`, and it sends the DELETE only for a label present on the
-        snapshot in hand — so only snapshot staleness gets there, which is a race, not a route.
+        The REMOVE half is still not mirrored, and it is close to unreachable. Real 2.3.0 answers
+        403 `Forbidden` when a DELETE names a label that is NOT on the task, where the fake is an
+        idempotent no-op (pinned by the `mirrors_client` test in `test_workflow_gates.py`).
+        `api.remove_label` has exactly ONE caller, `workflow._remove_label`, and it sends the
+        DELETE only for a label present on the snapshot in hand — so only snapshot staleness gets
+        there, which is a race, not a route.
 
-        The ADD half is REACHABLE, and that was measured rather than reasoned. Real 2.3.0 answers
-        400 code 8001 `This label already exists on the task.` when a PUT adds a label the task
-        already carries; the fake appends a second copy and stays green. An earlier draft here
-        claimed `_add_label` runs behind a `_has_label` check — it does not. `_add_label` has
-        three call sites and only the epic-ready one is guarded (by its own idempotency read of a
-        re-fetched parent); `review_task`'s approve and needs_work branches are unguarded, and two
-        further sites call `api.add_label` DIRECTLY, bypassing `_add_label` altogether
-        (`return_task` adding `blocked`, `decompose` adding `epic`). Driven through the real
-        `Workflow` over this fake, agent tools only: a second `review_task(..., 'approve')` on a
-        card that already carries `reviewed` re-adds it, and a `return_task` on a card a human
-        already labelled `blocked` re-adds that. On a real server both are the 400 — and in the
-        approve case the `[review] APPROVE` comment is written BEFORE the label, so the refusal
-        would land on a verdict that is already half-applied. Filed as VMCP-311 (1216); NOT fixed
-        here, because the fix belongs in `workflow` and mirroring the 400 in the fake first would
-        turn a live suite red without closing anything.
+        The ADD half IS MIRRORED NOW — see `add_label` below, which raises the measured 400 —
+        because it was the other kind: a ROUTE, not a race. Real 2.3.0 answers 400 code 8001
+        `This label already exists on the task.` when a PUT adds a label the task already carries.
+        Until #1216 this fake appended a second copy and stayed green, and `workflow` had FOUR
+        routes into that 400 (an earlier draft here said two, and separately claimed `_add_label`
+        runs behind a `_has_label` check — it did not): a second `review_task(..., 'approve')`,
+        which needs no human step at all; a `needs_work` on a card a human hand-dragged back to
+        Review still wearing `review-failed`; a `return_task` on a card a human had labelled
+        `blocked`; and a `decompose` on one already labelled `epic`. The last two never called
+        `_add_label` at all — each inlined `get_or_create_label` + `api.add_label` — which is why
+        #1216 fixed the BYPASS (one guarded write path, `Workflow._add_label`, pinned by
+        `test_workflow_duplicate_label.py`) rather than adding a check per site.
+
+        What that cost the suite, measured, because it is the reason this mirror was worth making
+        and the reason it was safe. Control (all of `tests/unit`, unmutated): 0 failed, 0 errors,
+        1367 collected at `f7de8d7`. That same selection with the 400 mirrored here and `workflow`
+        UNCHANGED: 0 failed, 0 errors, 1367 collected. So no existing test drove a duplicate add —
+        the fake's generosity was not holding anything up. Nor is it what made the four routes
+        invisible: nobody had written a test that drove one. What it WOULD have done is let such a
+        test pass. The tests that DO see them were written against this mirror in
+        the same change, and their own sweep is recorded in `test_workflow_duplicate_label.py`.
 
         `remove_assignee` needed no such decision: measured, the server answers 200 for a user
         that is not assigned AND for one that does not exist, which is what the fake's filter
@@ -580,6 +586,18 @@ class FakeAPI:
         # `This task does not exist` even when the label_id is valid (#1211).
         task = self._read_task(task_id)
         lb = next(x for x in self._labels if x["id"] == label_id)
+        # a label ALREADY on the task is a 400, not a second copy — measured on a throwaway real
+        # 2.3.0 (#1216), through this package's OWN client: `api.add_label` on a duplicate raises
+        # `VikunjaError status=400 message='{"code":8001,"message":"This label already exists on
+        # the task."}'`. Until #1216 this line appended and stayed green, which is the "fake more
+        # generous than the server" mode this module exists to prevent: `workflow` had FOUR
+        # reachable duplicate-add routes and the unit suite could not see a single one. The BODY is
+        # mirrored verbatim rather than paraphrased because it is the only thing distinguishing
+        # this 400 from any other, and a reader who wants to sniff it will read it here.
+        if any(x["id"] == label_id for x in task["labels"]):
+            raise VikunjaError(
+                400, '{"code":8001,"message":"This label already exists on the task."}'
+            )
         task["labels"].append(dict(lb))
 
     def remove_label(self, task_id, label_id):
@@ -589,7 +607,17 @@ class FakeAPI:
         t["labels"] = [lb for lb in t["labels"] if lb["id"] != label_id]
 
     def get_or_create_label(self, title):
+        # 1:1 with the client, which matches case- and whitespace-INSENSITIVELY on purpose (see
+        # `VikunjaAPI.get_or_create_label`: a bot typing `Bug`/`bug ` once forked a duplicate
+        # label). This fake was EXACT-match until #1216, and that divergence was not cosmetic —
+        # it made a whole leak untestable here. `Workflow._add_label`'s first draft guarded with
+        # `_has_label`, which compares titles exactly, so a card carrying `Blocked` slipped past
+        # the guard and the PUT was a duplicate 400 on a real server; under an exact-match fake
+        # the same sequence minted a SECOND label and stayed green, which is the same "more
+        # generous than the server" mode `_read_task`'s docstring is about. Measured on real
+        # 2.3.0 both before and after the guard was re-keyed to the resolved label ID.
+        want = (title or "").strip().casefold()
         for lb in self._labels:
-            if lb["title"] == title:
+            if (lb.get("title") or "").strip().casefold() == want:
                 return dict(lb)
         return self.create_label(title)
