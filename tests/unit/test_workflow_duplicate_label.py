@@ -5,16 +5,19 @@ WHAT THESE TESTS REST ON, narrowed by the sweep that measured it rather than by 
 like. `FakeAPI.add_label` refuses a duplicate the way real 2.3.0 does (`400 {"code":8001,...}`),
 which it did NOT do until this card: it appended a second copy and stayed green, so a whole green
 unit suite — 1367 at `f7de8d7`, the commit this fix was cut from — coexisted with four reachable
-duplicate-add routes in `workflow`. The obvious thing to
-say next — that without the fake's 400 the rest of this module stops measuring anything — is
-FALSE, and a round says so: with the mirror removed and the guard left in, only the mirror pin
-goes red (control 0 failed / 0 errors / 129 collected; that round 1 failed), and with BOTH removed
-5 fail, not 1. The route tests assert the label COUNT, so they see a duplicate append as readily
-as an exception. What the mirror actually buys is that the fake stops being more generous than the
-server on this endpoint — a 1:1 rule of this repo, and what stopped a route test that merely DROVE
-one of these sequences from going green anyway. What made the four routes invisible is simpler and
-worth not dressing up: nobody had written such a test. The SERVER end of the mirror is pinned
-where only it can be, against a real container:
+duplicate-add routes in `workflow`. FOUR counts the reaches whose 400 SURFACES to the caller as a
+failed agent tool; the epic-ready site was a fifth reach all along (`_add_label` unguarded, behind
+only an exact-title `continue` — `f7de8d7:2172`/`:2186`), and its 400 is swallowed by the marker's
+best-effort wrapper, which is why it took the #1216 rework to see it. The obvious thing to say next
+— that without the fake's 400 the rest of this module stops measuring anything — is FALSE, and a
+round says so: with the mirror removed and the guard left in, only the mirror pin goes red (control
+0 failed / 0 errors / 131 collected; that round 1 failed / 0 errors / 131 collected), and with BOTH
+removed 7 fail, not 1. The route tests assert the label COUNT, so they see a duplicate append as
+readily as an exception. What the mirror actually buys is that the fake stops being more generous
+than the server on this endpoint — a 1:1 rule of this repo, and what stopped a route test that
+merely DROVE one of these sequences from going green anyway. What made the four routes invisible is
+simpler and worth not dressing up: nobody had written such a test. The SERVER end of the mirror is
+pinned where only it can be, against a real container:
 `tests/integration/test_duplicate_label.py::test_duplicate_add_label_is_a_400`.
 
 MEASURED, on a throwaway real 2.3.0 (#1216), with `workflow.py` at the pre-fix commit — this is
@@ -27,31 +30,43 @@ what the guard prevents, not a worry about it:
     failure. Nobody comes back for that card — `next_task` offers a Review card only while the
     last `[review]` comment is OLDER than the last `[worklog]`, and that comment had just landed.
 
-THE SWEEP, ten rounds against ONE control and all of them against the FINAL code (the earlier
-rounds were re-run after the guard changed shape, rather than quoted from before it). Selection
-every time is this file + `test_workflow_epic_marker.py` + `test_workflow_gates.py`, in a fresh
-clone with `__pycache__` deleted and PYTHONDONTWRITEBYTECODE=1, `vikunja_mcp.__file__` printed each
-round, rounds read by COUNTING lines beginning `FAILED ` and `ERROR ` counted separately. Control
-(unmutated): 0 failed, 0 errors, 130 collected — every round below reports the same 130 collected
-and 0 errors, and each names what it killed.
-  * delete the guard inside `_add_label` -> 5 failed: the four route tests and the variant pin
+THE SWEEP, ten rounds against ONE control and all of them against the FINAL code — re-run in full
+in the #1216 rework, because the pin added there is inside the selection and moved SIX of the ten
+rows (the four route tests' rounds are the ones it left alone). Selection every time is this file +
+`test_workflow_epic_marker.py` + `test_workflow_gates.py`, in a fresh clone with `__pycache__`
+deleted and PYTHONDONTWRITEBYTECODE=1, `vikunja_mcp.__file__` printed each round, rounds read by
+COUNTING lines beginning `FAILED ` and `ERROR ` counted separately. Control (unmutated): 0 failed,
+0 errors, 131 collected — every round below reports the same 131 collected and 0 errors, and each
+names what it killed.
+  * delete the guard inside `_add_label` -> 6 failed: the four route tests and both variant pins
   * re-inline the bypass in `return_task` -> 2 failed: its own route, plus the one-caller pin
   * re-inline the bypass in `decompose` -> 2 failed: the same pair
   * put the verdict comment back BEFORE the labels in the approve branch -> 2 failed: both order
     tests
   * key the guard on the exact TITLE instead of the resolved label ID (the guard's own first
-    draft) -> 1 failed: the variant pin
-  * give `FakeAPI.get_or_create_label` its pre-#1216 exact-match resolution back -> 1 failed: the
-    same pin. That answers the obvious worry about it — the variant pin is NOT blind to an
-    exact-match fake, it goes red, because such a fake mints a second label where the server
+    draft) -> 2 failed: both variant pins — the standalone one on the raised 400, the epic-ready
+    one on the marker that same 400 costs it. The epic-ready pin is in there because that site's
+    `continue` lets a variant-marked parent REACH the helper, after which a title-keyed guard
+    misses there exactly as it does anywhere else
+  * give `FakeAPI.get_or_create_label` its pre-#1216 exact-match resolution back -> 2 failed: the
+    same pair. That answers the obvious worry about it — the variant pins are NOT blind to an
+    exact-match fake, they go red, because such a fake mints a second label where the server
     refuses
-  * both of those together -> 1 failed
+  * both of those together -> 2 failed
   * remove the fake's 400 and leave the guard -> 1 failed: only the mirror's own pin. This is the
     round that narrowed the paragraph above
-  * remove BOTH the guard and the fake's 400, i.e. the pre-#1216 world -> 6 failed
+  * remove BOTH the guard and the fake's 400, i.e. the pre-#1216 world -> 7 failed
   * hand the epic-ready site the hollowed `parent` sub-dict instead of the re-fetched
-    `full_parent` -> 0 failed. A blind spot recorded rather than papered over; the test that would
-    have been its pin says why there is nothing observable to catch
+    `full_parent` -> 1 failed: the epic-ready variant pin, and nothing else. THIS ROW USED TO READ
+    0, and was written up as a blind spot with nothing observable to catch; that reading was wrong
+    and the pin now in the selection is what refutes it — the round returned 0 because the
+    selection held no parent whose marker was spelled a way `get_or_create_label` resolves and
+    `_has_label` does not. Capitalised is one such spelling and the one pinned; both the client and
+    the fake resolve on `.strip().casefold()`, so a trailing space is another. The ISOLATING PAIR,
+    on the same selection with that pin DELETED: pristine code 0 failed / 0 errors / 130 collected,
+    hollowed `parent` 0 failed / 0 errors / 130 collected. So the old 0 reproduces exactly, the pin
+    is the only thing in the selection that sees the swap, and 130 — not the 129 two of these
+    figures used to carry — is what the control measured before it
 """
 import pytest
 
@@ -60,6 +75,7 @@ from vikunja_mcp.api import VikunjaError
 from vikunja_mcp.workflow import (
     LABEL_BLOCKED,
     LABEL_EPIC,
+    LABEL_EPIC_READY,
     LABEL_REVIEW_FAILED,
     LABEL_REVIEWED,
     STAGES,
@@ -84,6 +100,16 @@ def _hand_label(api, task_id, title):
     `api.add_label` rather than poking `tasks[...]["labels"]`, so the fixture itself is subject to
     the same refusal the code under test is."""
     api.add_label(task_id, api.get_or_create_label(title)["id"])
+
+
+def _epic_ready(api, task_id):
+    """Both halves of the epic-ready marker — the label and its `[epic-ready]` comment — read
+    the way the SERVER resolves a label title. `epic-ready` and `Epic-ready` are ONE label to
+    `get_or_create_label`, so counting exact titles would miss a duplicate minted under a variant,
+    which is the very disagreement this module is about."""
+    labels = sum(1 for t in _titles(api, task_id) if t.casefold() == LABEL_EPIC_READY)
+    comments = sum(1 for c in api.comments_text(task_id) if c.startswith("[epic-ready]"))
+    return labels, comments
 
 
 def test_the_fake_refuses_a_duplicate_add_like_the_server(env):
@@ -171,14 +197,19 @@ def test_epic_ready_marker_still_fires_through_the_resigned_helper(env):
     marker is wrapped in a best-effort `except Exception` that leaves only one stderr line — a
     break here is silent.
 
-    WHAT IT DOES NOT PIN, measured rather than assumed: swapping `full_parent` for the HOLLOWED
-    `related_tasks` sub-dict `parent` leaves this suite entirely green (control 0 failed / 0
-    errors / 129 collected; that round 0 failed). Not a hole in the test — there is no observable
-    difference to catch. That site reaches `_add_label` only after its OWN `continue` has
-    established the label is absent, so the helper's guard is belt-and-braces there and a hollowed
-    snapshot degrades to exactly the pre-#1216 behaviour. `full_parent` is still the right
-    argument (it is a real guard rather than a guaranteed-False one, and it costs nothing — the
-    fetch already happened); it is simply not a claim any test here backs."""
+    WHAT **THIS** TEST DOES NOT PIN, narrowed in the #1216 rework because the sentence that stood
+    here was wrong and, worse, told the next agent not to write the pin. Swapping `full_parent`
+    for the HOLLOWED `related_tasks` sub-dict `parent` leaves THIS construction green, and that
+    round was read as "there is no observable difference to catch", on the grounds that the site
+    reaches `_add_label` only after its own `continue` has established the label is absent. THE
+    `continue` DOES NOT ESTABLISH THAT: it asks `_has_label`, which compares titles EXACTLY, while
+    the guard resolves through `get_or_create_label` and asks by label ID — this card's own
+    `root_cause`, surviving one level up in the file that fixed it. An observable case therefore
+    exists, and it is pinned directly below. What is true is the narrower claim, and only of THIS
+    construction: the parent here carries no epic-ready label under any spelling, so the guard is
+    genuinely a no-op and a hollowed snapshot degrades to exactly the pre-#1216 behaviour.
+    `full_parent` is the right argument for the reason the docstring already gave two sentences
+    on — a real guard rather than a guaranteed-False one — and that half was never in doubt."""
     api, wf, _t = env
     epic = api.add_task("epic parent", "Backlog", labels=[LABEL_EPIC])
     child = api.add_task("only child", "Design", assignee=api.me_user)
@@ -189,6 +220,39 @@ def test_epic_ready_marker_still_fires_through_the_resigned_helper(env):
 
     assert "epic-ready" in _titles(api, epic["id"])
     assert any(c.startswith("[epic-ready]") for c in api.comments_text(epic["id"]))
+
+
+def test_epic_ready_on_parents_where_a_human_typed_the_marker_CAPITALISED(env):
+    """The pin the round above was said to be unable to have (#1216 rework) — this card's own
+    defect, surviving one level up in the file that fixed it.
+
+    THE PREMISE, asserted below rather than argued: on a parent a human marked `Epic-ready` the
+    site's exact-title `continue` MISSES, so the site does reach `_add_label` with that label
+    genuinely present, and the id-keyed guard is what stops the PUT. A real guard here, not a
+    guaranteed-False one.
+
+    TWO parents, because one understates the loss. Measured both ways against the hollowed
+    `parent` sub-dict: with a SINGLE parent the label is byte-identical in both worlds and only
+    the `[epic-ready]` comment dies, but the 400 aborts the `for parent in parents` loop, so a
+    LATER parent loses the LABEL — the half a human reads off the board — outright. Both losses
+    are one swallowed stderr line, the marker being best-effort."""
+    api, wf, _t = env
+    first = api.add_task("epic one", "Backlog", labels=[LABEL_EPIC])
+    _hand_label(api, first["id"], LABEL_EPIC_READY.capitalize())   # the human typed it capitalised
+    second = api.add_task("epic two", "Backlog", labels=[LABEL_EPIC])
+    child = api.add_task("only child", "Design", assignee=api.me_user)
+    api.add_relation(child["id"], first["id"], "parenttask")
+    api.add_relation(child["id"], second["id"], "parenttask")
+    assert not Workflow._has_label(api.get_task(first["id"]), LABEL_EPIC_READY), (
+        "the premise: the site's own exact-title `continue` must MISS the variant, otherwise this "
+        "test is not exercising the disagreement it is named for"
+    )
+
+    wf.advance(child["id"], to="build", spec="s")
+    wf.advance(child["id"], to="review", worklog="w", evidence="abc123")
+
+    assert _epic_ready(api, first["id"]) == (1, 1), "neither a 400 nor a second epic-ready label"
+    assert _epic_ready(api, second["id"]) == (1, 1), "the 400 must not abort the loop before it"
 
 
 def test_a_title_VARIANT_does_not_slip_past_the_guard(env):

@@ -683,8 +683,11 @@ inline copy, naming the file that did it.
 It takes the task SNAPSHOT (dict) rather than an id, mirroring `_remove_label` beside it — every
 call site already holds a fresh task dict, so idempotence costs ZERO extra requests, and two
 matched signatures are what makes the next bypass unlikely. Swallowing the 400 inside
-`api.add_label` was rejected: `VikunjaError` carries `r.text[:300]`, a TRUNCATED body, so a sniff
-on the message is not a sound discriminator, and it would put a workflow decision in the client.
+`api.add_label` was rejected for the LAYERING reason — a workflow idempotency decision does not
+belong in the REST client — and because a sniff on the message would swallow a genuinely
+different 400. This sentence used to LEAD with truncation (`VikunjaError` carries `r.text[:300]`),
+which is real in general but does not bite for THIS body: measured, it is 64 characters, so a
+sniff would never meet the cut. Reordered on the reviewer's non-blocking finding, #1216 rework.
 
 **What the guard closes is the STATE, not the RACE.** A label added by someone else between the
 board read and the PUT still 400s — the same residual `_remove_label` documents. What makes
@@ -713,16 +716,36 @@ label-then-comment, for a neighbouring reason of its own: there the label IS the
 so a partial failure must leave the epic consistently marked. Same direction, different argument.
 
 **The fake was more generous than the server, and that is why a whole green unit suite (1367 at
-`f7de8d7`) coexisted with four live routes.** `FakeAPI.add_label` appended a second copy. It now raises the measured
-400. Two rounds price that mirror honestly, against a control of 0 failed / 0 errors / 130
-collected on the same selection: remove the mirror and leave the guard -> 1 failed, only the
-mirror's own pin, because the route tests assert the label COUNT and see a duplicate append as
-readily as an exception; remove BOTH -> 6 failed. So the mirror is a 1:1 rule this repo keeps,
-not the thing holding the route pins up. One blind spot is recorded rather than papered over, same
-control: handing the epic-ready site the hollowed `parent` sub-dict instead of the re-fetched
-`full_parent` -> 0 failed. There is nothing observable to catch — that site reaches `_add_label`
-only after its own `continue` has established the label is absent, so the helper's guard is
-belt-and-braces there. The full ten-round table lives in the test module's own docstring.
+`f7de8d7`) coexisted with four live routes.** `FakeAPI.add_label` appended a second copy. It now
+raises the measured 400. Two rounds price that mirror honestly, against a control of 0 failed / 0
+errors / 131 collected on the same selection: remove the mirror and leave the guard -> 1 failed,
+only the mirror's own pin, because the route tests assert the label COUNT and see a duplicate
+append as readily as an exception; remove BOTH -> 7 failed. So the mirror is a 1:1 rule this repo
+keeps, not the thing holding the route pins up. The full ten-round table lives in the test
+module's own docstring.
+
+**THE ROUND THAT WAS WRITTEN UP AS A BLIND SPOT WAS NOT ONE, AND THE REASON IS THIS CARD'S OWN
+DEFECT ONE LEVEL UP.** Handing the epic-ready site the hollowed `parent` sub-dict instead of the
+re-fetched `full_parent` measured 0 failed, and that was read here as "There is nothing observable
+to catch — that site reaches `_add_label` only after its own `continue` has established the label
+is absent". The `continue` establishes no such thing: it asks `_has_label`, which compares titles
+EXACTLY, while the guard resolves through `get_or_create_label` and asks by label ID — the very
+disagreement `root_cause` above is built on. On a parent a human marked `Epic-ready` they differ,
+and the difference is observable. Constructed and driven through the real `advance` over
+`FakeAPI`: as shipped the guard FIRES, the PUT is skipped, the `[epic-ready]` comment lands and
+nothing raises; with the hollowed `parent` the guard is blind, the PUT answers `400 code 8001`,
+and because the marker is best-effort the whole thing dies as ONE swallowed stderr line. With a
+single parent the LABEL is byte-identical in both worlds and only the comment is lost; with TWO
+epic parents the 400 aborts the `for parent in parents` loop, so the SECOND parent loses the
+label as well — the half a human reads off the board. The pin is
+`test_epic_ready_on_parents_where_a_human_typed_the_marker_CAPITALISED`, and with it in the
+selection that same swap is 1 failed against a control of 0 failed / 0 errors / 131 collected.
+The isolating pair, same selection with the pin DELETED: pristine 0 failed / 0 errors / 130
+collected, hollowed `parent` 0 failed / 0 errors / 130 collected — the old 0 reproduces exactly,
+and nothing else in the selection sees the swap. **The lesson is the one CLAUDE.md already
+states and this file briefly stopped following: a round returning 0 says the SELECTION held no
+case that distinguishes, never that no such case exists — and prose that upgrades the first into
+the second forecloses the pin nobody then writes.**
 
 **THE GUARD'S FIRST DRAFT LEAKED, AND THE SECOND INDEPENDENT PASS IS WHAT CAUGHT IT.** It read
 `if self._has_label(task, title): return`, which compares titles EXACTLY, while
