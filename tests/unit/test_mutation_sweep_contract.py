@@ -1380,6 +1380,26 @@ def test_claude_md_states_the_control_round_rule_and_its_limit():
         permitted — one control header for a long section — so an agent who reads "beside" as
         "somewhere in this docstring" writes prose the suite rejects, and the rulebook has to
         say where the control goes, not just that there is one
+
+    VMCP-318 (1462) RE-KEYED ONE PIN AND ADDED ONE, and the re-keying is the more interesting
+    half because the pin was GREEN throughout. The `.venv` pin used to name
+    `rsync -a --exclude .venv`, one of the two extraction methods CLAUDE.md prescribed; that
+    card withdrew both, and the string went on occurring in the section only inside the
+    sentence that retires it. Nothing went red, and that is measured rather than assumed: the
+    gate run made after the prose edit and BEFORE this re-keying passed, i.e. the old pin
+    accepted a mention with the opposite meaning. It would then have gone red later, on a
+    tidy-up that changed nothing about #646. So the proxy moved to `git clone --no-hardlinks`,
+    which is what the rule now prescribes and what actually keeps `.venv` out. Read it as the
+    general shape: a prose pin keyed to a QUOTED PRESCRIPTION survives that prescription's
+    withdrawal, silently, and its message is then the only thing that still says what it meant.
+    Same discipline as the rounds above, `__pycache__` deleted then PYTHONDONTWRITEBYTECODE=1,
+    the selection being this file, run in a clone with the working tree committed inside it so
+    a restore returns to the state under test; control 0 failed, 0 errors, 7 collected.
+      * `Record SKIPPED beside FAILED` replaced in CLAUDE.md -> 1 failed, here, on the new pin,
+        7 collected
+      * `git clone --no-hardlinks` replaced in CLAUDE.md -> 1 failed, here, on the re-keyed pin,
+        7 collected
+      * both restored -> control (closing) 0 failed, 0 errors, 7 collected
     """
     section = _testing_philosophy()
 
@@ -1406,9 +1426,15 @@ def test_claude_md_states_the_control_round_rule_and_its_limit():
     assert "only deleting `__pycache__` moved" in section, \
         "CLAUDE.md no longer says the variable alone is not the remedy. Measured: it stops " \
         "Python WRITING bytecode, not READING it, so a stale .pyc already on disk still replays"
-    assert "rsync -a --exclude .venv" in section and "vikunja_mcp.__file__" in section, \
-        "CLAUDE.md no longer names the form a control round CANNOT catch (#646) or the check " \
-        "that does: copy without .venv, and print where the package was actually imported from"
+    assert "git clone --no-hardlinks" in section and "vikunja_mcp.__file__" in section, \
+        "CLAUDE.md no longer names the way to build a tree .venv cannot follow into (#646), or " \
+        "the check that catches it anyway: print where the package was actually imported from"
+    assert "Record SKIPPED beside FAILED" in section, \
+        "CLAUDE.md no longer asks a round to record its SKIP count. `collected` counts SKIPPED " \
+        "items, so it reads the same on a sound stand and on one where the tests never ran — " \
+        "measured at 1401 on both a clone and a `git archive` extraction of one tree, the " \
+        "extraction silently skipping 61 of them (#1462). Without this the cross-check asserted " \
+        "just above certifies a blind round as a clean one"
 
     # ...and the step BEFORE the arithmetic: how a round is READ. VMCP-205 (748) and VMCP-224
     # (767). A control cannot rescue a mis-read round, and this repo's own docstrings are what

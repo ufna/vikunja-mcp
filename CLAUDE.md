@@ -320,8 +320,20 @@ validity is the pair (source mtime in SECONDS, source size), and
 `.pyc` on disk only deleting `__pycache__` moved the round. Do both. NOT CAUGHT: a mutation
 that never reached the interpreter — a tree copied with `cp -R` drags `.venv` along, whose
 editable `.pth` holds an ABSOLUTE path to the ORIGINAL `src`, after which control and
-rounds are all green (card 646). Copy with `git archive` or `rsync -a --exclude .venv`, and
-print `vikunja_mcp.__file__` in every round. HALF-CAUGHT: a CONCURRENT WRITER in the same
+rounds are all green (card 646). **Build the sweep tree with `git clone --no-hardlinks`,
+the one method SKILL.md also prescribes** — git does not track `.venv`, so it cannot
+follow, and the clone is a REPOSITORY. `git archive` and `rsync -a --exclude .venv` stood
+here until #1462 and are WITHDRAWN, for DIFFERENT failures: no `.git` means no
+`git ls-files`, while an rsync of a linked worktree — where every per-task agent stands —
+copies a `.git` FILE still addressing the LIVE repository and SHARES its index, so a write
+there lands on the live branch and a sibling's staged file reddens your round. Print
+`vikunja_mcp.__file__` in every round.
+NOT CAUGHT EITHER, and the `collected` cross-check is what misses it: a stand where the
+tests never RAN. `collected` counts SKIPPED items, so it reads the SAME on a sound stand
+and a blind one. **Record SKIPPED beside FAILED**, treat a skip the control did not have
+as a broken stand and not a result, and read a round only from output you PROVED exists —
+`grep -c` over a deleted path prints NOTHING and exits 2, `2>/dev/null` hides why, and an
+empty count reads as a zero. HALF-CAUGHT: a CONCURRENT WRITER in the same
 tree — its mutant under your round is caught loudly, your restore under its round is not.
 The remedy is a separate tree, not a stronger control.
 

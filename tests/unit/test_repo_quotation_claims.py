@@ -292,6 +292,41 @@ requires_git_checkout = pytest.mark.skipif(
     ),
 )
 
+
+def _ls_files_failed(stderr: str) -> str:
+    """The message an agent actually reads when `git ls-files` dies, branched on WHICH death.
+
+    It used to open `failed inside a checkout that has a .git` in both cases, and that clause is
+    false in exactly the stand where this fires most often (#1462): CLAUDE.md prescribed
+    `git archive` for sweep trees until that card, an extraction carries no `.git` at all, and
+    the reader was told the opposite of its own problem while the fix — build the stand
+    differently — was named nowhere. Eleven items in this module report through here, so the
+    wording is the whole diagnosis for the agent that hits it.
+
+    The branch reads `_IS_GIT_CHECKOUT`, i.e. the same FILESYSTEM probe the skip above uses, and
+    never git's exit code. That is the same separation the marker argues for one comment up: if
+    the exit code decided, "no repository" and "git is broken" would collapse into one answer
+    again, and this message exists to keep them apart.
+
+    Message text only — no test changes its verdict because of this, and NOTHING here is
+    decorated with the marker that would make a repo-less tree quiet. That is deliberate and is
+    the point of the card: a repo-less stand must stay LOUD, because the alternative is 11 more
+    items moving into the skip column, where `collected` cannot see them.
+    """
+    if not _IS_GIT_CHECKOUT:
+        return (
+            f"`git ls-files` failed and {REPO_ROOT} has no .git ({stderr}), so this tree is not "
+            "a repository — a `git archive` extraction, an unpacked sdist, a copied tree. That "
+            "is a broken STAND, not a prose defect: build a sweep tree with "
+            "`git clone --no-hardlinks`, which CLAUDE.md's testing section prescribes and which "
+            "keeps `.venv` out for free"
+        )
+    return (
+        f"`git ls-files` failed inside a checkout that has a .git ({stderr}). The corpus this "
+        "scanner searches is undefined, so every claim would read as unverifiable — that is a "
+        "broken checkout, not a prose defect"
+    )
+
 # THE ASSERTIVE IDIOMS. A sentence containing one of these is read as claiming that the strings it
 # quotes are in this checkout. Each is here because it is an ASSERTION about content rather than
 # ordinary English about location — see the measurement in the module docstring for what the next
@@ -436,11 +471,7 @@ def _tracked_text_files():
     listed = subprocess.run(
         ["git", "ls-files", "-z"], cwd=REPO_ROOT, capture_output=True, text=True
     )
-    assert listed.returncode == 0, (
-        f"`git ls-files` failed inside a checkout that has a .git ({listed.stderr.strip()}). "
-        "The corpus this scanner searches is undefined, so every claim would read as "
-        "unverifiable — that is a broken checkout, not a prose defect"
-    )
+    assert listed.returncode == 0, _ls_files_failed(listed.stderr.strip())
     for name in listed.stdout.split("\0"):
         if not name:
             continue
@@ -466,7 +497,7 @@ def _tracked_names():
     listed = subprocess.run(
         ["git", "ls-files", "-z"], cwd=REPO_ROOT, capture_output=True, text=True
     )
-    assert listed.returncode == 0, f"`git ls-files` failed: {listed.stderr.strip()}"
+    assert listed.returncode == 0, _ls_files_failed(listed.stderr.strip())
     return [name for name in listed.stdout.split("\0") if name and (REPO_ROOT / name).is_file()]
 
 
