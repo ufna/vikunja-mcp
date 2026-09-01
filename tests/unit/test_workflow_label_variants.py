@@ -428,8 +428,24 @@ def test_the_sweep_is_recorded():
         / 0 errors / 131 collected on #1216's three-file selection. `_add_label`'s docstring
         carries both numbers and says why the guard is kept anyway
       * hand the epic-ready site the hollowed `parent` sub-dict — #1216's other row, also
-        re-measured -> **7 failed** (control 0), against 1 at #1216. It kills more now because the
-        hollowed dict makes the `epic` check itself miss, so the whole marker stops firing
+        re-measured, and NAME THE FORM or the row is unreproducible from its own words, because
+        the two readings answer differently. THIS row's own mutation — the argument to
+        `_add_label` at `workflow.py:2356`, nothing else, which is what #1216's row states ->
+        **0 failed** (control 0), where #1216 measured 1 on its own selection. The **7** this row
+        used to report belongs to a BROADER swap that ALSO hollows the two
+        `_has_label(full_parent, …)` reads above it -> **7 failed** (control 0): the two
+        epic-ready variant pins in `test_workflow_duplicate_label.py` plus five in
+        `test_workflow_epic_marker.py`. And under THAT reading the row is false a second way,
+        which is why neither reading rescues it: the same broad swap measures 7 at `d80c174` and
+        at `edbb8e4` too, trees with no #1256 in them, so the retracted "it kills more now" was
+        wrong about the direction and about the cause alike. Those per-tree figures are inherited
+        from this card's third review, not measured here; they are recorded at the twin row in
+        `test_workflow_duplicate_label.py`, where the rework corrected this claim one round before
+        it reached this copy. What is left unpinned is the ARGUMENT at that one site, and that is
+        an EQUIVALENT mutant rather than a hole: since #1256 `_has_label` resolves through
+        `label_key`, so the `epic-ready` test at `workflow.py:2342` and its `continue` already
+        subsume the guard — instrumented on that review, the guard fires for `blocked`, `epic`,
+        `review-failed` and `reviewed`, and never for `epic-ready`
       * add a SECOND spelling of the rule BESIDE `label_key` — `.strip().lower()` wired into
         `_has_label` alongside the existing calls, the mutation #1256's second independent pass
         used to show the first draft of the anti-drift pin closed nothing -> **1 failed**
