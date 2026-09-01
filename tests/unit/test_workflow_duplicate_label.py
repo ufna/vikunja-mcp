@@ -36,8 +36,28 @@ rows (the four route tests' rounds are the ones it left alone). Selection every 
 `test_workflow_epic_marker.py` + `test_workflow_gates.py`, in a fresh clone with `__pycache__`
 deleted and PYTHONDONTWRITEBYTECODE=1, `vikunja_mcp.__file__` printed each round, rounds read by
 COUNTING lines beginning `FAILED ` and `ERROR ` counted separately. Control (unmutated): 0 failed,
-0 errors, 131 collected — every round below reports the same 131 collected and 0 errors, and each
-names what it killed.
+0 errors, 131 collected at `d80c174` — every round below reports the same 131 collected and 0
+errors, and each names what it killed.
+**THAT ANCHOR IS LOAD-BEARING AND NOT DECORATION: every figure below is a property of THAT tree,
+and not of the one you are reading — and it was CHECKED, not assumed.** That tree extracted with
+`git archive`: control 0 failed / 0 errors / 131 collected, and ALL TEN rows reproduce their
+stated figure exactly there — 6, 2, 2, 2, 2, 2, 2, 1, 7, 1, in the order they are written below.
+The anchor is therefore not a hedge over rows nobody checked; it is a label on a tree that was
+re-run whole.
+#1256 then routed `_has_label` through `api.label_key` and MOVED six of the ten. TWO of those six
+carry a note at the row itself, because each makes a claim about its own mutation and nowhere else
+would hold it: the exact-TITLE row and the hollowed-`parent` one, and this rework had to correct
+BOTH of those notes. The other FOUR are given here, once and together, rather than row by row —
+what settles the register is the anchor above, and annotating four more rows would only sharpen
+the implicature that the rest are current. Those four, at
+`57762ef` on this same three-file selection (in a clone of the release bump directly above it,
+which touches only the three version files), control run FIRST and 0 failed / 0 errors / 131
+collected there too: delete-the-guard 6 -> 5 failed, fake-exact 2 -> 1 failed,
+both-of-those-together 2 -> 1 failed reading "both" as the row above reads (byte-exact title guard
++ exact-match fake) and 0 failed reading it via `_has_label` — the same split the exact-TITLE row
+carries, and it has to be named for the same reason — and remove-BOTH 7 -> 6 failed. UNCHANGED at
+both trees, four rows: the two re-inlined bypasses and the verdict-comment order at 2 each, and
+remove-the-fake's-400-and-leave-the-guard at 1.
   * delete the guard inside `_add_label` -> 6 failed: the four route tests and both variant pins
   * re-inline the bypass in `return_task` -> 2 failed: its own route, plus the one-caller pin
   * re-inline the bypass in `decompose` -> 2 failed: the same pair
@@ -48,9 +68,16 @@ names what it killed.
     one on the marker that same 400 costs it. The epic-ready pin is in there because that site's
     `continue` lets a variant-marked parent REACH the helper, after which a title-keyed guard
     misses there exactly as it does anywhere else.
-    **#1256 MOVED THIS ROW TO 0 and it is left here as the record of what it USED to measure.**
+    **#1256 MOVED THIS ROW, AND SPLIT IT IN TWO — its own annotation said only "to 0", which is
+    true of ONE of the two readings this row's words now have.** Before #1256 "the exact TITLE"
+    and "the guard's own first draft" (`_has_label`) were the SAME mutation and both give the 2
+    above; after it they are different, and the split is measured, each against a control of 0
+    failed / 0 errors / 131 collected on this selection: `if self._has_label(task, title)` -> 0
+    failed, a byte-exact `lb.get("title") == title` -> 1 failed, the standalone variant pin. Name
+    the form or the row is unreproducible from its own words.
     That card routed `_has_label` through `api.label_key`, so a title-keyed guard now answers what
-    the id-keyed one answers in every state this package can create, the `continue` above no
+    the id-keyed one answers on every state this package's ORDINARY write path creates, the
+    `continue` above no
     longer lets a variant-marked parent reach the helper at all, and the mutation kills nothing —
     re-measured 0 failed against a clean control of 0 on that card's own selection. What still
     tells the two guards apart is written up in `_add_label`'s docstring; nothing in the unit
@@ -64,9 +91,16 @@ names what it killed.
     round that narrowed the paragraph above
   * remove BOTH the guard and the fake's 400, i.e. the pre-#1216 world -> 7 failed
   * hand the epic-ready site the hollowed `parent` sub-dict instead of the re-fetched
-    `full_parent` -> 1 failed: the epic-ready variant pin, and nothing else. (#1256 re-measured
-    this one too: 7 failed on its selection, because with `_has_label` resolving, a hollowed dict
-    makes the `epic` check itself miss and the whole marker stops firing.) THIS ROW USED TO READ
+    `full_parent` -> 1 failed: the epic-ready variant pin, and nothing else. (#1256 annotated this
+    row with a 7 and blamed `_has_label` resolving. BOTH halves were wrong, and what stands here is
+    the correction. That 7 belongs to a BROADER swap — hollowing the two `_has_label(full_parent,
+    …)` READS as well — and it is 7, the same seven tests, at `d80c174` and at `edbb8e4` too, i.e.
+    on trees with no #1256 in them, because `_has_label` iterates `task.get("labels") or []` and a
+    hollowed `labels: None` misses however titles are compared; the resolving does no work there,
+    so that 7 is not attributable to this card at all. THIS row's own mutation — the argument to
+    `_add_label`, nothing else — measures 1 failed at `d80c174`, reproducing the row on the tree it
+    was written for, and 0 failed at `57762ef`, each against a control of 0 failed / 0 errors /
+    131 collected run first on that same tree.) THIS ROW USED TO READ
     0, and was written up as a blind spot with nothing observable to catch; that reading was wrong
     and the pin now in the selection is what refutes it — the round returned 0 because the
     selection held no parent whose marker was spelled a way `get_or_create_label` resolves and
@@ -304,8 +338,13 @@ def test_a_title_VARIANT_does_not_slip_past_the_guard(env):
     PUT for the same reason the id-keyed one does. The assertions below are unchanged and still
     true; what is gone is their power to tell the two guards apart — measured, keying the guard on
     the title kills nothing in this file's own sweep selection any more. Where the two still
-    differ is a board holding TWO variant rows, which nothing in this package creates: filed as a
-    question of its own rather than answered here.
+    differ is a board holding TWO variant rows — and this sentence used to add that nothing in
+    this package creates that state, which is WRONG and is corrected rather than kept.
+    `api.get_or_create_label` is read-`labels()`-then-`create_label` with nothing atomic between
+    the two, so at `wip_limit > 1` two agents adding the same absent label both miss and both
+    create; and `GET /labels` surfaces only labels used on a task the caller can READ, so a row
+    invisible to one caller gets minted again. `_add_label`'s docstring carries the full reading;
+    the state is filed as a question of its own rather than answered here.
 
     This is only visible here because `FakeAPI.get_or_create_label` was made 1:1 in the same
     change; it was exact-match before, under which this sequence minted a SECOND label and stayed

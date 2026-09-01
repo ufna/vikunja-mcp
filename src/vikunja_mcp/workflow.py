@@ -1082,24 +1082,40 @@ class Workflow:
 
         SINCE #1256 `_has_label` RESOLVES THROUGH `api.label_key` TOO, AND THAT COST THIS GUARD
         ITS PIN — said here because the alternative is a reader believing it still has one.
-        The two now agree on every state THIS package can create (it mints one label row per
-        normalised title), so keying the guard on the title instead kills NOTHING: measured on
+        The two now agree on every state this package's ORDINARY write path creates — every call
+        site passes a lowercase `LABEL_*` constant, so that path mints one row per normalised
+        title. (This sentence used to say "every state THIS package can create", full stop, seven
+        lines above the correction below that forbids exactly that reading; the race named there
+        is a state the package CAN create.) On those states, keying the guard on the title kills
+        NOTHING — PROVIDED "on the title" means `_has_label`: measured on
         the WHOLE of `tests/unit`, 0 failed against a clean control of 0 failed / 0 errors /
         1399 collected, and 0 again on #1256's narrower sweep selection, where #1216 had that
-        same row at 2. The only state
-        that still tells them apart is a board holding TWO rows with the same NORMALISED title —
+        same row at 2. A BYTE-EXACT title comparison is a DIFFERENT mutation since #1256 and is
+        still caught: 1 failed, `test_a_title_VARIANT_does_not_slip_past_the_guard`, against a
+        control of 0 failed / 0 errors / 131 collected on #1216's three-file selection. The states
+        that still tell them apart are boards holding TWO rows with the same NORMALISED title —
         `blocked` and `Blocked`, or two rows both spelled `blocked` — with the card carrying the
         one `get_or_create_label` does not return. Do not read that as "only an outside actor can
         make it": `get_or_create_label` is read-`labels()`-then-`create_label`, so at
         `wip_limit > 1` two agents adding the same absent label both miss and both create; and
-        `GET /labels` only surfaces labels used on a task the caller can READ (this module says so
-        above), so an invisible one is minted again. MEASURED, and the result is not the tidy
-        one: the ID guard sees a
+        `GET /labels` surfaces only labels used on a task the caller can READ — api.py's own
+        comment on `get_or_create_label`, and read that half as UNPINNED: api.py states it in the
+        WIDENING direction ("not just its own"), nothing in either suite measures the exclusion,
+        and the cross-reference this sentence used to make to "this module" pointed at no sentence
+        in it. So an invisible one is minted again. MEASURED over `FakeAPI` and this helper, and
+        the result is not the tidy one: the ID guard sees a
         different label id, sends the PUT, and the card comes out carrying BOTH rows
-        (`['Blocked', 'blocked']`); a title guard would have left the one. Neither raises. So this
-        is no longer "the ID guard is right and a title guard leaks" — the 400 it was built for
-        cannot arise either way, and on the one divergent state its answer is arguably the worse
-        one. It is kept AS IS regardless, because #1216 measured it against a real 2.3.0 and
+        (`['Blocked', 'blocked']`) where a `_has_label` guard skips and leaves the one; on
+        `[blocked, blocked]` with the card carrying the second it is `['blocked', 'blocked']`
+        against `['blocked']`. THREE of the six two-row arrangements diverge, not one, and the ID
+        guard is the duplicating one in every one of them. Neither of those raises. So this
+        is no longer "the ID guard is right and a title guard leaks" — against a `_has_label`
+        guard the 400 it was built for cannot arise either way, and on every divergent arrangement
+        its answer is arguably the worse one. Against a BYTE-EXACT title guard it still CAN arise:
+        rows `[Blocked, blocked]` with the card carrying `Blocked` sends a PUT the fake answers
+        `400 code 8001`, #1216's leak exactly. Which guard is "right" therefore depends on which
+        alternative is meant, and that is part of what 1456 has to settle.
+        It is kept AS IS regardless, because #1216 measured it against a real 2.3.0 and
         changing it on a fake would be trading a measured decision for an unmeasured one. The
         question is filed rather than answered here — VMCP-316 (1456), which also carries the
         one probe nobody has run: does real `PUT /labels` accept a title that already exists?
@@ -1139,8 +1155,13 @@ class Workflow:
         # Снимаем ПЕРВУЮ подходящую, как и раньше — и вот ОСТАТОК, который это НЕ закрывает:
         # если на карточке висят ОБЕ строки (`reviewed` и `Reviewed`), уйдёт одна, вторая
         # останется. Измерено: до advance `['reviewed', 'Reviewed']`, после — `['Reviewed']`.
-        # Сам пакет такого состояния не создаёт (`get_or_create_label` резолвит обе в одну), но
-        # рука человека — да, и тогда протухший бейдж всё ещё доезжает. Цикл вместо `next` это
+        # И НЕ только рукой человека: здесь стояло «сам пакет такого состояния не создаёт», и это
+        # неверно — `get_or_create_label` устроен как read-`labels()`-then-`create_label`, без
+        # атомарности между ними, так что при `wip_limit > 1` два агента, добавляющих одну и ту же
+        # отсутствующую метку, оба промахиваются и оба создают; а `GET /labels` показывает только
+        # метки, висящие на задаче, которую вызывающий может ЧИТАТЬ, — невидимая строка создаётся
+        # заново. Полное изложение — в докстринге `_add_label` выше, в том же коммите; сюда оно
+        # тогда не доехало. Так или иначе протухший бейдж доезжает. Цикл вместо `next` это
         # чинит; не сделано здесь, потому что это смена поведения за пределами слайса #1256, и
         # заведено отдельной карточкой — VMCP-317 (1457); там же про 403 на DELETE по
         # несуществующей связи, из-за которого цикл нельзя писать наивно.

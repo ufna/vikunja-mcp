@@ -833,11 +833,38 @@ re-announcement of a mark already there. That is what the `continue`'s own comme
 `_add_label`'s ID-keyed guard its pin: keying that guard on the title instead now kills NOTHING —
 0 failed against a clean control of 0 failed / 0 errors / 1399 collected over the WHOLE of
 `tests/unit`, and 0 again on the narrower sweep selection, where #1216 had that same row at 2.**
-The two agree on every state THIS package can
-create; the only divergent one is a board holding two variant rows (`blocked` AND `Blocked`), which
-only an outside actor mints, and MEASURED there the ID guard's answer is not the tidy one — it
-sends the PUT and the card comes out carrying BOTH (`['Blocked', 'blocked']`) where a title guard
-would have left the one. Neither raises. The guard is kept AS IS anyway, because #1216 measured it
+The two agree on every state this package's ORDINARY
+write path creates: every `_add_label`/`get_or_create_label` call site passes a lowercase `LABEL_*`
+constant (walked with `ast`), so that path mints one row per normalised title. What tells the two
+guards apart is a board carrying TWO rows of the same normalised title — and there are TWO such
+boards, which this file used to collapse into one: two SPELLINGS (`blocked` AND `Blocked`), and the
+same spelling TWICE (`blocked` and `blocked`).
+**Of the first this file said, flat, that only an outside actor mints it — and the retraction
+belongs on the SECOND, which is why writing it here as a blanket correction would have been a
+second error.** `api.get_or_create_label` is read-`labels()`-then-`create_label` with nothing
+atomic between the two, so at `wip_limit > 1` two agents adding the same absent label both miss and
+both create; and because every call site passes the same constant, the two rows they mint carry the
+SAME spelling. That is a divergent board the package reaches with nobody outside it. For the
+two-SPELLINGS board the old sentence was right about this package's own writes — nothing here ever
+passes `Blocked`. `_add_label`'s docstring names BOTH boards, which is exactly why its correction
+is sound and this file's sentence was not. (It offers a second route as well — `GET /labels`
+surfacing only what the caller can READ — and that half is pinned by nothing: api.py records the
+visibility in the opposite direction, "not just its own", and the docstring's cross-reference to
+this module points at no sentence in it.)
+#1256's own second pass raised this and its author accepted it, after which the correction landed
+in one of the FIVE copies of the rule and in none of the other four, of which this was one. A rule
+stated five times and drifted in four is #1256's subject matter one layer up, which is why the
+retraction is written out here instead of the sentence being quietly swapped.
+MEASURED over `FakeAPI` and the real `_add_label`, with `_has_label` as the alternative guard —
+which is the alternative VMCP-316 (1456) actually asks about: rows `[blocked, Blocked]`, card
+carrying `Blocked`, the ID guard sends the PUT and the card comes out with BOTH
+(`['Blocked', 'blocked']`) where the `_has_label` guard skips and leaves the one; rows
+`[blocked, blocked]`, card carrying the second, `['blocked', 'blocked']` against `['blocked']`.
+THREE of the six arrangements diverge, not one, and the ID guard is the duplicating one in every
+one of them. Neither raises — but a BYTE-EXACT title comparison, a third reading of "title guard",
+does: rows `[Blocked, blocked]` with the card carrying `Blocked` sends a PUT that answers
+`400 code 8001`, which is #1216's leak exactly.
+The guard is kept AS IS anyway, because #1216 measured it
 against a real 2.3.0 and trading a measured decision for an unmeasured one is the wrong direction;
 the question is FILED, not answered — VMCP-316 (1456). The neighbouring residual is VMCP-317
 (1457): `_remove_label` takes only the FIRST matching row, so a card wearing BOTH `reviewed` and
@@ -855,3 +882,42 @@ invariant itself, and the anti-drift source pin that `label_key` is the only spe
 in `api.py`/`workflow.py` — read with `ast`, because the first draft grepped the text and went red
 on its own subject matter: `label_key`'s docstring says `.strip().casefold()` out loud). The sweep
 table is in that module's own docstring.
+
+**THE REWORK ROUND WAS ENTIRELY PROSE, AND ITS LESSON IS THE CARD'S OWN ONE LAYER UP.** The
+independent review re-derived the whole behaviour change — the census, both named consequences on
+the parent and at `57762ef`, the over-match direction across a wide variant set, every sweep row —
+and would have approved the six lines unchanged. What it sent back were three sentences. The
+rework's OWN second pass then widened the first of the three from three sites to four, refuted one
+figure the review had handed over, and found two further sentences that measurement contradicts —
+so the round that was about claims outrunning their evidence needed a fresh context twice more to
+stop doing it.
+
+**A retraction that reaches ONE copy of a rule stated FIVE times leaves four live, and accepting
+the finding is not the same as landing it.** #1256's own second pass raised "only an outside actor
+mints two rows", the author accepted it and said so in the `[worklog]` — and the correction then
+landed in `_add_label`'s docstring alone. Four copies kept the narrow reading, all of them `+`
+lines of the SAME commit as the correction: this file, the
+`test_a_title_VARIANT_does_not_slip_past_the_guard` docstring, the Russian comment in
+`_remove_label`, and — the one the rework's own second pass had to find — a clause SEVEN LINES
+ABOVE the correction, inside the very docstring that carries it. The missing step is cheap and
+mechanical: when a claim is retracted, `git grep` the retracted PHRASE before writing the fix,
+because "I accepted that finding" is a memory of a decision and not a record of an edit. That the
+fourth copy sat in the same docstring as its own correction is the sharpest form of the lesson
+available: proximity is not coverage. The same reflex is what the card's `label_key` is for at the
+code layer — one statement of a rule, so there is no second copy to drift.
+
+**AND ANNOTATING SOME ROWS OF A TABLE IS WORSE THAN ANNOTATING NONE.** #1256 moved six of the ten
+rows in #1216's sweep table and annotated exactly two, which manufactures the reading that the
+other eight are current; FOUR of those eight were not, and the two it DID annotate are the
+remaining two moved rows — both annotated wrongly. The fix is NOT to re-measure someone else's
+landed record — SKILL.md forbids retroactively rewriting one — but to give the table the TREE it
+was measured on, `131 collected at `d80c174``, which settles every row at once. That anchor was
+then checked rather than asserted: at `d80c174`, extracted with `git archive`, the control is 0
+failed / 0 errors / 131 collected and ALL TEN rows reproduce their stated figure exactly. What an
+anchor does NOT cure is a wrong claim written by the ANNOTATING card, and this card wrote two. Its
+note on the hollowed-`parent` row named a 7 belonging to a BROADER mutation and blamed
+`_has_label` resolving, when that 7 is 7 on `d80c174` and `edbb8e4` too — `_has_label` iterates
+`task.get("labels") or []`, so a hollowed `labels: None` misses however titles are compared. And
+its note on the exact-TITLE row gave one number for a mutation that #1256 itself SPLIT IN TWO:
+"the exact TITLE" and "the guard's own first draft" named one mutation before this card and two
+after it, and they measure 1 and 0. Both are corrected at their rows.

@@ -39,13 +39,21 @@ THE DIRECTION THAT STRANDS WORK HAS ITS OWN PIN, deliberately, rather than ridin
 also the direction in which work goes silently missing — a Queue card nobody is offered is a card
 nobody notices.
 
-THE SWEEP. Selection every round is this file + `test_workflow_duplicate_label.py` +
-`test_workflow_gates.py` + `test_workflow_epic_marker.py`, run in a clone with `__pycache__`
-deleted and `PYTHONDONTWRITEBYTECODE=1`, `vikunja_mcp.__file__` printed each round, rounds read by
-COUNTING lines beginning `FAILED ` with lines beginning `ERROR ` counted separately, and
-`collected` cross-checked against the control's. The table lives in
-`test_the_sweep_is_recorded`'s docstring at the bottom of this file, so that every round sits in
-the same paragraph as the control it is a delta against.
+THE SWEEP. Selection every round is FIVE files — this file + `test_workflow_duplicate_label.py` +
+`test_workflow_gates.py` + `test_workflow_epic_marker.py` + `test_api_labels.py` — run in a clone
+with `__pycache__` deleted and `PYTHONDONTWRITEBYTECODE=1`, `vikunja_mcp.__file__` printed each
+round, rounds read by COUNTING lines beginning `FAILED ` with lines beginning `ERROR ` counted
+separately, and `collected` cross-checked against the control's. THE FIFTH FILE IS NOT OPTIONAL
+AND THIS SENTENCE USED TO OMIT IT: measured, the four-file selection collects 152 and the
+five-file one 154, while every row of the table cross-checks on 154 — so a reader following the
+shorter list got a `collected` that could never agree with the table. What that cross-check
+actually establishes is narrower than "one tree": it says round and control COLLECTED THE SAME
+SELECTION, i.e. the mutation moved no test in or out. Same-tree is carried by the other two steps
+beside it, deleting `__pycache__` and printing `vikunja_mcp.__file__`. Why `test_api_labels.py` is
+in the selection at all is in the table's own row for the real client.
+
+The table lives in `test_the_sweep_is_recorded`'s docstring at the bottom of this file, so that
+every round sits in the same paragraph as the control it is a delta against.
 """
 import pytest
 
@@ -414,8 +422,11 @@ def test_the_sweep_is_recorded():
         — #1216's own sweep row, RE-MEASURED because #1256 moves it -> **0 failed** (control 0),
         where it was 2 at #1216. Re-run WIDE to be sure the 0 is not a selection artefact: 0
         failed against a clean control of 0 failed / 0 errors / 1399 collected over the whole of
-        `tests/unit`. That guard is no longer pinned by anything at all; `_add_label`'s docstring
-        says so outright and says why it is kept anyway
+        `tests/unit`. That guard is no longer pinned against THIS mutation — and the qualifier is
+        load-bearing: a byte-exact `lb.get("title") == title` guard is a DIFFERENT mutation since
+        this card, and it still kills 1 (the standalone variant pin) against a control of 0 failed
+        / 0 errors / 131 collected on #1216's three-file selection. `_add_label`'s docstring
+        carries both numbers and says why the guard is kept anyway
       * hand the epic-ready site the hollowed `parent` sub-dict — #1216's other row, also
         re-measured -> **7 failed** (control 0), against 1 at #1216. It kills more now because the
         hollowed dict makes the `epic` check itself miss, so the whole marker stops firing
