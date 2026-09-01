@@ -488,6 +488,12 @@ Five things follow, and only these five.
 1. **`low` is not a position on a dial, it is thinking OFF.** All 8 runs at `low` reported
    `thinking_tokens: 0`; all 26 at every other level reported a non-zero count. Both directions, no
    exceptions, across both models. That count is also the within-run control that the lever fired.
+   **NARROWED BY VMCP-319 (1468) — the COUNT stands, the generalisation above it does not.** On a
+   harder prompt, `--effort low` produced 789-2 773 thinking tokens over SIXTEEN runs on the same
+   box and build, while a one-word prompt at that level produced 0 in five runs out of five. So
+   the level sets a
+   small BUDGET the model spends when the work calls for it, and the zeros in this row are a fact
+   about THIS card's task rather than about `low`. The section below carries the runs.
 2. **Only ONE cell separated from anything, and it is the one a menu would write first.** Seven
    cells score 9.33-10.00 of 10 — four of them a clean sweep; `sonnet/low` scores 5.50. Pairing the
    cheaper MODEL with the shallower EFFORT — the obvious "cheap role" menu entry — is the single
@@ -547,7 +553,11 @@ Five things follow, and only these five.
   roughly 15 assertive sentences, which inverts the real base rate — a real second pass hunts one
   or two errors among a hundred sound ones, and there, flagging everything quantified is a failure
   mode this instrument cannot even express. **A cheap cell's fitness for the real role is therefore
-  not carried by this data at all.**
+  not carried by this data at all.** VMCP-319 (1468) built the instrument that CAN express it —
+  twelve sound sentences engineered to be flagged, six of them lexical twins of its defects — and
+  measured zero false alarms in nineteen runs across the same model and effort corners. So the
+  failure mode is now measured rather than merely unexpressed; the sentence above stands for THIS
+  card's data.
 * **The live range is smaller than the eleven items planted.** K5, K8 and K10 were found by 34 of
   34 runs and discriminate nothing; K1 fuses two independent mistakes into one item. An eleventh
   item was DROPPED whole after review, and the reason is the same defect class the instrument
@@ -594,6 +604,321 @@ The follow-up the data asks for — an instrument that does not saturate and tha
 well as recall — is filed as VMCP-319 (1468) rather than attempted here, because that is a second
 measurement with its own corpus, its own key and its own audit, not an extension of this one.
 
+## A second instrument — VMCP-319 (1468): matched pairs, and a NULL on precision
+
+VMCP-315's own boundaries asked for exactly this, and named it as a second measurement rather
+than an extension: an instrument that does not saturate and that scores PRECISION as well as
+recall. This card built one and ran it. **The headline is a NULL on the axis it was built to
+measure**, and a null there is worth more than the rung answer beside it. The apparatus is
+committed under `docs/instruments/dispatch-depth/` — material, report, key, prompt and grader —
+so the next card re-runs it instead of building a third one.
+
+**Read what the previous instrument's limit actually was, because the obvious reading is wrong
+and the card filing this one carried the wrong one.** It is not that VMCP-315 could not see: it
+separated `sonnet/low` cleanly. It is that it has a CEILING — seven of its eight cells pile up at
+9.33-10.00 and none of their twenty-one pairs rejects. So the job here was to raise the ceiling
+until cells stuck at the top come apart, not to build something that can see at all. That
+distinction decided the whole design: a first tier of three defects in a 45-sentence report was
+PROBED before anything else was written, and five runs across three cells — opus/xhigh twice,
+opus/low, sonnet/low twice — every one returned exactly those three and not one false alarm. It
+had reproduced the ceiling, in the cheapest cell available, so a harder tier was built on top of
+it.
+
+### What is different from VMCP-315's instrument, and why each difference is there
+
+**MATCHED PAIRS are how precision gets measured at a realistic base rate.** The report is 69
+sentences; six are planted defects and twelve are LOOKALIKES — sound, and engineered to wear a
+defect's shape. Six lookalikes are lexical TWINS of the six defects: an unhedged universal, a
+statement about what the code does, an attribution to a named reviewer, a named statistic, a
+true clause with a trailing consequence, a cross-artefact identification. A run that recognises
+the SHAPE takes the defect and its twin alike and nets zero on the pair; a run that reads the
+material takes the defect and leaves the twin. VMCP-315 could not express that failure mode at
+all: its sound sentences were incidental, so "no false positives" there was consistent with
+nothing ever having been tempting. **Say what the pairs then DID, because it is not what this
+paragraph promises:** not one lookalike was flagged in 228 exposures, so no pair ever netted
+anything and no pair-level analysis appears below. The mechanism was BUILT AND NOT ACTIVATED.
+That is itself the result — nothing shape-matched — and it is why the precision half of this card
+is a null rather than a table.
+
+**The key is width-checked item by item, before the runs.** Every keyed item names the place in
+the material that decides it AND the reading a run might defensibly give instead. That is
+VMCP-315's third defect turned into a procedure, and it fired: an independent auditor recomputed
+every sum, average, percentage, count and gap from the material before any scored run, confirmed
+all eleven then-existing verdicts, and broke four things around them — one defect whose
+"defensibly instead" cell said "none" and should not have, one filler sentence asserting the
+provenance of the test trees that no artefact records, one asserting a definition of a column
+the material did not give, and three carrying self-referential universals over the whole report.
+All four were fixed before a scored run was made.
+
+**Grading is set intersection over four fixed sets, so there is no grader JUDGEMENT and therefore
+no grader noise.** There is still a grader — `score.py` — and it has two tie-breaks the sentence
+above would deny it: the last flag block wins, and an identifier outside S01-S69 is dropped. All
+26 runs emitted exactly one block and no out-of-range identifier, so neither tie-break ever fired.
+VMCP-315's grader, by contrast, scored one and the same answer 1 on one transcript and 0 on
+another, twice in one cell, so its grading noise was the size of the effect it was claiming. The
+price here is that the run is told the report is numbered, which cues the sentence as the unit of
+a finding. That price is paid equally by every cell, which makes it unlikely to move a comparison
+between them — but a constant is not thereby non-interacting, and nothing here tests that.
+
+**Defect density is 6 in 69, against ten defects in roughly fifteen assertive sentences.** Still
+not the one-or-two-in-a-hundred of a real second pass, and that remaining gap is deliberate: at
+one or two in a hundred the same six defects need a report of three hundred to six hundred
+sentences — four to nine times this one — for no gain in resolution, and the base-rate realism it
+would buy is not what the precision measurement rests on. The lookalikes are.
+
+### The numbers
+
+Nineteen scored runs, four cells at n=4 plus a three-run prompt variant, `claude -p --model M
+--effort E --output-format json --allowed-tools ""` from a scratch cwd, Claude Code 2.1.252.
+Baseline is **opus/xhigh** for VMCP-315's reason: subagents here carry no `.claude/agents`
+definition, so they inherit the session effort, and this box's `settings.json` sets
+`effortLevel: "xhigh"`. Recall is out of SEVEN — the six planted defects plus S64, which was
+planted as filler and is a real defect the RUNS found (see below); every figure counting it is
+post-hoc and is marked — **including in the false-alarm column, which is where it bites hardest**.
+Under the key AS PRE-REGISTERED, S64 was filler and a flag on it was a false alarm, so that column
+reads 3, 1, 4, 0, 0 rather than five zeros. Every one of those eight flags is on S64 and S64 is a
+real defect, which is why the corrected column is the one to act on and the pre-registered one is
+printed beside it rather than replaced.
+
+Two cost columns, because one of them is nearly a fiction. `$/run` is the cell mean over all its
+runs; 6 of the 19 paid `cache_creation`, unevenly — one such run inflates the opus/low mean by
+54% on its own — so `x warm` is the ratio over the 13 runs that paid none, and it is the honest
+one.
+
+| cell | n | recall /7 | FA corrected | FA as pre-reg | think | out tok | $/run | x warm |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| opus/xhigh (baseline) | 4 | 7, 7, 7, 6 | 0 | 3 | 5 448 | 5 905 | 0.2069 | 1.00 |
+| opus/low | 4 | 7, 6, 6, 6 | 0 | 1 | 1 018 | 1 356 | 0.0687 | **0.26** |
+| sonnet/xhigh | 4 | 7, 7, 7, 7 | 0 | 4 | 19 520 | 20 036 | 0.2219 | **1.20** |
+| sonnet/low | 4 | 4, 5, 5, 5 | 0 | 0 | 2 063 | 2 398 | 0.0406 | **0.17** |
+| sonnet/low, warning removed | 3 | 3, 5, 4 | 0 | 0 | 1 630 | 1 931 | 0.0385 | 0.18 |
+
+**On the SIX pre-registered defects, the top three cells all sweep 6/6 in all twelve runs.**
+Only the post-hoc seventh item tells them apart at all, and it does not tell them apart
+significantly. So the ceiling was raised — `sonnet/low` now sits at 4-5 rather than at the top —
+and it was not raised far enough to separate opus/xhigh, opus/low and sonnet/xhigh from each
+other. That is this card's honest boundary and it is the same one VMCP-315 hit, one rung higher up.
+
+### The finding: WHERE an item's refutation lives may decide whether it measures anything
+
+The per-item table is where the information is, and it splits the seven items along an axis this
+card did not design and did not expect.
+
+* **INTERNAL** — refutable from the report's own other sentences. S27 (S22 and S26 say in the
+  report's own voice that no deferral was recorded), S51 (S44 gives the middle of the twelve as
+  421 seven sentences earlier), S58 (S53 says nothing in the log records an integration round),
+  S65 (S38 says the tree in the quoted comment was REMOVED, which is what kills it, with S39
+  supplying the mechanism).
+* **CONSULTATION** — refutable only by reading a particular artefact. S14 (two rows of the table),
+  S41 (the last sentence of the quoted comment), S64 (the table's own caption).
+
+Every run is `num_turns: 1` with no tool use and the whole material inline, so "consultation"
+never means fetching anything. It means holding two artefacts against each other rather than two
+sentences.
+
+| cell | INTERNAL items | CONSULTATION items |
+| --- | --- | --- |
+| opus/xhigh | 16/16 | 11/12 |
+| opus/low | 16/16 | 9/12 |
+| sonnet/xhigh | 16/16 | 12/12 |
+| sonnet/low | 16/16 | **3/12** |
+| sonnet/low, warning removed | 11/12 | **1/9** |
+
+**Every cell but one takes every internal item, and ALL the variance is on the other three.**
+Seventy-five of the seventy-six internal exposures were taken — the single miss is one run of the
+variant arm, which is why that row reads 11/12 — against thirty-six of fifty-seven consultation
+exposures.
+
+**The split survives dropping the post-hoc item, and gets cleaner.** On S14 and S41 alone — both
+width-checked before any run — the three upper cells are IDENTICAL at 2/2 in every run
+(8/8 each), `sonnet/low` is [0,1,1,1] and the variant arm [0,1,0]: twenty-eight of thirty-eight.
+Exact two-sided permutation tests on that S64-free subscore: every upper cell against `sonnet/low`
+is d = +1.25 at **p = 0.029**, the shape's floor; every pair among the three upper cells is
+d = 0.00 at p = 1.000. So the finding does not rest on the item the runs handed the key.
+
+**Read the two cheap arms separately, because they are not the same manipulation.** `sonnet/low`
+differs from the baseline in model and effort. The variant arm differs in model, effort AND
+prompt, so its three comparisons carry a confound the other three do not; it is reported here as
+a prompt variant that happens also to be cheap, not as a second depth cell.
+
+Four consequences, and the first is the one worth carrying off this board.
+
+1. **An item whose refutation sits elsewhere in the text under test may measure nothing about
+   depth.** Every cell but one took every such item here. That is a CANDIDATE explanation for
+   saturation in instruments of this class and not a demonstrated one: the split is post-hoc over
+   seven items, nothing was manipulated, and the internal/consultation distinction is confounded
+   with everything else that separates those two groups. What it does license is a cheap pre-run
+   CHECK, and that is the part worth carrying off this board: for each keyed item, ask whether the
+   report's own other sentences already contradict it. Four of this card's seven items do.
+2. **This card's own EASY/HARD tiers did not predict difficulty, and were wrong in the direction
+   that matters.** `sonnet/low` scored 12/12 on the "hard" tier and 7/12 on the "easy" one. The
+   labels were the author's judgement of how intricate an item looked; what actually decided it
+   was whether the answer was already in the report. Recorded rather than quietly relabelled.
+3. **An item's difficulty is not a property of the item.** The three easy-tier defects are the
+   SAME three sentences the probe used, and in the 45-sentence probe report `sonnet/low` took all
+   three in both runs, while in the 69-sentence report it took S14 once in four and S41 twice in
+   four. Nothing about those sentences changed; what changed is how much else was on the page.
+   Two runs against four is a thin comparison and the direction is the whole claim — but it means
+   an item calibrated on a short corpus does not keep its difficulty when the corpus grows, and
+   the ceiling of an instrument is therefore not fixed by its items alone.
+4. **The cheap corner's misses are concentrated, and it is NOT that it failed to look.**
+   `sonnet/low` flagged 4.8 sentences per run against the baseline's 6.8, and every one of the 4.8
+   was correct. An earlier draft of this bullet said it "fails by not looking"; that is refuted by
+   its own transcripts, which cite the material four to seven times per run, as often as the
+   baseline's do — and it is impossible by construction anyway, since the material is inline and
+   there is nothing to open. What is measured is narrower: its misses sit on the items needing two
+   ARTEFACTS held against each other rather than two sentences. Whether that is a shorter search, a
+   weaker cross-reference or something else, this instrument does not say. It is consistent with
+   VMCP-315's "keeps what one comparison settles" without being evidence for that card's
+   mechanism.
+
+### The precision axis: a NULL, and the confound was measured rather than argued about
+
+**Not one false alarm in nineteen runs, ONCE THE KEY WAS CORRECTED.** Zero flags on the twelve
+engineered lookalikes across 228 exposures, and zero on the fifty remaining filler sentences
+across 950. The only off-key flags any run made — eight of them — were all on S64, which turned
+out to be a real defect; under the key as pre-registered those eight scored as false alarms and
+the headline would read 8 in 19. Both readings are printed in the table above, and the corrected
+one is the one that means anything, because a flag on a true defect is not a false alarm whatever
+the key said first. Six of the twelve lookalikes are lexical twins of the six defects, so the
+failure mode this instrument was built to catch — a run that recognises the SHAPE of a defect and
+flags the sound twin with it — did not occur once, in any cell, including the cheapest.
+
+**And the obvious objection to that null was measured rather than argued about.** The prompt
+tells the run that a wrong flag costs the author a rework round, which is the operational truth
+and is also a perfectly good explanation of a zero all by itself. So a three-run arm removed that
+block and re-ran the cheapest cell. **Be exact about the size of that intervention**: it deletes
+three sentences, not one clause — the cost warning AND the flagging threshold itself, the
+instruction to flag only what you would send the card back over. Removing the threshold is the
+bigger half and the half likelier to raise flag counts. It produced **zero false alarms as well**,
+and its recall went DOWN rather than up (1/9 on the consultation items against 3/12, d = +0.42,
+p = 0.486 — not a separation).
+
+**That BOUNDS the instruction's effect; it does not exclude it, and the difference is the whole
+honesty of the paragraph.** Both arms are zero, so there is no variance in either. Three runs
+across 62 non-defect sentences is 186 exposures, which by the rule of three puts a 95% upper
+bound near 1.6% per sentence — about one false alarm per run still not ruled out. What the arm
+says is that the warning is not doing all the work, not that it is doing none.
+
+What the null licenses is narrow and worth stating exactly: **on this task, at this base rate, a
+cheap cell's failure mode is missing defects and not inventing them.** The worry that a shallow
+reviewer bounces cards on non-defects, which is what makes precision the sharper axis on this
+board, was not exhibited by any cell tested.
+
+### The precision channel fired ONCE, and what it caught was the KEY
+
+Every off-key flag any run made, in every cell, was the same sentence: **S64**, planted as
+filler, which says one artefact is the only one describing the porcelain status while another
+artefact's own caption describes it too. The sentence is false and the runs were right. It was
+promoted to a seventh defect in the key AFTER the runs and is labelled post-hoc there; the
+report file was deliberately NOT fixed, so the committed corpus stays the one these numbers were
+taken on.
+
+Three things follow and they are worth more than the promotion.
+
+* **A false-alarm channel that only ever fires on the key is not a false-alarm channel at all.**
+  Zero flags landed on the twelve engineered lookalikes, and zero on the other fifty filler
+  sentences. That is the null, and it is a stronger null than VMCP-315's because these traps were
+  built to be taken.
+* **The pre-run audit's gap is visible in exactly where S64 sits.** The auditor read the easy
+  tier's thirty-four filler sentences; the hard tier was written afterwards and never got a pass
+  of its own. The procedure is only as wide as the last time it was run.
+* **This is the same phenomenon VMCP-315 recorded and could not act on.** Its off-key findings —
+  eleven by the count of a counter its own text says undercounts them — were, on review, defects
+  its key had MISSED rather than false positives. Two
+  instruments, two corpora, one result: what looks like a model's false positive on this task is
+  overwhelmingly the key being wrong.
+
+### VMCP-315's finding 1 is NARROWER than it was written — said loudly, because it is a rule-shaped sentence
+
+That card's finding 1 reads that `low` is not a position on a dial but thinking OFF, on 8 of 8
+runs at `low` reporting zero thinking tokens against 26 of 26 non-zero elsewhere. **The COUNT is
+not in dispute and is not being corrected — it is a true report of those 34 runs.** What does not
+survive is the generalisation above it, and the discriminator is a within-level pair on this
+card's rig, at `--effort low` throughout:
+
+* the audit prompt, sonnet at `low`, ELEVEN runs: 789, 867, 1 423, 1 571, 1 747, 1 843, 2 005,
+  2 228, 2 451, 2 596, 2 773 thinking tokens. Not one zero.
+* the audit prompt, opus at `low`, FIVE runs: 792, 948, 948, 1 061, 1 113. Not one zero.
+* a ONE-WORD prompt ("Reply with exactly the word OK and nothing else."), same flag, FIVE runs
+  across BOTH models — three sonnet, two opus: **0, 0, 0, 0, 0**. Not one non-zero.
+
+Same flag, same box, same build — **sixteen runs at `low` that think and five that do not**, and
+what separates the two groups is the TASK and nothing else. The five zeros were run deliberately
+as this contrast's control rather than found lying about, except one, which was a smoke test made
+before the instrument existed and is counted here because excluding it would improve the picture.
+
+So `low` sets a small BUDGET the model spends when the work calls for
+it, and zero thinking tokens at `low` is a fact about a prompt, not about the level. Three
+environment variables this session carries that could each have been the cause were controlled
+rather than argued about — `_CLAUDE_CODE_EFFORT_LEVEL`, `CLAUDE_EFFORT` and
+`CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING` — by unsetting all three for a repeat run and then
+unsetting only the last: 789 and 1 843 thinking tokens, so none of the three is what enables it.
+One run each, and the response records no environment at all, so that pair is a weak control that
+rules the three variables out as a SUFFICIENT cause and nothing more.
+
+Why this matters beyond bookkeeping: "thinking OFF" invites a reader to treat `low` as a
+different KIND of thing from the other levels and to reason about a menu from that. It is the
+same level as the others with less budget, and the lever's effect is still large and visible —
+opus ran 4 029-6 859 thinking tokens at `xhigh` against 948-1 113 at `low` on this same prompt.
+
+### What it cost, stated the way the card asked
+
+**$3.2158 for 31 runs**, of which **$2.2678** is the 19 SCORED runs and $0.9480 is everything
+around them: the pilot, the probes that showed the easy tier could not stand alone, the three
+environment controls and the five one-word thinking controls. VMCP-315's
+comparable figure is $2.4669 for its 34 scored runs — so on scored runs this card came in under
+its neighbour and all-in it came in $0.75 over. Neither number covers the instrument's own
+construction, the two audit subagents, or this prose; as VMCP-315 already said of itself, the
+instrument's own cost is unmeasured, and saying it again is cheaper than pretending otherwise.
+
+The budget declared before the runs was "about $2.2" for the scored set. That one landed
+($2.2678). The declared TOTAL of "near $2.9" did not, by $0.32, and every dollar of the overrun
+is controls that were not planned because the things they close were not known when the budget
+was written — an environment confound found mid-run, and a one-word contrast the independent
+second pass asked for. Hard stop was $5 and was not approached.
+
+### What this does NOT settle
+
+* **The precision result is a NULL, and a null at this n is not "these cells never false-flag".**
+  It says that on this task, at this base rate, with twelve traps built to be taken, none was
+  taken by any cell. It does not say the traps are as attractive as a real report's worst
+  sentences, and it cannot: how attractive they are is exactly what nobody has a scale for.
+* **The instrument was still built by one author.** The lookalikes are sound because a second
+  reader recomputed them, not because a procedure guarantees it — and S64 is the standing proof
+  that the procedure has a seam, at the boundary of whatever the auditor was last shown.
+* **Closed-book, again.** VMCP-315 named an open-book arm as the thing most worth adding and this
+  card did not add one either; the budget went on the precision axis instead. So both
+  measurements on this board now bound their claims to the judging half of the second-pass role
+  and say nothing about the deciding-what-to-look-up half. That is now the oldest open item here.
+* **The seventh item is post-hoc and every figure counting it says so.** The precision claim is
+  NOT post-hoc — it rests on the twelve lookalikes, which were width-checked before a single
+  scored run and did not move. Read the two differently.
+* **The grader's composite weights one false alarm equal to one miss**, which is defensible on
+  this board because a wrong bounce costs a rework round, and is still a weight somebody picked.
+  Nothing above rests on it: the tables report recall and false alarms separately so a reader can
+  reweigh without re-running anything.
+* **The cells are four runs each, three in the variant arm.** Complete separation reaches
+  p = 0.029 at both shapes and nothing below it, so a cell that fails to reject has not been
+  shown equal to anything — measured by running the test on a maximally separated pair rather
+  than derived from a formula, which is where the neighbouring card's floors went wrong.
+* **Ten pairwise tests are reported and NONE is corrected for multiplicity.** At a floor of
+  0.029, no comparison here survives any correction over ten tests. Read each p as a description
+  of its own pair and not as a family-wise claim.
+* **The run transcripts are not committed.** The corpus, key, prompt and grader are; the 27 JSON
+  responses live only in this card's scratchpad, so every figure above is re-derivable only by
+  re-running the instrument, not by re-reading the same bytes. And the JSON records neither the
+  harness version nor the flags, so `2.1.252`, `--effort`, `--allowed-tools ""` and the scratch
+  cwd are asserted here rather than shown; what the JSON does carry, and what evidences the
+  closed-book condition, is `num_turns: 1` with zero `server_tool_use` on all 26 runs.
+* **These are `claude -p` runs from a scratch cwd with this box's real config dir**, on a ~2 000
+  word prompt with a short answer. VMCP-315's warning transfers unchanged: the cost ratios belong
+  to that shape and not to a real per-task dispatch of hundreds of thousands of tokens.
+* **The rule is UNCHANGED by this card**, deliberately and for the third card running. What is
+  added is a fact — the false-positive failure mode this rulebook worries about did not appear on
+  a task built to elicit it — and one narrowing of a neighbouring card's wording. Neither
+  licenses a menu, and neither was allowed to move the ladder.
+
 ## What the brief does that the model cannot
 
 Three things, all free, all per-dispatch. NONE of the three is measured: only the first is even
@@ -636,7 +961,12 @@ Verification by RUNNING is not the expensive part of a review — re-deriving th
 * How much of a REAL second pass that closed-book task stands for. Its runs used no tools, so it
   scored judging the width of a claim against evidence put in front of the agent, and not deciding
   what to go and look up — which is where a real second pass spends its tokens, and plausibly where
-  a rung bites hardest.
+  a rung bites hardest. **BOTH measurements on this board are closed-book**: VMCP-319 named an
+  open-book arm as the thing most worth adding and spent its budget on precision instead, so this
+  is now the oldest open item here rather than a fresh one.
+* Whether a cheap cell ever produces a FALSE positive on this role. VMCP-319 measured zero across
+  nineteen runs against traps built to be taken, which is a null and not a proof of absence — what
+  nobody has a scale for is how attractive those traps are next to a real report's worst sentences.
 * What this repo actually pays per token. The prices above are list API rates for the ratio only.
 * Whether 643k/337k is typical. It is ONE card, reported once, and it is the reason for the rule
   rather than a distribution. A second such accounting would be worth more than any wording here.
