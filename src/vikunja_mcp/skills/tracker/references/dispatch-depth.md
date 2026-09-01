@@ -336,16 +336,21 @@ cannot distribute anything by risk, because it has not asked what the risk is.
 
 ## The ladder, and how much of it this repo has actually measured
 
-**None of it.** There is no measurement here of Sonnet-class or Haiku-class output on any role in
-this pipeline, and none of Fable-class either. What exists is the token accounting above and the
-list prices; what does not exist is a single A/B of verdict quality by model on this board.
+**Until VMCP-315 (1455), none of it — and what that card added is one role, one task and one
+sharply separated cell, so read this paragraph as the state it CORRECTED and not as a state that
+is gone.** There is still no measurement here of Haiku-class or Fable-class output on any role in
+this pipeline; what the section below adds is Opus-class against Sonnet-class, and the effort
+ladder on both, on a single closed-book auditing task. Before it, what existed was the token
+accounting above and the list prices, and not one A/B of verdict quality by model on this board.
 Checked rather than assumed, and the check took two attempts. `git grep -i -l` for each of the
 four names over the tree at the commit this landed on returns: `Sonnet` and `Haiku` only in
 SKILL.md — the policy sentence this rule replaces; `Opus` there plus a plan document and a
 `settings.json` FIXTURE in `tests/unit/test_install_skill.py` that has nothing to do with
 dispatch; `Fable` only in a plan document, inside quoted `Co-Authored-By` trailer strings. So a
 reader who greps and finds a model name has found a POLICY, an AUTHOR or a fixture — never a
-measurement. The two attempts are the point: the first used `git grep -E "\b(sonnet|...)\b"`
+measurement. **That last clause expired with VMCP-315**, whose section below carries all four
+names inside a measurement in this very file: re-run the grep, do not quote its old result. The
+two attempts are the point: the first used `git grep -E "\b(sonnet|...)\b"`
 and returned NOTHING, because `\b` is not a POSIX ERE word boundary and the pattern silently
 matched nothing at all. That is the same family as the `git log -S` case-sensitivity trap SKILL.md
 already records — a search that answers "there is none" when it never looked. VMCP-314 added a
@@ -378,6 +383,217 @@ Two consequences, and they are why the rule steps one rung and stops:
 
 If someone measures a rung, that measurement belongs here, with the card it was run on.
 
+## One rung, measured — VMCP-315 (1455): one role, one task, 34 scored runs
+
+The first A/B of output quality by depth on this board. **What it separated is ONE cell; the other
+seven sit at or beside the instrument's ceiling and no comparison among them rejects.** Read that
+before any number below, because the useful result here is a boundary and a mechanism, not a ladder.
+
+**The role and the instrument.** The second-pass prose auditor, picked because a wrong verdict there
+is cheap and reversible. The task is CLOSED-BOOK: a synthetic report in this repo's house style,
+supplied together with the raw material it claims to rest on, with defects planted in the report —
+each one a contradiction of that inline material, so scoring needs no repo knowledge and no
+judgement about what is really true. The prompt is the second pass's own question, "which claim here
+is wider than its evidence?". A deny list withheld the fourteen tools an auditor would reach for,
+and every one of the 34 runs came back `num_turns: 1` — which is what evidences the closed-book
+condition. Say the runs USED no tools rather than that they HAD none: the deny list names tools, and
+naming a list is never the same as closing a surface.
+
+**The rig.** `claude -p "<task>" --model M --effort E --output-format json --disallowed-tools …`
+from a scratch cwd, Claude Code 2.1.252. Two observables, both OUTSIDE the agent: the run's own
+`usage` block — output tokens, `output_tokens_details.thinking_tokens`, `total_cost_usd` — and
+recall against the key. Grading was a SEPARATE `claude -p` run per transcript that never saw which
+cell produced it, joined to the cell labels only afterwards. That blinding is load-bearing: the
+runner printed cell labels to its own log, so the author's own reading was NOT blind, and the
+grader's is the primary score.
+
+**What the `--effort` flag does on the wire, measured with a control.** VMCP-314's stub method
+rebuilt — a local HTTP server impersonating the Messages API under `ANTHROPIC_BASE_URL` — but with
+this box's REAL `CLAUDE_CONFIG_DIR` in play, which is what this leg adds to that card's isolated
+runs. Six captures, each a one-turn `claude -p` making exactly one request, so the pairs and not a
+within-run counter are what make each row a difference; every row carried the `effort-2025-11-24`
+beta and the model it named:
+
+| what varied | `output_config` |
+| --- | --- |
+| `--effort low` | `{"effort": "low"}` |
+| `--effort xhigh` | `{"effort": "xhigh"}` |
+| no flag, this box's `settings.json` | `{"effort": "xhigh"}` |
+| `CLAUDE_CODE_EFFORT_LEVEL=low` **plus** `--effort xhigh` | `{"effort": "low"}` |
+| `--effort low`, `--model opus` | `{"effort": "low"}` |
+| CONTROL: throwaway `CLAUDE_CONFIG_DIR`, no flag | `{"effort": "high"}` |
+
+So the precedence on this build is **env > `--effort` > `settings.effortLevel` > model default**,
+and each link is a pair of rows differing in one thing — the control row being what stops the third
+link from being a reading of a value that was there anyway. That closes VMCP-314's open item, which
+said that `--effort` was the channel exercised and that the `settings.json` `effortLevel` channel
+was not, **for the SESSION's own request only**; the SUBAGENT leg of the `settings` channel is still
+unmeasured. **And none of this says anything about the 34 scored runs**: no wire was captured on a
+run that reached the real service, because the stub replaces it. What evidences the lever on the
+scored runs is `thinking_tokens` in their own responses, which is the EFFECT and not the lever.
+
+A shell bug is recorded because it produced a plausible false finding: a first pass through these
+arms used `set -- $SPEC` in **zsh**, which does not word-split an unquoted parameter, so every arm
+launched with a malformed `--model`/`--effort` pair and every one came back `xhigh`. Read straight,
+that says "`settings.effortLevel` silently overrides `--effort`" — striking, publishable and false.
+Use an array or `${=SPEC}`, and re-run anything surprising before writing it down. Those captures
+were discarded and the table above is a clean re-run, not a repair of them.
+
+### The numbers
+
+Baseline is **opus/xhigh**, because subagents here carry no `.claude/agents` definition and so
+INHERIT the session effort (VMCP-314 point 2), and this box's `settings.json` sets
+`effortLevel: "xhigh"`. Recall is out of TEN: an eleventh key item was planted, found defective
+during review and dropped whole — see the boundaries. Cost is not quoted as a run mean, because
+`input_tokens` is **2** in all 34 runs (the prompt is entirely cache-read) and cost is therefore an
+exact function of output tokens: a fixed cached-input term of $0.0098 (opus) / $0.0050 (sonnet) plus
+output at the list rate. 13 of the 34 runs additionally paid `cache_creation` and cost 1.84x the
+other 21, which is noise about the CACHE and not about the arms, so the column below is the
+cache-warm figure derived from the cell's output tokens. `costBasis` in these records reads `list`;
+read the ratio, never this repo's bill.
+
+| cell | n | recall /10 | mean | thinking tok | output tok | $ warm | x base | wall |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| opus/xhigh (baseline) | 4 | 9,10,10,10 | 9.75 | 2016 | 3172 | 0.0891 | 1.00 | 42s |
+| opus/high | 3 | 10,10,10 | 10.00 | 1015 | 2008 | 0.0600 | 0.67 | 27s |
+| opus/medium | 6 | 10 x6 | 10.00 | 833 | 1850 | 0.0561 | 0.63 | 29s |
+| opus/low | 4 | 10,10,10,10 | 10.00 | **0** | 862 | 0.0314 | 0.35 | 17s |
+| sonnet/xhigh | 4 | 9,10,10,10 | 9.75 | 8179 | 9247 | 0.0975 | 1.09 | 93s |
+| sonnet/high | 3 | 10,10,10 | 10.00 | 3372 | 4557 | 0.0506 | 0.57 | 55s |
+| sonnet/medium | 6 | 8,9,9,10,10,10 | 9.33 | 2009 | 3091 | 0.0359 | 0.40 | 38s |
+| sonnet/low | 4 | 5,5,6,6 | **5.50** | **0** | 634 | 0.0113 | 0.13 | 14s |
+
+Exact two-sided permutation tests. The p-floor is set by the cell sizes and is what decides whether
+a cell can reach significance AT ALL: 0.029 at 4 against 4, 0.057 at 3 against 4, 0.010 at 6
+against 4. So no three-run cell here can reject whatever it scores, and that is a property of the
+design, not a result.
+
+* effort rung on opus, xhigh->low ....... d = −0.25, **p = 1.000** — no separation
+* the MODEL rung at xhigh, opus->sonnet . d = ±0.00, **p = 1.000** — identical multisets
+* effort rung on sonnet, xhigh->low ..... d = +4.25, **p = 0.029** — at that pair's floor
+* effort rung on sonnet, medium->low .... d = +3.83, **p = 0.005** — clear of its floor
+* the model rung at low, opus->sonnet ... d = +4.50, **p = 0.029** — at that pair's floor
+
+Among the seven cells that are not `sonnet/low` there are twenty-one pairs. **Thirteen return
+p = 1.000 and none of the other eight rejects**; those eight run 0.182 to 0.690. Six of the eight
+involve `sonnet/medium` — the smallest is `sonnet/medium` against `opus/medium`, d = −0.67,
+p = 0.182 — so it holds the only near-signal among the seven, and after doubling it to n=6 it is
+still not one. The other two are `opus/medium` against each `xhigh` cell at p = 0.400, on d = −0.25;
+note that the SAME d = −0.25 gives p = 1.000 for `opus/xhigh` against `opus/low`, so these p-values
+track cell size as much as effect, which is one more reason to read the whole block as unresolved
+rather than as a ranking.
+
+Five things follow, and only these five.
+
+1. **`low` is not a position on a dial, it is thinking OFF.** All 8 runs at `low` reported
+   `thinking_tokens: 0`; all 26 at every other level reported a non-zero count. Both directions, no
+   exceptions, across both models. That count is also the within-run control that the lever fired.
+2. **Only ONE cell separated from anything, and it is the one a menu would write first.** Seven
+   cells score 9.33-10.00 of 10 — four of them a clean sweep; `sonnet/low` scores 5.50. Pairing the
+   cheaper MODEL with the shallower EFFORT — the obvious "cheap role" menu entry — is the single
+   measured configuration that fails, and **neither of its halves fails alone**: `opus/low` and
+   `sonnet/high` both swept. `opus/low` is also both CHEAPER and higher-scoring than
+   `sonnet/medium` (0.35x against 0.40x, 10.00 against 9.33), so the cheap corner of this grid is
+   not where the model ladder points.
+3. **WHICH items the failing cell loses is the finding, and the aggregate hides it.** Across the 30
+   runs outside that cell, every one of the ten items was found 28-30 times. `sonnet/low` found K5,
+   K7, K8 and K10 4/4 — the items a single comparison settles: a key absent from a JSON blob, 60
+   against a quoted 90, a bare universal quantifier, an outlier under an "every time". It found K1,
+   K2 and K4 **0/4** — subtract the control round before calling a kill count, notice that a ZERO
+   delta means the pin is BLIND, sum one field across two responses — and K6 1/4, K9 2/4, which are
+   attribution rather than arithmetic (a cause invented; "read a constant" against "measured
+   live"). So the honest form is **it keeps what one comparison settles and loses what needs a
+   second step — completely on the three arithmetic items, most of the time on the two attributional
+   ones.** Not "it keeps the scepticism": it loses that too, just less reliably. K3 is the
+   counterexample that fixes the shape — 3/4 in this cell despite needing the same control round,
+   because the report's own arithmetic there is checkable without it. K1 and K2 are precisely this
+   repo's mutation-sweep discipline, which is what makes this cell's failure mode the expensive one
+   here.
+4. **The rung this rule already permits — Opus to Sonnet class — separated NOTHING at full depth, in
+   either direction.** The two cells returned identical recall multisets (`9,10,10,10` each,
+   p = 1.000) and the cheaper model cost 1.09x the baseline rather than less, because it spent 8179
+   thinking tokens against 2016 to reach the same place. Do NOT read that as "Sonnet costs more": a
+   1.09x ratio on n=4 is not distinguishable from 1.0 here. The measured claim is smaller and still
+   worth having — **on this task the permitted rung produced no saving anyone can demonstrate.** And
+   it is NOT an instance of the caution one section above about a cheaper agent taking MORE TURNS:
+   every one of these 34 runs is `num_turns: 1`. The mechanism observed is a different one — more
+   thinking tokens inside a single turn.
+5. **The two models have different SHAPES on the effort axis, and only one of them has a knee.**
+   Opus reads 10.00 / 10.00 / 10.00 / 9.75 across low/medium/high/xhigh — flat within noise all the
+   way down, at 0.35x the baseline cost at the bottom; five of its six internal pairs sit at
+   p = 1.000 and the sixth, `xhigh` against `medium`, at p = 0.400.
+   Sonnet reads 5.50 / 9.33 / 10.00 / 9.75 across the same four: the step from `low` to `medium`
+   carries +3.83 at p = 0.005, and nothing above `medium` separates. **A rung is therefore not one
+   quantity — the same nominal step costs Sonnet most of the task and costs Opus nothing
+   measurable.** The `opus/high` cell was run specifically to test whether Opus had a knife-edge
+   hiding between the levels either side of it; it does not. Set against the harness's own effort
+   cost index quoted above (sonnet low 0.47 / medium 0.74 / xhigh 2.41, high = 1), the measured
+   output-token ratios are 0.14 / 0.68 / 2.03 — close at the top, over-predicting `low` by about
+   3.4x, because at `low` thinking collapses to zero.
+
+### What this does NOT settle, which is most of it
+
+* **The instrument SATURATES, and that is the largest boundary.** FOUR of the eight cells swept
+  10/10 on the grader's scores — `opus/low`, `opus/medium`, `opus/high`, `sonnet/high` — and the
+  only pair the design resolves is the one involving `sonnet/low`. So "`opus/low` matches the
+  baseline" must not be restated as "`low` costs Opus nothing" — it is a statement about a task
+  neither cell struggles with. Everything in the 0.35x-1.09x cost band is measured as
+  INDISTINGUISHABLE, which is not EQUAL, and a failure to reject at n=3-6 is weak evidence of
+  sameness.
+* **PRECISION was never measured, only recall.** Across 34 runs not one mis-flagged a sound
+  sentence — established by reading the transcripts, not from the grader's `extra` counter, which
+  logged 11 off-key findings and undercounts them. Those off-key findings were, on review, defects
+  the key had MISSED rather than false positives. The report under test carries its defects in
+  roughly 15 assertive sentences, which inverts the real base rate — a real second pass hunts one
+  or two errors among a hundred sound ones, and there, flagging everything quantified is a failure
+  mode this instrument cannot even express. **A cheap cell's fitness for the real role is therefore
+  not carried by this data at all.**
+* **The live range is smaller than the eleven items planted.** K5, K8 and K10 were found by 34 of
+  34 runs and discriminate nothing; K1 fuses two independent mistakes into one item. An eleventh
+  item was DROPPED whole after review, and the reason is the same defect class the instrument
+  tests for: it asked a run to notice that "three of the last five landings were made by agents"
+  is two, not three — but the supplied `git log --oneline` carries no AUTHORS at all, so a run
+  answering "no authorship is shown" was right for a BETTER reason than the key's, and the key was
+  itself a claim wider than its evidence. The automated grader then scored that same answer 1 on
+  one transcript and 0 on another, twice in one cell, manufacturing the only model-ladder gap the
+  first reading contained. **Grading noise was the size of the effect being claimed**, which is why
+  the item is gone rather than patched.
+* **The grader is the primary score, and the hand re-score that checked it covered 25 of the 34
+  runs.** An independent pass hand-scored those 275 cells: five disagreements, four of them K11
+  (now gone), and ONE inside K1-K10 — on `740d13c7f1` (sonnet/high) at K9, where a run named the
+  right card as the measurer but never corrected the report's "#1102 measured that on a live tree".
+  A reasonable reader can go either way on that one, unlike the K11 four. Under that hand reading
+  `sonnet/high` is 9.67 rather than 10.00 and the sweeps number three rather than four; nothing
+  else in the table moves, and finding 5 survives either way. **The nine runs added later were
+  never hand-checked at all** — they are `opus/high` and the second half of both `medium` cells.
+* **Closed-book measures half the role.** With no tools used, this scores judging the width of a
+  claim against evidence PUT IN FRONT of the agent, never deciding what to go and look up — which
+  is where a real second pass spends its tokens, and plausibly where a rung bites hardest.
+* **The cells are 3, 4 or 6 runs, and every "n=4" is two batches of two.** Batch is unmodelled.
+* **The runs were not environment-isolated.** Only `cwd` was scratch; `CLAUDE_CONFIG_DIR` was the
+  real one, so every run loaded this box's settings, memory and skills. Fixed across arms, so not a
+  bias between cells — but these are not clean-default runs, unlike VMCP-314's probe, and the cost
+  ratios belong to a ~20k cached prompt with a 1-10k answer, not to a real per-task dispatch of
+  hundreds of thousands of tokens. **The cost ratios do not transfer to a real dispatch.**
+* **$2.4669 is the 34 SCORED runs and nothing else.** It excludes the 34 grading runs, whose cost
+  the scorer never captured, the wire probes, and the discarded zsh round. The instrument's own
+  cost is unmeasured.
+
+### So: still no `.claude/agents/` set, and the reason has changed
+
+The three objections in the paragraph above — the `model:` column that does not compose, the
+`.gitignore` question, and a fixed menu being coarser than per-card judgement — are untouched. What
+this card removes is the second one, "no rung of either ladder has been measured", and what replaces
+it does not license a menu either. On one saturating closed-book task: the axis that moved COST
+monotonically was effort (0.13x to 1.09x), while the model rung moved cost by 2.8x at `low` and by
+0.91x at `xhigh` — inconsistent in direction; on QUALITY neither axis predicts anything alone, and
+what failed was a PAIRING, which is finding 2. A menu would be picking among seven cells this
+measurement could not tell apart, on an instrument that saturated for four of them outright.
+**Fact, not decision: the rule above is unchanged by this card, exactly as it was by VMCP-314.**
+The follow-up the data asks for — an instrument that does not saturate and that scores precision as
+well as recall — is filed as VMCP-319 (1468) rather than attempted here, because that is a second
+measurement with its own corpus, its own key and its own audit, not an extension of this one.
+
 ## What the brief does that the model cannot
 
 Three things, all free, all per-dispatch. NONE of the three is measured: only the first is even
@@ -406,11 +622,21 @@ Verification by RUNNING is not the expensive part of a review — re-deriving th
 ## What is not known here
 
 * Whether an effort level changes what a model actually DOES. The key reaches the request — that
-  is measured above — and the levels stop being observable there. What the wire cannot see, this
-  file does not claim.
-* Whether a downgrade costs verdict quality on this board, and by how much. Unmeasured, on BOTH
-  ladders now: no rung of the model ladder and no effort level has ever been run against a role
-  here.
+  is measured above — and the MECHANISM stops being observable there. What VMCP-315 added is not
+  the mechanism but an OUTCOME: on one closed-book auditing task the level moved the token spend on
+  every cell and the recall on one, so the field is not inert. What the wire cannot see, this file
+  still does not claim.
+* Whether a downgrade costs verdict quality on this board, and by how much — still open on almost
+  all of both ladders. VMCP-315 measured Opus-class against Sonnet-class over four effort levels
+  each, on ONE role and ONE synthetic closed-book task, and seven of its eight cells sat at or
+  beside that task's ceiling with no comparison among the twenty-one pairs rejecting, so it
+  separated a single cell and nothing else. Haiku-class and Fable-class have still never been
+  run against a role here, and neither has any rung against code review, implementation, or the
+  per-task agent.
+* How much of a REAL second pass that closed-book task stands for. Its runs used no tools, so it
+  scored judging the width of a claim against evidence put in front of the agent, and not deciding
+  what to go and look up — which is where a real second pass spends its tokens, and plausibly where
+  a rung bites hardest.
 * What this repo actually pays per token. The prices above are list API rates for the ratio only.
 * Whether 643k/337k is typical. It is ONE card, reported once, and it is the reason for the rule
   rather than a distribution. A second such accounting would be worth more than any wording here.
