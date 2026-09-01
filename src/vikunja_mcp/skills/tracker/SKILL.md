@@ -482,9 +482,10 @@ where. Here — what must not be broken:
     come anyway), now it is load-bearing. Keep your own list for the tick regardless: `exclude`
     protects against a duplicate, while a reviewer that did NOT come back is still something
     only you will notice.
-- **The per-task agent runs the WHOLE task itself** (a fresh one per task; the senior model;
-  loads the tracker tools through ToolSearch). The brief from the orchestrator: the task id, the
-  working directory, the readiness criteria (tests/lint) and `wip.limit` from the `next_task`
+- **The per-task agent runs the WHOLE task itself** (a fresh one per task; the model by the
+  grading rule below, which on anything that writes code keeps it senior; loads the tracker
+  tools through ToolSearch). The brief from the orchestrator: the task id, the working
+  directory, the readiness criteria (tests/lint) and `wip.limit` from the `next_task`
   response — the agent computes its ceiling of integration rounds from it (see "Where the
   ceiling comes from"); do not name it and it will read `wip_limit` from the repo config itself,
   but that is an extra step and an extra way to be wrong. **Name `wip.active` from that same
@@ -500,10 +501,35 @@ where. Here — what must not be broken:
   narrow whitelist below) or by dispatching further — a separate implementer, or parallel agents
   on unrelated pieces. For its own task it is the same kind of orchestrator that the main
   session is for the queue.
-- **The model is the senior one (Opus class) by default**, both for the per-task agent and for
-  all the nested ones (the implementer, the independent bug review). Downgrading (Sonnet/Haiku
-  class) is FORBIDDEN — except where the task itself carries a separate, explicit permission to
-  downgrade.
+- **The model is the per-dispatch DECISION, and the only depth knob the `Agent` CALL itself
+  takes.** It accepts `opus`/`sonnet`/`haiku`/`fable` — ignored for a `fork`, which inherits —
+  and NO effort or reasoning parameter. **Effort is not unreachable, it is just not HERE, and
+  the difference matters:** an agent DEFINITION accepts an `effort` key (parsed and validated in
+  the harness shipped today) and `subagent_type` IS per call, so a maintained SET of definitions
+  would be a real lever — a coarse one, chosen from a fixed menu rather than fitted to the card.
+  This repo defines no agent types and a measurement taken here disputes that the key changes
+  anything, so today it is not a lever you have; do not write a rule that assumes it. The
+  session-wide controls (`effortLevel`, `/effort`, `MAX_THINKING_TOKENS`) move the whole SESSION
+  and are not a per-card substitute (`references/dispatch-depth.md`).
+- **Choose by BLAST RADIUS and REVERSIBILITY, never by file type or diff size** — and state the
+  choice with its ground in one clause of the brief, because an unstated choice is the default
+  and not a decision. **Senior (Opus class), non-negotiable, if ANY of these holds:** the
+  dispatch writes code, or changes a gate, a guard or a rule; a wrong APPROVE would reach
+  consumers through `stable`; a revert would NOT undo it because something downstream has already
+  acted on it (for example, a rule already sitting in every agent's context); or
+  checking the card means RE-DERIVING a measurement. **One rung down (Sonnet class) is
+  permitted** only when every one of those is false — the change is inert, a revert restores it
+  completely, and there is nothing to re-measure. The step is ONE rung, and it stops there: no
+  rung of this ladder has been measured against any role here, so the bottom (Haiku) and the top
+  (Fable) are UNMEASURED rather than free.
+- **The model is price per TOKEN; the BRIEF is the only PER-DISPATCH lever on the NUMBER of
+  tokens.** So the same brief says whether this dispatch may raise sub-agents of its OWN —
+  nesting is the multiplier — and names the diff, the sha and the files, instead of leaving a
+  reviewer to discover the scope by reading. It may narrow what is at STAKE; it may never waive
+  verification by running.
+  → **`references/dispatch-depth.md`**: the surface as measured, the doc-versus-measurement
+  conflict over `effort` and what is actually settled, and the 643k-token card that spent 337k
+  of it on two rounds of review, the second over a `+8/-5` diff with no code in it.
 - **Why:** a clean context per task (decisions from neighbouring tasks do not leak across), the
   orchestrator stays light and lives long, and symmetry with review — the author and the
   reviewer have their own unmixed contexts.
@@ -1157,11 +1183,13 @@ unchanged or was found correct on the first try, and what spun was the wordings 
   "53 insertions, ~45 of them prose" on 594 was exactly the grounds for saying the prose there is
   the deliverable and not decoration. On a one-line edit, on pure code with no new claims, and
   where the text merely accompanies the work — do not raise one, it is wasted spend.
-- **Whom you raise, and with what.** A separate subagent with a FRESH context (the senior model, as
-  with everything nested — see "Who does the work"). Give it the raw material: run logs, commands
-  and their output, shas, card comments — and the text itself. Do NOT give it your own conclusions
-  about what is already verified: the memory "I measured this myself" is precisely what it must not
-  have. It works exactly because it opens the file and the history instead of remembering.
+- **Whom you raise, and with what.** A separate subagent with a FRESH context (senior: auditing
+  a claim means RE-DERIVING a measurement, which is the fourth test in "Who does the work", so
+  the one-rung downgrade never reaches this dispatch). Give it
+  the raw material: run logs, commands and their output, shas, card comments — and the text
+  itself. Do NOT give it your own conclusions about what is already verified: the memory "I
+  measured this myself" is precisely what it must not have. It works exactly because it opens
+  the file and the history instead of remembering.
 - **WHERE it works — in its OWN clone, not in your tree.** A READING auditor (open the file, the
   history, `git log -S`) is fine with your tree — the bullet above describes exactly that one. But
   the moment you ask it to RE-MEASURE, the assignment becomes a WRITING one: a claim of the form "X
