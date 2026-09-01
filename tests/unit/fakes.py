@@ -2,7 +2,7 @@
 import copy
 import itertools
 
-from vikunja_mcp.api import VikunjaError
+from vikunja_mcp.api import VikunjaError, label_key
 from vikunja_mcp.formatting import html_to_text, text_to_html
 
 # Real Vikunja 2.3.0 auto-creates the reciprocal relation on the OTHER task: write one side
@@ -611,13 +611,22 @@ class FakeAPI:
         # `VikunjaAPI.get_or_create_label`: a bot typing `Bug`/`bug ` once forked a duplicate
         # label). This fake was EXACT-match until #1216, and that divergence was not cosmetic —
         # it made a whole leak untestable here. `Workflow._add_label`'s first draft guarded with
-        # `_has_label`, which compares titles exactly, so a card carrying `Blocked` slipped past
+        # `_has_label`, which THEN compared titles exactly (it resolves through `api.label_key`
+        # since #1256), so a card carrying `Blocked` slipped past
         # the guard and the PUT was a duplicate 400 on a real server; under an exact-match fake
         # the same sequence minted a SECOND label and stayed green, which is the same "more
         # generous than the server" mode `_read_task`'s docstring is about. Measured on real
         # 2.3.0 both before and after the guard was re-keyed to the resolved label ID.
-        want = (title or "").strip().casefold()
+        #
+        # IT CALLS `api.label_key` RATHER THAN RESTATING IT, since #1256, and that is a
+        # deliberate exception to "the fake is an independent oracle". Until #1256 this method
+        # held a verbatim second copy of `.strip().casefold()`, which is the exact drift that
+        # cost this repo the leak above — and #1256's own second independent pass found the copy
+        # still sitting here after the production side had been unified. A fake that can drift on
+        # THIS rule is a fake that can hide THIS defect. The independence that matters is in the
+        # STORAGE and the STATUS CODES, which stay the fake's own.
+        want = label_key(title)
         for lb in self._labels:
-            if (lb.get("title") or "").strip().casefold() == want:
+            if label_key(lb.get("title")) == want:
                 return dict(lb)
         return self.create_label(title)

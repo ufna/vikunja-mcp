@@ -47,7 +47,14 @@ names what it killed.
     draft) -> 2 failed: both variant pins — the standalone one on the raised 400, the epic-ready
     one on the marker that same 400 costs it. The epic-ready pin is in there because that site's
     `continue` lets a variant-marked parent REACH the helper, after which a title-keyed guard
-    misses there exactly as it does anywhere else
+    misses there exactly as it does anywhere else.
+    **#1256 MOVED THIS ROW TO 0 and it is left here as the record of what it USED to measure.**
+    That card routed `_has_label` through `api.label_key`, so a title-keyed guard now answers what
+    the id-keyed one answers in every state this package can create, the `continue` above no
+    longer lets a variant-marked parent reach the helper at all, and the mutation kills nothing —
+    re-measured 0 failed against a clean control of 0 on that card's own selection. What still
+    tells the two guards apart is written up in `_add_label`'s docstring; nothing in the unit
+    suite sees it
   * give `FakeAPI.get_or_create_label` its pre-#1216 exact-match resolution back -> 2 failed: the
     same pair. That answers the obvious worry about it — the variant pins are NOT blind to an
     exact-match fake, they go red, because such a fake mints a second label where the server
@@ -57,7 +64,9 @@ names what it killed.
     round that narrowed the paragraph above
   * remove BOTH the guard and the fake's 400, i.e. the pre-#1216 world -> 7 failed
   * hand the epic-ready site the hollowed `parent` sub-dict instead of the re-fetched
-    `full_parent` -> 1 failed: the epic-ready variant pin, and nothing else. THIS ROW USED TO READ
+    `full_parent` -> 1 failed: the epic-ready variant pin, and nothing else. (#1256 re-measured
+    this one too: 7 failed on its selection, because with `_has_label` resolving, a hollowed dict
+    makes the `epic` check itself miss and the whole marker stops firing.) THIS ROW USED TO READ
     0, and was written up as a blind spot with nothing observable to catch; that reading was wrong
     and the pin now in the selection is what refutes it — the round returned 0 because the
     selection held no parent whose marker was spelled a way `get_or_create_label` resolves and
@@ -224,18 +233,31 @@ def test_epic_ready_marker_still_fires_through_the_resigned_helper(env):
 
 def test_epic_ready_on_parents_where_a_human_typed_the_marker_CAPITALISED(env):
     """The pin the round above was said to be unable to have (#1216 rework) — this card's own
-    defect, surviving one level up in the file that fixed it.
+    defect, surviving one level up in the file that fixed it. **#1256 INVERTED ITS PREMISE, so
+    what it pins today is not what it pinned when it was written**, and the history is kept here
+    because a reader who only sees the new assertions would conclude the old ones were wrong.
 
-    THE PREMISE, asserted below rather than argued: on a parent a human marked `Epic-ready` the
-    site's exact-title `continue` MISSES, so the site does reach `_add_label` with that label
-    genuinely present, and the id-keyed guard is what stops the PUT. A real guard here, not a
-    guaranteed-False one.
+    WHAT IT PINNED AT #1216. On a parent a human marked `Epic-ready` the site's exact-title
+    `continue` MISSED, so the site reached `_add_label` with that label genuinely present, and the
+    id-keyed guard was what stopped the PUT. Two parents, because one understated the loss:
+    measured against the hollowed `parent` sub-dict, a SINGLE parent lost only the `[epic-ready]`
+    comment (the label being byte-identical in both worlds), while the 400 aborted the
+    `for parent in parents` loop, so a LATER parent lost the LABEL — the half a human reads off
+    the board — outright. Both losses were one swallowed stderr line, the marker being
+    best-effort.
 
-    TWO parents, because one understates the loss. Measured both ways against the hollowed
-    `parent` sub-dict: with a SINGLE parent the label is byte-identical in both worlds and only
-    the `[epic-ready]` comment dies, but the 400 aborts the `for parent in parents` loop, so a
-    LATER parent loses the LABEL — the half a human reads off the board — outright. Both losses
-    are one swallowed stderr line, the marker being best-effort."""
+    WHAT IT PINS AT #1256, and it is the better thing. `_has_label` now resolves through
+    `api.label_key`, so the `continue` SEES the human's spelling and the site never reaches
+    `_add_label` at all: the hand-marked parent is left exactly as the human left it — one label,
+    and NO second `[epic-ready]` comment (measured `(1, 0)`, against `(1, 1)` before). That is
+    what the `continue`'s own comment has always claimed it does ("already marked — idempotent"),
+    and it was false for every spelling but one. The second parent is the half that did not move:
+    it is marked normally, `(1, 1)`, which is what says the first parent did not abort the loop —
+    now because nothing raises rather than because a guard caught it.
+
+    AND IT PICKS UP THE HUMAN'S SPELLING, which is worth seeing: the second parent's label reads
+    `Epic-ready`, not `epic-ready`, because `get_or_create_label` resolved to the row the human
+    minted. `_epic_ready` counts case-insensitively for exactly that reason."""
     api, wf, _t = env
     first = api.add_task("epic one", "Backlog", labels=[LABEL_EPIC])
     _hand_label(api, first["id"], LABEL_EPIC_READY.capitalize())   # the human typed it capitalised
@@ -243,31 +265,47 @@ def test_epic_ready_on_parents_where_a_human_typed_the_marker_CAPITALISED(env):
     child = api.add_task("only child", "Design", assignee=api.me_user)
     api.add_relation(child["id"], first["id"], "parenttask")
     api.add_relation(child["id"], second["id"], "parenttask")
-    assert not Workflow._has_label(api.get_task(first["id"]), LABEL_EPIC_READY), (
-        "the premise: the site's own exact-title `continue` must MISS the variant, otherwise this "
-        "test is not exercising the disagreement it is named for"
+    assert Workflow._has_label(api.get_task(first["id"]), LABEL_EPIC_READY), (
+        "the premise since #1256: the site's `continue` must SEE the variant. Before #1256 this "
+        "line was its negation, and that miss was the disagreement this test is named for"
+    )
+    assert LABEL_EPIC_READY not in _titles(api, first["id"]), (
+        "and the premise of the premise: no lowercase twin is on the card, so a byte-exact check "
+        "would still miss — the resolution is doing the work, not the fixture"
     )
 
     wf.advance(child["id"], to="build", spec="s")
     wf.advance(child["id"], to="review", worklog="w", evidence="abc123")
 
-    assert _epic_ready(api, first["id"]) == (1, 1), "neither a 400 nor a second epic-ready label"
-    assert _epic_ready(api, second["id"]) == (1, 1), "the 400 must not abort the loop before it"
+    assert _epic_ready(api, first["id"]) == (1, 0), (
+        "the human already marked it: one label, and NO second [epic-ready] comment. This read "
+        "(1, 1) before #1256, when the `continue` missed and the site re-announced a mark that "
+        "was already there"
+    )
+    assert _epic_ready(api, second["id"]) == (1, 1), "the first parent must not abort the loop"
 
 
 def test_a_title_VARIANT_does_not_slip_past_the_guard(env):
     """The leak the FIRST draft of the guard had, found by this card's second independent pass and
     then measured on a real 2.3.0 rather than argued.
 
-    `Workflow._has_label` compares titles EXACTLY; `api.get_or_create_label` resolves case- and
-    whitespace-INSENSITIVELY, deliberately (a bot typing `Bug`/`bug ` once forked a duplicate
-    label — api.py records the date). So a guard written as `_has_label(task, title)` and a
-    resolution written as `get_or_create_label(title)` disagree about what "this label" means, and
-    the gap is the whole defect again: measured on a real container, a card carrying `Vari906071`
-    with no lowercase twin gave `_has_label(card,'vari906071') -> False`,
-    `get_or_create_label('vari906071') -> that same label`, and the PUT `400 code 8001`. The guard
-    now resolves FIRST and asks whether that LABEL ID is on the snapshot — the same question the
-    server asks — so the disagreement cannot arise.
+    `Workflow._has_label` compared titles EXACTLY when this was written; `api.get_or_create_label`
+    resolves case- and whitespace-INSENSITIVELY, deliberately (a bot typing `Bug`/`bug ` once
+    forked a duplicate label — api.py records the date). So a guard written as
+    `_has_label(task, title)` and a resolution written as `get_or_create_label(title)` disagreed
+    about what "this label" means, and the gap was the whole defect again: measured on a real
+    container, a card carrying `Vari906071` with no lowercase twin gave
+    `_has_label(card,'vari906071') -> False`, `get_or_create_label('vari906071') -> that same
+    label`, and the PUT `400 code 8001`. The guard resolves FIRST and asks whether that LABEL ID
+    is on the snapshot — the same question the server asks — so the disagreement cannot arise.
+
+    #1256 INVERTED THE PREMISE AND, WITH IT, WHAT THIS TEST MEASURES. `_has_label` resolves
+    through `api.label_key` now, so the two agree here and a title-keyed guard would skip this
+    PUT for the same reason the id-keyed one does. The assertions below are unchanged and still
+    true; what is gone is their power to tell the two guards apart — measured, keying the guard on
+    the title kills nothing in this file's own sweep selection any more. Where the two still
+    differ is a board holding TWO variant rows, which nothing in this package creates: filed as a
+    question of its own rather than answered here.
 
     This is only visible here because `FakeAPI.get_or_create_label` was made 1:1 in the same
     change; it was exact-match before, under which this sequence minted a SECOND label and stayed
@@ -275,9 +313,13 @@ def test_a_title_VARIANT_does_not_slip_past_the_guard(env):
     api, wf, t = env
     variant = api.create_label(LABEL_BLOCKED.capitalize())     # the human typed it capitalised
     api.add_label(t["id"], variant["id"])
-    assert not Workflow._has_label(api.tasks[t["id"]], LABEL_BLOCKED), (
-        "the premise of this test: the exact-title check must MISS the variant, otherwise the "
-        "test is not exercising the gap it is named for"
+    assert LABEL_BLOCKED not in _titles(api, t["id"]), (
+        "the premise: no lowercase twin is on the card, so a byte-exact title check would MISS "
+        "the variant — that is the gap this test is named for"
+    )
+    assert Workflow._has_label(api.tasks[t["id"]], LABEL_BLOCKED), (
+        "the premise since #1256: `_has_label` resolves the way the server does, so it SEES the "
+        "variant. Before #1256 this line was its negation"
     )
 
     wf._add_label(api.tasks[t["id"]], LABEL_BLOCKED)           # must be a no-op, not a 400

@@ -145,13 +145,19 @@ def test_decompose_on_a_card_a_human_already_labelled_epic(dupproj):
 def test_a_title_variant_does_not_slip_past_the_guard(dupproj):
     """The leak the guard's FIRST draft had — pinned HERE because the fake could not have shown it.
 
-    `Workflow._has_label` compares titles exactly; `api.get_or_create_label` resolves case- and
-    whitespace-insensitively on purpose. A guard written with the first and a resolution written
-    with the second disagree about what "this label" means, and the server settles the argument:
-    measured on this container before the fix, a card carrying a capitalised title with no
-    lowercase twin gave `_has_label -> False`, `get_or_create_label -> that same label`, and the
-    PUT `400 code 8001`. The title here is generated so no lowercase twin can exist — that is the
-    whole premise, and the first assertion checks it rather than assuming it.
+    `Workflow._has_label` compared titles EXACTLY when this was written; `api.get_or_create_label`
+    resolves case- and whitespace-insensitively on purpose. A guard written with the first and a
+    resolution written with the second disagree about what "this label" means, and the server
+    settles the argument: measured on this container before the fix, a card carrying a capitalised
+    title with no lowercase twin gave `_has_label -> False`, `get_or_create_label -> that same
+    label`, and the PUT `400 code 8001`. The title here is generated so no lowercase twin can
+    exist — that is the whole premise, and the assertions check it rather than assuming it.
+
+    #1256 MOVED ONE OF THOSE ASSERTIONS TO ITS NEGATION, and that is the point of this note rather
+    than a footnote to it: `_has_label` now resolves through `api.label_key`, so it SEES the
+    variant, and the premise that survives is the one about the RAW titles — no lowercase twin is
+    on the card, so a byte-exact check would still miss. What is still pinned here is the thing
+    only a real server can say: the guard makes `_add_label` a NO-OP rather than a `400 code 8001`.
     """
     boss, pid, view, buckets, wf = dupproj
     title = "vari" + uuid.uuid4().hex[:6]
@@ -161,7 +167,13 @@ def test_a_title_variant_does_not_slip_past_the_guard(dupproj):
     boss.move_task(pid, view["id"], buckets["Build"], task["id"])
 
     card = wf.api.get_task(task["id"])
-    assert not Workflow._has_label(card, title), "premise: the exact-title check must MISS it"
+    assert title not in _labels(boss, task["id"]), (
+        "premise: no lowercase twin is on the card — a byte-exact title check would MISS it"
+    )
+    assert Workflow._has_label(card, title), (
+        "premise since #1256: `_has_label` resolves the way the server does, so it SEES the "
+        "variant. Before #1256 this line was its negation, and that gap WAS the leak"
+    )
     assert wf.api.get_or_create_label(title)["id"] == variant["id"], (
         "premise: the client must RESOLVE the lowercase title to the capitalised label"
     )

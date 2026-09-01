@@ -728,9 +728,10 @@ module's own docstring.
 DEFECT ONE LEVEL UP.** Handing the epic-ready site the hollowed `parent` sub-dict instead of the
 re-fetched `full_parent` measured 0 failed, and that was read here as "There is nothing observable
 to catch — that site reaches `_add_label` only after its own `continue` has established the label
-is absent". The `continue` establishes no such thing: it asks `_has_label`, which compares titles
-EXACTLY, while the guard resolves through `get_or_create_label` and asks by label ID — the very
-disagreement `root_cause` above is built on. On a parent a human marked `Epic-ready` they differ,
+is absent". The `continue` established no such thing: it asked `_has_label`, which THEN compared
+titles EXACTLY (#1256 routed it through `api.label_key`), while the guard resolves through
+`get_or_create_label` and asks by label ID — the very disagreement `root_cause` above is built on.
+On a parent a human marked `Epic-ready` they differ,
 and the difference is observable. Constructed and driven through the real `advance` over
 `FakeAPI`: as shipped the guard FIRES, the PUT is skipped, the `[epic-ready]` comment lands and
 nothing raises; with the hollowed `parent` the guard is blind, the PUT answers `400 code 8001`,
@@ -748,7 +749,7 @@ case that distinguishes, never that no such case exists — and prose that upgra
 the second forecloses the pin nobody then writes.**
 
 **THE GUARD'S FIRST DRAFT LEAKED, AND THE SECOND INDEPENDENT PASS IS WHAT CAUGHT IT.** It read
-`if self._has_label(task, title): return`, which compares titles EXACTLY, while
+`if self._has_label(task, title): return`, which THEN compared titles EXACTLY, while
 `api.get_or_create_label` resolves case- and whitespace-INSENSITIVELY on purpose (a bot typing
 `Bug`/`bug ` once forked a duplicate label; api.py records the date). The two therefore disagree
 about what "this label" means, and the gap is the whole defect again. Constructed on the real
@@ -762,3 +763,95 @@ was EXACT-match and is now 1:1 with the client, without which no unit test could
 the new pin RED, because such a fake mints a second label where the server refuses). And the
 sentence in `_add_label` claiming the STATE was closed was narrowed, because it was not: what was
 closed was the exact-title state.
+
+## The READS disagreed with the WRITES about what a label is — thirteen more sites (#1256)
+
+**The defect in one line: `api.get_or_create_label` has always resolved a label title case- and
+whitespace-INSENSITIVELY, on purpose, while every gate in `workflow` asked `lb["title"] == title`,
+EXACT — so a label a human typed capitalised in the web UI EXISTED as far as every WRITE in this
+package was concerned and DID NOT EXIST as far as every GATE reading it was concerned.** This is
+the section above's own root cause, one layer wider: #1216 closed exactly one instance (the guard
+inside `_add_label`, re-keyed to the resolved label ID) and its reviewer scoped the reads out.
+
+**Reproduced before anything changed, on a live `Workflow` over `FakeAPI` with the agent tools,
+one variable per pair — the SPELLING — each variant against its lowercase control.**
+`advance(to='review')` with NO `root_cause`: `bug` REFUSED (the #718 gate); `Bug`, `BUG` and
+`bug ` all ADVANCED, and the payload said `review_kind: 'change'` in the same breath. So a bug fix
+reached its reviewer with no cause, which is precisely the state #718 exists to make impossible,
+and it failed OPEN — nothing said so. `next_task` over a free Queue card: `blocked` withheld;
+`Blocked`, `BLOCKED` and `blocked ` OFFERED, i.e. the way a human PARKS a card did not park it.
+
+**THE CARD GUESSED THE `epic` FAMILY WAS THE MILD ONE AND THAT WAS THE ONE THING WORTH
+RE-MEASURING.** Its scope note reasons that an epic container is created by `decompose`,
+which writes the label itself, so a human variant there is far less likely than on `bug`/`blocked`,
+which humans do type by hand. That has the causation backwards.
+`decompose` writes through `_add_label` -> `get_or_create_label('epic')`, which RESOLVES to
+whatever `Epic` row the board already holds, so the container the PACKAGE creates carries the
+HUMAN's spelling. Driven end to end with a pre-seeded `Epic` and nobody typing anything: the
+container comes out labelled `Epic`, `claim(container)` is then ACCEPTED (control, no pre-seed:
+REFUSED, "is an epic CONTAINER") and `next_task` OFFERS it (control: False). The write path
+manufactures the disagreement; no site was safe by construction.
+
+**A FOURTEENTH COMPARISON THE CARD DID NOT NAME, measured rather than added by symmetry.**
+`_remove_label` is the same `x.get("title") == title`, two helpers along from `_has_label`
+(`_add_label` and its docstring sit between them). A card a human
+hand-dragged Review -> Build still wearing `Reviewed` kept that badge through `advance(to='review')`
+(control `reviewed`: cleared) — a stale APPROVE riding into a fresh Review, which is exactly what
+`_clear_verdict_labels`' own docstring forbids. `transfer_task`'s cleanup of
+`blocked`/`reviewed`/`review-failed`/`epic-ready` reads through the same comparison.
+
+**THE CENSUS, verified rather than inherited: 13 `_has_label` CALL EXPRESSIONS on 12 SOURCE LINES**
+(`advance`'s `root_cause` line carries two), in five methods — `next_task` 5, `claim` 1,
+`_mark_epic_if_children_complete` 2, `advance` 4, `transfer_task` 1 — plus `_remove_label`'s own.
+The card's "twelve more read sites" is right on the LINES reading. Two things in its SCOPE
+paragraph are not: it names "the `epic` checks in `decompose`/`advance`/`return_task`", and
+`decompose` and `return_task` contain no `_has_label` at all — they only WRITE labels — and it
+omits `_remove_label`.
+
+**THE FIX IS A SHARED KEY, NOT A SHARED ROUTE, and the difference is the whole design.** A new
+module-level `api.label_key(title) -> (title or "").strip().casefold()` states the rule once;
+`get_or_create_label`, `_has_label` and `_remove_label` all read with it. The obvious alternative —
+give the reads `_add_label`'s shape, resolve through `get_or_create_label` and compare label IDs —
+was rejected for a reason that is not cost: **`get_or_create_label` CREATES the label when absent,
+so a READ gate would MINT labels**, and `vikunja-mcp claimable` is READ-ONLY BY CONTRACT while the
+hgdev-acp hub polls it per loop tick through the real `next_task`. That is a per-poll tracker
+mutation. (The cost is real too — a paged `labels()` read per call, on `next_task`'s hot path, per
+card.) Casefolding INLINE in `_has_label` was rejected as the card's own worry, "a SECOND spelling
+of what this label is, and this repo has just paid for having two", and because it leaves
+`_remove_label` leaking beside it; #1216's post-mortem is literally that a per-site guard
+"would have reproduced it one round later". BUCKET titles (`bucket["title"] == "Review"`) stay
+EXACT and are untouched — those are canonical names this package's own `setup` writes.
+
+**WHAT IT COST #1216's TWO VARIANT PINS, said here because the alternative is a reader believing
+they still measure what they were written to measure.** Both asserted `not _has_label(...)` as
+their PREMISE, and #1256 inverts it, so both had to be re-premised. The epic-ready one changed
+BEHAVIOUR, for the better: on a parent a human marked `Epic-ready` the site's `continue` now SEES
+the mark and the site never reaches `_add_label` at all, so the parent is left as the human left
+it — measured `(1 label, 0 comments)` where it used to be `(1, 1)`, the second being a
+re-announcement of a mark already there. That is what the `continue`'s own comment always claimed
+("already marked — idempotent") and it was false for every spelling but one. **And it cost
+`_add_label`'s ID-keyed guard its pin: keying that guard on the title instead now kills NOTHING —
+0 failed against a clean control of 0 failed / 0 errors / 1399 collected over the WHOLE of
+`tests/unit`, and 0 again on the narrower sweep selection, where #1216 had that same row at 2.**
+The two agree on every state THIS package can
+create; the only divergent one is a board holding two variant rows (`blocked` AND `Blocked`), which
+only an outside actor mints, and MEASURED there the ID guard's answer is not the tidy one — it
+sends the PUT and the card comes out carrying BOTH (`['Blocked', 'blocked']`) where a title guard
+would have left the one. Neither raises. The guard is kept AS IS anyway, because #1216 measured it
+against a real 2.3.0 and trading a measured decision for an unmeasured one is the wrong direction;
+the question is FILED, not answered — VMCP-316 (1456). The neighbouring residual is VMCP-317
+(1457): `_remove_label` takes only the FIRST matching row, so a card wearing BOTH `reviewed` and
+`Reviewed` keeps one — measured `['reviewed', 'Reviewed']` before `advance`, `['Reviewed']` after.
+
+**THE DIRECTION THAT STRANDS WORK GETS ITS OWN PIN.** Normalising makes a gate FIRE where it did
+not, and for `blocked` and `epic` that means cards DISAPPEARING from the offering — the fix, and
+also the direction in which work goes missing without anyone noticing. So
+`test_a_variant_blocked_label_keeps_the_card_out_of_the_offering` asserts the withholding AND its
+control (the same board with the label removed hands the card back), because an empty offering
+proves nothing on its own: a stand with no claimable work looks identical.
+
+**Where the pins live:** `tests/unit/test_workflow_label_variants.py` (the consequences, the
+invariant itself, and the anti-drift source pin that `label_key` is the only spelling of the rule
+in `api.py`/`workflow.py` — read with `ast`, because the first draft grepped the text and went red
+on its own subject matter: `label_key`'s docstring says `.strip().casefold()` out loud). The sweep
+table is in that module's own docstring.

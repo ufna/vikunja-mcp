@@ -344,6 +344,40 @@ def canonical_base_url(base_url: str) -> str:
     return base
 
 
+def label_key(title: str) -> str:
+    """The ONE statement of "what the server thinks this label title is" — `.strip().casefold()`.
+
+    Vikunja labels are matched by TITLE and the server is generous about spelling: this package
+    resolves `Bug`, `bug ` and `BUG` to the one label `bug`, on purpose, because a bot typing a
+    variant once forked a colorless duplicate beside the canonical label (real incident
+    2026-07-08, recorded in `get_or_create_label` below). That rule used to live ONLY in
+    `get_or_create_label`, i.e. only on the WRITE path, while every gate in `workflow` asked
+    `lb["title"] == title` — EXACT. The two therefore disagreed about what "this label" means,
+    and #1216 closed exactly one instance of that disagreement (the guard inside
+    `Workflow._add_label`, re-keyed to the resolved label ID). #1256 closed the class: BOTH
+    title comparisons in `workflow` — `_has_label`, read at thirteen CALL SITES (twelve source
+    lines; two of those thirteen compute `review_kind` rather than gate anything), and
+    `_remove_label` — now come through here, and `tests/unit/fakes.py` borrows it rather than
+    restating it, which it did until #1256's own second pass found the copy.
+
+    IT IS A COMPARISON KEY, NOT A TITLE. It never decides what gets WRITTEN to the board — a
+    label is created with the title its caller typed, and the board keeps whatever spelling a
+    human chose. What this normalises is only the question "is THAT label THIS one?".
+
+    Why `casefold()` and not `lower()`: `lower()` is a per-character map and misses the pairs
+    Unicode folds specially — checked, `"STRASSE".lower() == "straße".lower()` is False while
+    their casefolds are equal. Neither is a claim about what the SERVER folds, and the evidence
+    here does not reach that far: what the 2026-07-08 incident and
+    `tests/integration/test_duplicate_label.py` show is that the server does not fold ON CREATE —
+    a variant becomes its own row — and nothing here measures a server-side title comparison at
+    all, since attaching a label is by `label_id`. This is the CLIENT deciding which of those
+    rows it will treat as one, and it should err towards treating MORE of them as one: a false
+    split re-forks the duplicate the rule exists to prevent, while a false merge would need two
+    labels a human means differently and spells the same modulo case and surrounding space,
+    which none of this package's six are."""
+    return (title or "").strip().casefold()
+
+
 class VikunjaAPI:
     def __init__(
         self, base_url: str, token: str, client: httpx.Client | None = None,
@@ -1181,8 +1215,11 @@ class VikunjaAPI:
         # insensitively to REUSE an existing label instead of minting a divergent
         # duplicate. Without this an agent typing "Bug"/"bug " forks a second, colorless
         # label beside the canonical one (real incident 2026-07-08: a bot did exactly that).
-        want = title.strip().casefold()
+        # `label_key` (module level) is the SINGLE statement of this resolution rule — the same
+        # one `Workflow._has_label`/`_remove_label` read with, since #1256. Inlining it here
+        # again is the "second spelling" that made those gates disagree with this method.
+        want = label_key(title)
         for label in self.labels():
-            if (label.get("title") or "").strip().casefold() == want:
+            if label_key(label.get("title")) == want:
                 return label
         return self.create_label(title)

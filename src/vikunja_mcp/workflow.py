@@ -15,7 +15,7 @@ from typing import Any
 
 import httpx
 
-from .api import VikunjaError
+from .api import VikunjaError, label_key
 from .cardtext import card_text
 from .config import DEFAULT_LANGUAGE, DEFAULT_WIP_LIMIT
 from .formatting import html_to_text
@@ -986,7 +986,49 @@ class Workflow:
 
     @staticmethod
     def _has_label(task: dict, title: str) -> bool:
-        return any(lb.get("title") == title for lb in task.get("labels") or [])
+        """Does the board say this card carries THIS label — resolved the way the SERVER resolves
+        it, through `api.label_key` (#1256). It used to be `lb["title"] == title`, EXACT, and that
+        is the whole of #1256: `get_or_create_label` has always matched case- and
+        whitespace-insensitively, so a label a human typed capitalised in the web UI EXISTS as far
+        as every write in this package is concerned and DOES NOT EXIST as far as every gate reading
+        it is concerned. #1216 closed one instance of that (the guard inside `_add_label`, re-keyed
+        to the resolved label ID); this is the same disagreement at the thirteen call sites that
+        read.
+
+        MEASURED on a live `Workflow` over `FakeAPI` with agent tools only, one variable — the
+        SPELLING — and each pair against its lowercase control. `Bug`/`BUG`/`bug ` on a card:
+        `advance(to='review')` with NO `root_cause` SUCCEEDED, `review_kind='change'` (control
+        `bug`: REFUSED, the #718 gate) — a bug fix reaching its reviewer with no cause, which is
+        precisely the state #718 exists to make impossible. `Blocked`/`BLOCKED`/`blocked ` on a
+        free Queue card: `next_task` OFFERED it (control `blocked`: withheld).
+
+        THE `epic` SITES ARE NOT THE MILD ONES, and the card that filed this guessed the
+        opposite — its scope note reasons that an epic container is created by `decompose`, which
+        writes the label itself, so a human variant there is far less likely than on
+        `bug`/`blocked`, which humans do type by hand. `decompose` writing it is the DEFECT
+        rather than the protection: it writes through `_add_label` ->
+        `get_or_create_label('epic')`, which RESOLVES to whatever `Epic` the board already holds.
+        Measured end to end — board pre-seeded with an `Epic` label, nobody typing anything: the
+        container `decompose` just created carries title `Epic`, after which `claim(container)` is
+        ACCEPTED (control: REFUSED, "is an epic CONTAINER") and `next_task` OFFERS it (control:
+        False). So the package's own write path manufactures the disagreement.
+
+        WHY THIS AND NOT THE RESOLVED-ID SHAPE `_add_label` USES. Asking `get_or_create_label`
+        here would be the same question by the same route — and it CREATES the label when absent,
+        so a READ gate would MINT labels on a board that has none. `vikunja-mcp claimable` is
+        READ-ONLY BY CONTRACT and the hgdev-acp hub polls it per loop tick through this very
+        method, so that is a per-poll tracker mutation, not a cost question (it is also a paged
+        `labels()` read per call, on `next_task`'s hot path — MEASURED at up to TWO per card, not
+        the five its call SITES suggest: the assignee conjuncts short-circuit, so a Queue card
+        costs 1 assigned or 2 free, never both branches). Sharing the KEY
+        instead of the ROUTE buys the agreement at zero requests, and `label_key` being the single
+        statement of the rule is what keeps this from becoming the second spelling the card warned
+        about.
+
+        NOT applied to BUCKET titles (`bucket["title"] == "Review"`): those are canonical names
+        this package's own `setup` writes, not free text a human types."""
+        want = label_key(title)
+        return any(label_key(lb.get("title")) == want for lb in task.get("labels") or [])
 
     def _add_label(self, task: dict, title: str) -> None:
         """Put a label on a card — IDEMPOTENTLY, and this is the ONLY label write path in the
@@ -1024,19 +1066,43 @@ class Workflow:
         that is easier to re-inline than to call. Skipping `get_or_create_label` on the no-op path
         is a side benefit, not the point: that call is a PAGED list read of every label.
 
-        THE GUARD ASKS BY ID, NOT BY TITLE, AND THE FIRST DRAFT OF IT DID NOT — this is the one
-        place a `_has_label(task, title)` check would still have leaked, and it was caught by this
-        card's second independent pass and then MEASURED rather than reasoned. `_has_label`
-        compares titles EXACTLY (`lb["title"] == title`) while `api.get_or_create_label` resolves
+        THE GUARD ASKS BY ID, NOT BY TITLE, AND THE FIRST DRAFT OF IT DID NOT — this was the one
+        place a `_has_label(task, title)` check would still have leaked, and it was caught by
+        #1216's second independent pass and then MEASURED rather than reasoned. `_has_label` THEN
+        compared titles EXACTLY (`lb["title"] == title`) while `api.get_or_create_label` resolves
         case- and whitespace-INSENSITIVELY, on purpose (api.py: a bot typing `Bug`/`bug ` once
-        forked a duplicate label, real incident 2026-07-08). So the two disagree about what "this
-        label" means, and on a real 2.3.0 that gap is the whole defect again: a card carrying
+        forked a duplicate label, real incident 2026-07-08). So the two disagreed about what "this
+        label" means, and on a real 2.3.0 that gap was the whole defect again: a card carrying
         `Vari906071`, no lowercase twin anywhere, `_has_label(card,'vari906071')` False,
         `get_or_create_label('vari906071')` returning that very label — and the PUT answering
         `400 code 8001`. Resolving FIRST and then asking whether THAT LABEL ID is on the snapshot
         is the same question the server asks, so the disagreement cannot arise. The cost is that
         the paged `labels()` read now happens on the no-op path too; skipping it was never the
         point.
+
+        SINCE #1256 `_has_label` RESOLVES THROUGH `api.label_key` TOO, AND THAT COST THIS GUARD
+        ITS PIN — said here because the alternative is a reader believing it still has one.
+        The two now agree on every state THIS package can create (it mints one label row per
+        normalised title), so keying the guard on the title instead kills NOTHING: measured on
+        the WHOLE of `tests/unit`, 0 failed against a clean control of 0 failed / 0 errors /
+        1399 collected, and 0 again on #1256's narrower sweep selection, where #1216 had that
+        same row at 2. The only state
+        that still tells them apart is a board holding TWO rows with the same NORMALISED title —
+        `blocked` and `Blocked`, or two rows both spelled `blocked` — with the card carrying the
+        one `get_or_create_label` does not return. Do not read that as "only an outside actor can
+        make it": `get_or_create_label` is read-`labels()`-then-`create_label`, so at
+        `wip_limit > 1` two agents adding the same absent label both miss and both create; and
+        `GET /labels` only surfaces labels used on a task the caller can READ (this module says so
+        above), so an invisible one is minted again. MEASURED, and the result is not the tidy
+        one: the ID guard sees a
+        different label id, sends the PUT, and the card comes out carrying BOTH rows
+        (`['Blocked', 'blocked']`); a title guard would have left the one. Neither raises. So this
+        is no longer "the ID guard is right and a title guard leaks" — the 400 it was built for
+        cannot arise either way, and on the one divergent state its answer is arguably the worse
+        one. It is kept AS IS regardless, because #1216 measured it against a real 2.3.0 and
+        changing it on a fake would be trading a measured decision for an unmeasured one. The
+        question is filed rather than answered here — VMCP-316 (1456), which also carries the
+        one probe nobody has run: does real `PUT /labels` accept a title that already exists?
 
         RESIDUAL, and what is closed is the STATE, not the RACE: a label added by somebody else
         between the board read and this PUT still 400s. That residual is written up in
@@ -1064,7 +1130,22 @@ class Workflow:
         # снимаем только реально висящую на снапшоте метку — иначе DELETE по несуществующей
         # связи 403-ит (`Forbidden`), НЕ 404: измерено на живой 2.3.0 по ходу #1211, где эта
         # строчка ещё утверждала 404. Ветка от этого не меняется — DELETE просто не уходит.
-        lb = next((x for x in task.get("labels") or [] if x.get("title") == title), None)
+        # ...и ищем её так же, как ищет СЕРВЕР — через `api.label_key` (#1256). До этого здесь
+        # стояло `x.get("title") == title`, точное сравнение — тот же разлад, что и в `_has_label`
+        # строкой выше, и он ИЗМЕРЕН, а не выведен по симметрии: карточка, которую человек руками
+        # вытащил из Review в Build с меткой `Reviewed`, проходила `advance(to='review')` и
+        # оставалась с этой меткой (контроль `reviewed` — снимается), то есть протухший APPROVE
+        # уезжал в свежий Review. Ровно это докстринг `_clear_verdict_labels` ниже и запрещает.
+        # Снимаем ПЕРВУЮ подходящую, как и раньше — и вот ОСТАТОК, который это НЕ закрывает:
+        # если на карточке висят ОБЕ строки (`reviewed` и `Reviewed`), уйдёт одна, вторая
+        # останется. Измерено: до advance `['reviewed', 'Reviewed']`, после — `['Reviewed']`.
+        # Сам пакет такого состояния не создаёт (`get_or_create_label` резолвит обе в одну), но
+        # рука человека — да, и тогда протухший бейдж всё ещё доезжает. Цикл вместо `next` это
+        # чинит; не сделано здесь, потому что это смена поведения за пределами слайса #1256, и
+        # заведено отдельной карточкой — VMCP-317 (1457); там же про 403 на DELETE по
+        # несуществующей связи, из-за которого цикл нельзя писать наивно.
+        want = label_key(title)
+        lb = next((x for x in task.get("labels") or [] if label_key(x.get("title")) == want), None)
         if lb:
             self.api.remove_label(task["id"], lb["id"])
 
