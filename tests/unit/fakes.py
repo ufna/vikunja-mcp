@@ -577,6 +577,14 @@ class FakeAPI:
         return [dict(lb) for lb in self._labels]
 
     def create_label(self, title):
+        # appends UNCONDITIONALLY — a title that already exists gets a SECOND row rather than a
+        # refusal or the existing row back. 1:1, and MEASURED rather than assumed since #1456:
+        # real 2.3.0 answers `PUT /labels` with a duplicate title by minting another row, both
+        # byte-identically and in a case variant. That is what makes `get_or_create_label`'s
+        # read-then-create race FORK a row instead of 400ing, i.e. what makes a two-row board a
+        # state this package reaches with nobody outside it. Pinned on the server side by
+        # `tests/integration/test_duplicate_label.py::
+        # test_a_duplicate_label_TITLE_is_accepted_by_the_server`.
         lb = {"id": next(self._ids), "title": title}
         self._labels.append(lb)
         return dict(lb)
@@ -594,6 +602,13 @@ class FakeAPI:
         # reachable duplicate-add routes and the unit suite could not see a single one. The BODY is
         # mirrored verbatim rather than paraphrased because it is the only thing distinguishing
         # this 400 from any other, and a reader who wants to sniff it will read it here.
+        # ON THE `label_id` ALONE, and that boundary is 1:1 and MEASURED since #1456: a SECOND
+        # row whose title normalises to the same key is ACCEPTED onto a card already wearing the
+        # first, and the card comes out wearing BOTH — probed on a real 2.3.0 in all three
+        # arrangements. That is the outcome `_add_label`'s resolved-ID keying produced on such a
+        # board, so it is a state the server allows rather than a generosity of this fake, and it
+        # is what let #1456 decide the guard on a server answer. Pinned by
+        # `test_a_SECOND_row_of_one_key_is_accepted_onto_a_card_already_wearing_the_first`.
         if any(x["id"] == label_id for x in task["labels"]):
             raise VikunjaError(
                 400, '{"code":8001,"message":"This label already exists on the task."}'
@@ -616,7 +631,9 @@ class FakeAPI:
         # the guard and the PUT was a duplicate 400 on a real server; under an exact-match fake
         # the same sequence minted a SECOND label and stayed green, which is the same "more
         # generous than the server" mode `_read_task`'s docstring is about. Measured on real
-        # 2.3.0 both before and after the guard was re-keyed to the resolved label ID.
+        # 2.3.0 both before and after the guard was re-keyed to the resolved label ID. (That
+        # keying is history since #1456, which measured the server on the states the two forms
+        # disagree about and returned the guard to `_has_label`; this method is untouched by it.)
         #
         # IT CALLS `api.label_key` RATHER THAN RESTATING IT, since #1256, and that is a
         # deliberate exception to "the fake is an independent oracle". Until #1256 this method

@@ -6,7 +6,8 @@ and whitespace-INSENSITIVELY (on purpose — a bot typing `Bug`/`bug ` once fork
 label, real incident 2026-07-08), while `Workflow._has_label` asked `lb["title"] == title`,
 EXACT. So a label a human typed capitalised in the web UI EXISTED as far as every WRITE in this
 package was concerned and DID NOT EXIST as far as every GATE reading it was concerned. #1216
-closed exactly one instance (the guard inside `_add_label`, re-keyed to the resolved label ID);
+closed exactly one instance (the guard inside `_add_label`, re-keyed to the resolved label ID —
+#1456 has since returned it to `_has_label`, which is what closing the class here made possible);
 this module is the class — thirteen `_has_label` call sites plus `_remove_label`'s own
 comparison, all now routed through the single `api.label_key`. (`_remove_label` is not adjacent to
 `_has_label`, whatever the pairing suggests: `_add_label` and its docstring sit between them.)
@@ -426,7 +427,14 @@ def test_the_sweep_is_recorded():
         load-bearing: a byte-exact `lb.get("title") == title` guard is a DIFFERENT mutation since
         this card, and it still kills 1 (the standalone variant pin) against a control of 0 failed
         / 0 errors / 131 collected on #1216's three-file selection. `_add_label`'s docstring
-        carries both numbers and says why the guard is kept anyway
+        carries both numbers.
+        **THIS ROW IS HISTORY SINCE #1456, AND ITS FIGURES ARE NOT RE-MEASURED HERE.** That card
+        ran the probe this one left open — real 2.3.0 accepts a duplicate label TITLE, and accepts
+        a second row of one key onto a card already wearing the first — and made `_has_label` the
+        SHIPPED guard, so this row no longer names a mutation away from shipped code; it names the
+        shipped code. The 0 above is exactly what it says, on the tree it was run on, and it is
+        also the FIGURE #1456 had to answer for. Its own sweep, its own control, is in
+        `test_workflow_duplicate_label.py`'s module docstring
       * hand the epic-ready site the hollowed `parent` sub-dict — #1216's other row, also
         re-measured, and NAME THE FORM or the row is unreproducible from its own words, because
         the two readings answer differently. THIS row's own mutation — the argument to

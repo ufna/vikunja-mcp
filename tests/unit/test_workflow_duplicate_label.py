@@ -110,6 +110,43 @@ remove-the-fake's-400-and-leave-the-guard at 1.
     hollowed `parent` 0 failed / 0 errors / 130 collected. So the old 0 reproduces exactly, the pin
     is the only thing in the selection that sees the swap, and 130 — not the 129 two of these
     figures used to carry — is what the control measured before it
+
+#1456 MOVED THE BASELINE THE TABLE ABOVE MUTATES AGAINST, and that has to be said before any of
+its rows is read. Every row there names a mutation AWAY FROM THE SHIPPED GUARD, and the shipped
+guard was the resolved-ID keying at `d80c174`; it is `if self._has_label(task, title): return`
+now. So the row "key the guard on the exact TITLE instead of the resolved label ID" no longer
+describes a mutation this tree can be given — neither of its two readings is the shipped form any
+more — and the rows are kept, unrewritten, as the record of THAT tree, which is what the anchor is
+for. #1456's own sweep is below and it is the one that describes this file.
+
+THE #1456 SWEEP, five rounds against ONE control, all against the FINAL code, in a fresh clone
+with `__pycache__` deleted, PYTHONDONTWRITEBYTECODE=1 and `vikunja_mcp.__file__` printed each
+round, rounds read by COUNTING lines beginning `FAILED ` with `ERROR ` counted separately, `-q`
+dropped so `collected` prints. The selection is WIDER than the table above's — it is #1256's:
+this file + `test_workflow_epic_marker.py` + `test_workflow_gates.py` +
+`test_workflow_label_variants.py` + `test_api_labels.py` — because the figure this card had to
+beat was measured on that one. Control (unmutated): 0 failed / 0 errors / 156 collected.
+  * restore the resolved-ID keying (the #1216 shipped form) -> 2 failed: both pins added here,
+    `..._SKIPS_rather_than_minting_a_second_row_on_a_two_row_board` and
+    `test_the_no_op_path_does_not_read_the_label_list_at_all`. THIS IS THE ROW THE CARD EXISTS
+    FOR: the same mutation, run the other way round, is what #1256 measured at 0 failed and
+    reported as "the guard is pinned by nothing"
+  * key it on a BYTE-EXACT title -> 2 failed: the variant pin, still, plus the two-row pin. #1256
+    measured this at 1 on the narrower three-file selection; the second failure is the new pin,
+    not a change of behaviour
+  * delete the guard entirely -> 7 failed: the four route tests, the variant pin and both new pins
+  * THE ISOLATING PAIR, and it is what makes the first row mean something. Restore the ID keying
+    with `..._SKIPS_rather_than_minting_a_second_row_on_a_two_row_board` DELETED -> 1 failed /
+    0 errors / 155 collected, only the no-op pin. Restore it with BOTH new pins deleted ->
+    **0 failed / 0 errors / 154 collected** — #1256's figure on this selection reproduced exactly,
+    on this tree, with nothing else changed. So the two pins added here are the ONLY things in the
+    selection that see the swap, and before them the selection genuinely held no case that
+    distinguishes the two guards
+  * AND THE PAIR'S OTHER HALF, added because without it a reader following CLAUDE.md's
+    "cross-check `collected` against the control's" meets a 154 with only a 156 control beside it:
+    UNMUTATED with those same two pins deleted -> 0 failed / 0 errors / 154 collected. Same
+    selection size as the row above, so the two are comparable and the 0 there is the mutation
+    being invisible rather than the selection having shrunk out from under it
 """
 import pytest
 
@@ -245,9 +282,12 @@ def test_epic_ready_marker_still_fires_through_the_resigned_helper(env):
     for the HOLLOWED `related_tasks` sub-dict `parent` leaves THIS construction green, and that
     round was read as "there is no observable difference to catch", on the grounds that the site
     reaches `_add_label` only after its own `continue` has established the label is absent. THE
-    `continue` DOES NOT ESTABLISH THAT: it asks `_has_label`, which compares titles EXACTLY, while
-    the guard resolves through `get_or_create_label` and asks by label ID — this card's own
-    `root_cause`, surviving one level up in the file that fixed it. An observable case therefore
+    `continue` DOES NOT ESTABLISH THAT: it asked `_has_label`, which THEN compared titles EXACTLY,
+    while the guard resolved through `get_or_create_label` and asked by label ID — #1216's own
+    `root_cause`, surviving one level up in the file that fixed it. (Both halves are history now:
+    #1256 routed `_has_label` through `api.label_key` and #1456 returned the guard to it, so the
+    two ask one question. The paragraph is left in the past tense it always needed rather than
+    rewritten, because what it explains is why a round measured 0.) An observable case therefore
     exists, and it is pinned directly below. What is true is the narrower claim, and only of THIS
     construction: the parent here carries no epic-ready label under any spelling, so the guard is
     genuinely a no-op and a hollowed snapshot degrades to exactly the pre-#1216 behaviour.
@@ -333,18 +373,26 @@ def test_a_title_VARIANT_does_not_slip_past_the_guard(env):
     label`, and the PUT `400 code 8001`. The guard resolves FIRST and asks whether that LABEL ID
     is on the snapshot — the same question the server asks — so the disagreement cannot arise.
 
-    #1256 INVERTED THE PREMISE AND, WITH IT, WHAT THIS TEST MEASURES. `_has_label` resolves
-    through `api.label_key` now, so the two agree here and a title-keyed guard would skip this
-    PUT for the same reason the id-keyed one does. The assertions below are unchanged and still
-    true; what is gone is their power to tell the two guards apart — measured, keying the guard on
-    the title kills nothing in this file's own sweep selection any more. Where the two still
-    differ is a board holding TWO variant rows — and this sentence used to add that nothing in
-    this package creates that state, which is WRONG and is corrected rather than kept.
+    #1256 INVERTED THE PREMISE AND, WITH IT, WHAT THIS TEST MEASURES — AND #1456 THEN MOVED THE
+    BASELINE IT MUTATES AGAINST. `_has_label` resolves through `api.label_key` since #1256, so the
+    two forms agree here and a `_has_label`-keyed guard skips this PUT for the same reason the
+    id-keyed one did; measured then, keying the guard on the title killed nothing in this file's
+    own sweep selection any more, and #1456 acted on that by making `_has_label` the SHIPPED form.
+    So what this test still pins, and pins alone, is the THIRD reading of "title guard": a
+    BYTE-EXACT `lb.get("title") == title`, which misses the variant here and sends a PUT the fake
+    answers `400 code 8001` — #1216's leak exactly. The assertions below are unchanged and still
+    true. Where the two SHIPPED-candidate forms differ is a board holding TWO rows of one
+    normalised title, and that is now pinned next door in
+    `test_the_guard_SKIPS_rather_than_minting_a_second_row_on_a_two_row_board`, decided on a real
+    2.3.0 rather than on this fake. This paragraph used to add that nothing in this package
+    creates such a board, which is WRONG and is corrected rather than kept:
     `api.get_or_create_label` is read-`labels()`-then-`create_label` with nothing atomic between
     the two, so at `wip_limit > 1` two agents adding the same absent label both miss and both
-    create; and `GET /labels` surfaces only labels used on a task the caller can READ, so a row
-    invisible to one caller gets minted again. `_add_label`'s docstring carries the full reading;
-    the state is filed as a question of its own rather than answered here.
+    create — and #1456 measured on a real container that the server ACCEPTS the duplicate title,
+    so that race forks a row rather than 400ing. (`GET /labels` surfacing only labels used on a
+    task the caller can READ is a second route, and it was UNPINNED until #1456 measured the
+    exclusion against a real container, with a control, in
+    `tests/integration/test_duplicate_label.py`.) `_add_label`'s docstring carries the full reading.
 
     This is only visible here because `FakeAPI.get_or_create_label` was made 1:1 in the same
     change; it was exact-match before, under which this sequence minted a SECOND label and stayed
@@ -367,6 +415,116 @@ def test_a_title_VARIANT_does_not_slip_past_the_guard(env):
         "the guard must resolve the title the way the server does and then skip: neither a 400 "
         "nor a second label on the card"
     )
+
+
+def _two_row_board(first, second, carried_index):
+    """A FRESH board holding exactly TWO label rows that normalise to ONE key, with the card
+    carrying `rows[carried_index]`.
+
+    Fresh per arrangement on purpose: the claim being pinned is about a board of TWO rows, and
+    reusing one `FakeAPI` across arrangements would leave four and then six rows on it, so the
+    later arrangements would no longer be the boards the docstring names.
+
+    Built through `api.create_label`/`api.add_label` rather than by poking `tasks[...]["labels"]`,
+    so the fixture is subject to the same refusals the code under test is — and so the board it
+    builds is one the SERVER would have built. That is not a style point here: #1456 measured on a
+    real 2.3.0 that `PUT /labels` accepts a title that already EXISTS (two rows, one spelling) and
+    that `PUT /tasks/{id}/labels` accepts the SECOND such row on a card already wearing the first.
+    Both are pinned in `tests/integration/test_duplicate_label.py`."""
+    api = FakeAPI(buckets=STAGES)
+    wf = Workflow(api, project_id=3)
+    rows = [api.create_label(first), api.create_label(second)]
+    task = api.add_task("two-row carrier", "Design", assignee=api.me_user)
+    api.add_label(task["id"], rows[carried_index]["id"])
+    return api, wf, task, rows[carried_index]
+
+
+def test_the_guard_SKIPS_rather_than_minting_a_second_row_on_a_two_row_board():
+    """THE PIN #1456 EXISTS FOR: on a board holding two rows of one normalised title, the guard
+    skips and the card keeps ONE row. Restore the resolved-ID keying and this goes RED.
+
+    WHY IT HAD TO BE WRITTEN. #1216 keyed this guard on the resolved label ID because
+    `_has_label` then compared titles EXACTLY and leaked a `400 code 8001`; #1256 routed
+    `_has_label` through `api.label_key` and closed that at the source, which left the ID keying
+    pinned by nothing — #1256 measured that mutation at 0 failed across the whole of `tests/unit`,
+    and #1456 reproduced it on this file's own sweep selection (0 failed / 0 errors / 154 collected
+    with this pin and its neighbour deleted, against a control of 0 failed / 0 errors / 156
+    collected). This test is the pin that decision needed, whichever way it went.
+
+    WHAT DECIDED WHICH WAY, and it is a SERVER answer rather than a fake one, because deciding it
+    on the fake would have traded #1216's measured choice for an unmeasured one. Probed on a
+    throwaway real 2.3.0 (#1456): a duplicate title is ACCEPTED by `PUT /labels`, and the second
+    row is ACCEPTED by `PUT /tasks/{id}/labels` on a card already carrying the first — so these
+    boards, and the two-rows-on-one-card outcome the ID keying produced on them, are states the
+    server permits rather than artefacts of a too-generous fake. On all three arrangements the ID
+    keying was the DUPLICATING form: it resolved to the row the card does not carry, saw a
+    different id, sent the PUT, and left the card wearing both — the proliferation
+    `get_or_create_label` exists to prevent, one level down, on the TASK rather than on the label
+    list, and the feedstock for VMCP-317 (1457), where `_remove_label` takes only the FIRST
+    matching row and a card wearing both keeps a stale badge.
+
+    THE FOUR ARRANGEMENTS ARE THE FOUR THAT DIVERGE, out of EIGHT — and the count is worth the
+    sentence it costs, because the first draft of this test had THREE, inherited from #1256's
+    six-row table along with its SPACE. Over two spellings there are four ORDERED two-row boards
+    (`[l,l] [l,u] [u,l] [u,u]`) and two carriers each; that table omits `[Blocked, Blocked]`, and
+    so did this loop. #1456's second independent pass drove all eight and found it — measured
+    there and re-derived here, 4 of 8 diverge and the ID form duplicates in all four. The rule is
+    simpler than the census and is what the loop actually encodes: `get_or_create_label` returns
+    the FIRST matching row, so the two forms differ exactly when the card wears the SECOND. Hence
+    every case below carries `rows[1]`; carrying `rows[0]` is a no-op under either form, in all
+    four boards, and there is nothing there to pin.
+
+    ONE CONSEQUENCE WORTH NAMING, because it is a residual this change NARROWS rather than closes.
+    VMCP-317 (1457) says of its own two-row state that "THIS PACKAGE DOES NOT CREATE THAT STATE ...
+    `_add_label` can only ever attach one" — which was FALSE while the guard was ID-keyed, and is
+    true with this one. What survives is the snapshot race in `_add_label`'s RESIDUAL: two agents
+    whose snapshots both predate the other's write can still land two rows on one card.
+
+    THE SAME-SPELLING BOARD IS THE ONE THIS PACKAGE REACHES ALONE, and it is here for that reason
+    rather than for symmetry: `get_or_create_label` is read-`labels()`-then-`create_label` with
+    nothing atomic between, so at `wip_limit > 1` two agents adding the same absent label both
+    miss and both create, and every call site passes a lowercase `LABEL_*` constant, so both rows
+    come out spelled the same. The two-SPELLINGS boards want a human typing `Blocked` in the web
+    UI (or a row `GET /labels` did not surface for one caller and did for another — measured with
+    a control on a real 2.3.0 by #1456; see `_add_label`)."""
+    lower, upper = LABEL_BLOCKED, LABEL_BLOCKED.capitalize()
+    for first, second, idx in [(lower, upper, 1), (upper, lower, 1), (lower, lower, 1),
+                               (upper, upper, 1)]:
+        api, wf, task, row = _two_row_board(first, second, idx)
+        where = f"[{first}, {second}] carrying rows[{idx}]"
+        assert wf.api.get_or_create_label(LABEL_BLOCKED)["id"] != row["id"], (
+            f"the premise of {where}: the card wears the row the resolution does NOT return, "
+            "which is the whole divergence"
+        )
+        labels_before = len(api._labels)
+
+        wf._add_label(api.tasks[task["id"]], LABEL_BLOCKED)
+
+        assert [lb["id"] for lb in api.tasks[task["id"]]["labels"]] == [row["id"]], (
+            f"{where}: the guard must SKIP. Keyed on the resolved label ID it sends the PUT and "
+            "the card comes out wearing BOTH rows for one concept"
+        )
+        assert len(api._labels) == labels_before, "and it must not mint a row either"
+
+
+def test_the_no_op_path_does_not_read_the_label_list_at_all(env):
+    """The skip is decided BEFORE `get_or_create_label`, so the no-op path costs zero requests.
+
+    Not decoration: `api.labels()` is a PAGED list read of every label on the instance, and the
+    ID keying had to run it on the no-op path too — it could not ask its question until the title
+    was resolved. Driven by making the resolution explode rather than by reading the source,
+    because the ORDER is the thing under test and only a failure can see it."""
+    api, wf, t = env
+    _hand_label(api, t["id"], LABEL_BLOCKED)
+
+    def explode(title):
+        raise AssertionError("the no-op path must not resolve the title")
+
+    api.get_or_create_label = explode
+
+    wf._add_label(api.tasks[t["id"]], LABEL_BLOCKED)          # must not raise
+
+    assert _titles(api, t["id"]) == [LABEL_BLOCKED]
 
 
 # --- the ORDER the verdict is written in --------------------------------------------------

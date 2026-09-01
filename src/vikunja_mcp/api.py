@@ -354,7 +354,9 @@ def label_key(title: str) -> str:
     `get_or_create_label`, i.e. only on the WRITE path, while every gate in `workflow` asked
     `lb["title"] == title` — EXACT. The two therefore disagreed about what "this label" means,
     and #1216 closed exactly one instance of that disagreement (the guard inside
-    `Workflow._add_label`, re-keyed to the resolved label ID). #1256 closed the class: BOTH
+    `Workflow._add_label`, re-keyed to the resolved label ID — #1456 has since returned THAT
+    guard to `_has_label`, on a probe of this server; the ID keying is history, the class below is
+    not). #1256 closed the class: BOTH
     title comparisons in `workflow` — `_has_label`, read at thirteen CALL SITES (twelve source
     lines; two of those thirteen compute `review_kind` rather than gate anything), and
     `_remove_label` — now come through here, and `tests/unit/fakes.py` borrows it rather than
@@ -1213,7 +1215,20 @@ class VikunjaAPI:
         # Vikunja labels are owned per-user; GET /labels surfaces every label used on a
         # task the caller can read (not just its own), so match case- and whitespace-
         # insensitively to REUSE an existing label instead of minting a divergent
-        # duplicate. Without this an agent typing "Bug"/"bug " forks a second, colorless
+        # duplicate.
+        # AND IT EXCLUDES THE REST — the sentence above states only the WIDENING half, and the
+        # exclusion on top of it was an inference nothing measured until #1456, which measured it
+        # against a real 2.3.0 WITH A CONTROL: a row owned by another user and used on no task
+        # the caller can read is simply ABSENT from that caller's list, and the
+        # same row APPEARS the moment it is put on a task the caller can read (the other caller
+        # sees both throughout, so the difference is visibility and not existence). The
+        # consequence for THIS method is that two callers can resolve one title to DIFFERENT rows
+        # at the same moment on the same board — measured — and that where nothing resolvable is
+        # visible it mints a row beside one that already exists, which follows from the two lines
+        # below rather than from a probe. Pinned by
+        # test_a_label_on_no_readable_task_is_INVISIBLE_to_another_caller, in
+        # tests/integration/test_duplicate_label.py.
+        # Without the insensitive match an agent typing "Bug"/"bug " forks a second, colorless
         # label beside the canonical one (real incident 2026-07-08: a bot did exactly that).
         # `label_key` (module level) is the SINGLE statement of this resolution rule — the same
         # one `Workflow._has_label`/`_remove_label` read with, since #1256. Inlining it here
