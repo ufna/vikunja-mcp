@@ -1019,7 +1019,7 @@ card, and copying it onto every card touched makes the human's cleanup larger.
 
 **THE PIN, which is the half the card's TITLE was about.** `_add_label`'s guard is pinned by
 `test_the_guard_SKIPS_rather_than_minting_a_second_row_on_a_two_row_board` in
-`tests/unit/test_workflow_duplicate_label.py`, which builds all three divergent arrangements and
+`tests/unit/test_workflow_duplicate_label.py`, which builds all four divergent arrangements and
 asserts the skip, plus `test_the_no_op_path_does_not_read_the_label_list_at_all` on the order (the
 skip is decided BEFORE the resolution, so the no-op path costs zero requests). Sweep, five rounds on
 #1256's five-file selection against ONE control of 0 failed / 0 errors / 156 collected: restore the
@@ -1072,3 +1072,134 @@ by the new integration tests rather than merely assumed (`== same[0]["id"]`, and
 comparison in the visibility pin), so it is pinned — but nothing documents it as a server
 guarantee, and if a later Vikunja orders that endpoint differently those pins are where it will
 show.
+
+## `_remove_label` took only the FIRST matching row (#1457)
+
+**The defect in one line: `_remove_label` resolved the title the way the SERVER does
+(`api.label_key`, #1256) and then picked the first match with `next(...)`, sending ONE DELETE — so
+on a card carrying two board rows that normalise to one label, one row survived every clearing
+path in the package.** #1256 measured it, named it, and left it open on purpose: closing it is a
+behaviour change outside that card's slice.
+
+**WHAT THE SURVIVOR COSTS IS NARROWER THAN THE OBVIOUS SENTENCE, and the obvious sentence is what
+this section said until its own second independent pass measured it.** It said the survivor "is
+READ as the label by every `_has_label` gate". NO `_has_label` GATE READS `reviewed` AT ALL —
+censused on the landing tree, the reads name `epic` (8), `bug` (3), `blocked` (1) and `epic-ready`
+(1) and nothing else — and `_clear_verdict_labels`' own docstring says so in as many words: the
+review offering keys on `[worklog]`/`[review]` comment freshness, so a stale `reviewed` would NOT
+suppress a re-review. The harm is the one that docstring actually names, `ложь на доске`: the badge
+a HUMAN reads off the card before moving it to Done, plus the broken mutual exclusion (a
+`needs_work` leaves the card wearing both verdicts). The `blocked` family is NOT symmetric with it
+and the flattened sentence hid that: there a gate really does act — `next_task` withholds a
+`blocked`-labelled card — so case E below is a gate consequence and case D is a board-lie one. The
+general lesson is this repo's usual one: a consequence measured on one label family was
+generalised onto another without being asked.
+
+**Reproduced before anything changed, on a live `Workflow` over `FakeAPI` with agent tools only,
+each case against its one-row control.** Both rows minted with `api.create_label`:
+
+    A  advance(to='review'), card wearing `reviewed` + `Reviewed`
+         before ['reviewed', 'Reviewed']            after ['Reviewed']
+    B  CONTROL, one row                 before ['reviewed']  after []
+    C  three rows, `reviewed`/`Reviewed`/`REVIEWED `         after ['Reviewed', 'REVIEWED ']
+    D  review_task(verdict='needs_work') on the two-row card after ['Reviewed', 'review-failed']
+    E  transfer_task, card wearing `blocked` + `Blocked`     after ['Blocked']
+
+D and E are the two the card's own description reaches for and neither had been driven: D leaves
+BOTH mutually-exclusive verdict labels on one card, so it reads as approved AND rejected to the
+human who moves it to Done; E carries a block about a board the neighbour cannot see onto the
+neighbour's board, where their human triages it — and there the surviving row does hit a gate.
+
+**THERE ARE TWO TWO-ROW BOARDS AND THIS FILE HAS ALREADY RETRACTED THE COLLAPSED VERSION ONCE, so
+the new section states them apart rather than repeating the mistake ~250 lines below its own
+retraction.** Two SPELLINGS (`reviewed` + `Reviewed`) come from a HUMAN typing one in the web UI;
+this package never writes them, because its single production `get_or_create_label` call site is
+inside `_add_label` and every caller passes a lowercase `LABEL_*` constant. The SAME spelling twice
+(`reviewed` + `reviewed`) is the board the package reaches UNAIDED: `get_or_create_label` is
+read-`labels()`-then-`create_label` with nothing atomic between the two, so at `wip_limit > 1` two
+agents adding the same absent label both miss and both create — and because both pass that same
+constant, the rows come out spelled alike. The first draft of this section attached the race to the
+two-SPELLING board, which is exactly the collapse #1256's section retracted; the consequence pin now
+drives both boards, and until this card nothing exercised the one the package can build by itself.
+
+**THE 403 QUESTION IS ANSWERED BY THE LOOP'S SHAPE, NOT BY TOLERATING THE FAILURE — and that is
+the whole design decision.** Real 2.3.0 answers `DELETE /tasks/{id}/labels/{label_id}` with 403
+`Forbidden` when the label is not on the task (measured in #1211; recorded in
+`FakeAPI._read_task`), so the naive reading of "delete every match" — N chances at a benign
+refusal — would turn a clearing into an error. It does not arise: every DELETE the loop sends
+names a DISTINCT `label_id` that WAS on the caller's snapshot, because two rows are two different
+board rows and a duplicate ADD of one id is refused by the server (400 code 8001) and by the fake
+alike, so a snapshot the SERVER filled does not carry one id twice. The residual is the same
+snapshot-staleness RACE that was already there, which `FakeAPI._read_task` grades as "a race, not a
+route" — and that grading is what licenses the fake's idempotent-no-op divergence on this endpoint,
+so it is load-bearing that the loop does not disturb it. The way the loop itself could manufacture
+that 403 is by sending one id twice, so the match list is DE-DUPLICATED BY ID, with its own pin —
+and the GUARD is what carries the safety while the server's 400 only supports it, because the loop
+iterates a CLIENT-SIDE dict and not server storage. Two neighbouring properties have no pin at all
+and the sweep table says so: the match list is MATERIALISED before the first DELETE, and `x["id"]`
+is read only on a row that already matched (a preservation of where `next(...)` read it, whose one
+measured consequence needs a snapshot no server produces — a matching row with no `id` raises
+`KeyError` out of the match loop, so on a two-row card one malformed row now aborts the clearing
+where the old code would have cleared the other, and `KeyError` is not in `server.py`'s `_tool`
+catch list).
+
+**THE 403 WAS RE-MEASURED FIRST-HAND RATHER THAN INHERITED, on a throwaway real 2.3.0 raised for
+this card (`vikunja/vikunja:2.3.0`, port derived from the task id), because the whole design rests
+on it and every statement of it in this repo traced back to #1211.** Six probes, one full JWT:
+
+    PUT    /tasks/{id}/labels, label_id the card ALREADY carries   400 {"code":8001,"message":
+                                                                       "This label already exists
+                                                                       on the task."}
+    PUT    /tasks/{id}/labels, a SECOND row of the same key        201, card then wears
+                                                                       ['reviewed', 'Reviewed']
+    DELETE /tasks/{id}/labels/{id}, link PRESENT                   200 Successfully deleted.
+    DELETE the same id again, link now gone                        403 {"message":"Forbidden"}
+    DELETE a label that exists but was NEVER attached              403 {"message":"Forbidden"}
+    DELETE a label_id that does not exist at all                   403 {"message":"Forbidden"}
+
+Three things follow, and only the first was the point. #1211's 403 reproduces exactly, and 404 —
+raised as a competing hypothesis for what an absent link answers — is not what this server says in
+any of the three absent-link shapes. The 400 on a REPEATED id says that THIS endpoint refuses a
+repeat of one id, which is why a snapshot the server filled carries each id at most once; it is the
+belt and the de-duplication guard is the brace, and the first draft of this paragraph called it "the
+load-bearing half", which over-reads one route into a claim about card state over all of them. And
+the two-row card this whole card is about is constructible on a REAL server and not only on the
+fake: the second row is ACCEPTED onto a card already wearing the first, which is independently what
+VMCP-316 (1456) measured in the same week.
+
+**A HAND MEASUREMENT DECAYS SILENTLY, so the three 403 rows are now a GATE and not only prose** —
+`tests/integration/test_remove_label_absent.py`, which drives all three absent-link shapes plus the
+200 happy-path control (a 403 proves nothing without a DELETE that does succeed: a caller that
+cannot delete answers alike on every call, and `_read_task` records exactly that trap) and rebuilds
+the two-row card on the server. It runs with a full JWT for that reason. Without it this card would
+have left its own central measurement in precisely the condition it distrusted #1211's for.
+
+**Containment, not tolerance: every match is attempted, the FIRST `VikunjaError` is remembered and
+re-raised after the loop.** On a one-row card — every ordinary board — that is the old behaviour
+unchanged, one DELETE with the same exception propagating, so no call site moved: FIVE
+`_remove_label` calls in THREE methods (`_clear_verdict_labels` twice, `review_task`'s two
+branches, `transfer_task`'s loop over four labels — the earlier "four call sites" here matched
+neither convention, and its own parenthetical summed to five). On a two-row card a refusal on one
+row can no longer shield the other's stale badge, which is the card's whole point. It is
+deliberately NOT swallowed, and the reason is that a 403 on this endpoint is not always the benign
+absent-link one: a task in a project the token cannot see answers 403 on a DELETE that would
+otherwise have succeeded (`FakeAPI._read_task`'s probe table), so swallowing would fail OPEN and
+silently, the exact mode #1256 is about. A token merely missing `tasks_labels: delete` answers 401
+there rather than 403 — the same table records that the endpoint was never reached at all — and an
+earlier draft of this paragraph put 403 in that sentence's headline while citing the 401 two
+clauses later. Sniffing the body to swallow only a "benign" 403 is the shape #1216 rejected for
+`add_label`'s 400, on the transferable half of its reasoning: a sniff swallows a genuinely
+different error of the same status. (#1216's other reason, layering, was about putting the decision
+in the REST client and does not transfer to a sniff written here.)
+
+**The sweep's most useful row is the one that stays GREEN.** Restoring `next(...)` kills 5 of the
+8 behavioural pins in the module (it collects 9; the ninth is the sweep record itself) against a
+control of 0 failed / 0 errors / 145 collected — and leaves the one-row pin, the
+no-op pin and the de-duplication pin green, because `next(...)` satisfies all three. A suite
+holding only those three would have called this defect fixed. The full table is in
+`tests/unit/test_workflow_remove_label_rows.py::test_the_sweep_is_recorded`, control first and
+last, and it carries one honest 0 as well: iterating lazily instead of materialising the match
+list measures 0 failed, because `FakeAPI.remove_label` rebinds `t["labels"]` rather than mutating
+it in place and the production client never touches the caller's dict at all. That guard is
+defence against a future in-place mutator and it is UNPINNED — written down so the next reader
+does not delete it on the strength of a green round.

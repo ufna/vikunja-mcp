@@ -299,7 +299,11 @@ class FakeAPI:
         idempotent no-op (pinned by the `mirrors_client` test in `test_workflow_gates.py`).
         `api.remove_label` has exactly ONE caller, `workflow._remove_label`, and it sends the
         DELETE only for a label present on the snapshot in hand — so only snapshot staleness gets
-        there, which is a race, not a route.
+        there, which is a race, not a route. #1457 turned that one caller into a LOOP — one DELETE
+        per BOARD ROW of a normalised key, where it used to send one per call — and the sentence
+        above survives it word for word: every id the loop names was on the snapshot, and the loop
+        de-duplicates by id precisely because sending one id twice is the ONLY way it could have
+        reached this 403.
 
         The ADD half IS MIRRORED NOW — see `add_label` below, which raises the measured 400 —
         because it was the other kind: a ROUTE, not a race. Real 2.3.0 answers 400 code 8001

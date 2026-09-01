@@ -456,7 +456,7 @@ def test_the_guard_SKIPS_rather_than_minting_a_second_row_on_a_two_row_board():
     throwaway real 2.3.0 (#1456): a duplicate title is ACCEPTED by `PUT /labels`, and the second
     row is ACCEPTED by `PUT /tasks/{id}/labels` on a card already carrying the first — so these
     boards, and the two-rows-on-one-card outcome the ID keying produced on them, are states the
-    server permits rather than artefacts of a too-generous fake. On all three arrangements the ID
+    server permits rather than artefacts of a too-generous fake. On all four arrangements the ID
     keying was the DUPLICATING form: it resolved to the row the card does not carry, saw a
     different id, sent the PUT, and left the card wearing both — the proliferation
     `get_or_create_label` exists to prevent, one level down, on the TASK rather than on the label
