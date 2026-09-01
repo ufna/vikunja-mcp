@@ -1,12 +1,12 @@
-# How deep to dispatch: the model lever, and the effort lever that is not there
+# How deep to dispatch: the model lever at the call site, and the effort lever one level up
 
-Evidence for the bullet **"The model is a per-dispatch DECISION, and it is the ONLY depth lever
-the call site has"** in SKILL.md's "Who does the work: the orchestrator-pump and the per-task
-agents". Open this before widening that rule, and ALWAYS before writing a sentence about
-"effort": on the card that created the rule the shape of that lever was got wrong at least
-once, from a reading of documentation, and the wrong version was operationally load-bearing
-while it stood. A SECOND overstatement about it was caught inside this very file by its own
-second pass — see the end of the next section.
+Evidence for the bullet **"The model is the per-dispatch DECISION, and the only depth knob the
+`Agent` CALL itself takes."** in SKILL.md's "Who does the work: the orchestrator-pump and the
+per-task agents". Open this before widening that rule, and ALWAYS before writing a sentence
+about "effort": the shape of that lever was got wrong TWICE on the card that created the rule —
+once from a reading of documentation, once from an over-general reading of a real measurement —
+and each wrong version was operationally load-bearing while it stood. VMCP-314 (1443) settled it
+by constructing the check the card said was missing; the settled answer is the next section.
 
 ## The surface, as it stands on the path a dispatch actually takes
 
@@ -24,76 +24,231 @@ That is the whole knob set. The orchestrator dispatching a per-task agent and th
 dispatching its own implementer or auditor are in the same position: one lever at the call site,
 and it names a model.
 
-## The `effort` key: a document and a measurement that disagree, and a rule that survives either
+## The `effort` key: SETTLED, and both disagreeing sources were right
 
-Both of these were produced during one tick of the card that wrote this file, and they do not
-agree. Neither is re-derived here; each is recorded with the provenance it has.
+This section used to record a document and a measurement that contradicted each other, and a rule
+built so it would not have to choose. VMCP-314 (1443) settled it, and "settled" means one specific
+thing: **the `effort` key in a `.claude/agents/*.md` definition REACHES THE WIRE** — the value
+written in the file arrives as `output_config.effort` on the subagent's own API request — **and the
+human's repro was a correct measurement of the one model where it cannot.** Neither source was
+wrong about what it saw. What was missing from both was a CONTROL.
 
-* **The documentation says the key exists.** A subagent-definition file
-  (`.claude/agents/*.md`) is documented as accepting `effort`, valued `low` / `medium` / `high`
-  / `xhigh` / `max` or a number, alongside `model`, `tools`, `permissionMode` and the rest. This
-  came back from an agent that fetched `code.claude.com/docs/en/sub-agents.md` and
-  `.../model-config.md` — a DOC READING, not a run.
-* **The human measured that setting it does nothing.** In this session they built a definition
-  carrying `model: haiku` plus an attempt to lower the effort, and reported that the frontmatter
-  honours `model` while the effort key is IGNORED. Their upstream request for the missing lever
-  is open: `https://github.com/anthropics/claude-code/issues/26102`.
-* **The SHIPPED BINARY parses and validates it.** Found by this card's second pass and then
-  re-checked by hand with `grep -a` over `~/.local/share/claude/versions/2.1.252`, the build
-  `claude` resolves to: it carries the agent-file validation message ``Agent file ${e} has
-  invalid effort '${me}'. Valid options: ${$h.join(", ")} or an integer``, the level list
-  ``"low","medium","high","xhigh","max"``, and a spawn-override entry ``kind:"effort"``. So the
-  key is READ, VALIDATED and CARRIED. That is a code reading, not a run — neither the auditor
-  nor this card ran two agents differing only in that key and compared them, and PARSED is not
-  the same claim as CHANGES BEHAVIOUR.
+Two boundaries belong in the same breath as the finding, because each of them is what a reader
+would otherwise over-read. TRANSMITTED is not CHANGES BEHAVIOUR — no model ran in any of these
+runs. And the lever does not COMPOSE with the model lever this rule already has: a call-site
+`model: haiku` silently deletes it, measured below.
 
-**What the rule can safely rest on is NARROWER than "there is no effort knob", and the first
-draft of this file got that wrong.** It argued that the key is static per agent TYPE and
-therefore blind to the card — which does not follow, because `subagent_type` is chosen PER CALL.
-Under the documentation-plus-binary reading, a maintained SET of definitions differing only in
-`effort`, selected per dispatch, IS a working lever. It is a COARSE one — a fixed menu rather
-than a value fitted to the card — but it is not nothing, and calling it nothing was an
-overstatement caught by this card's own second pass.
+### How it was settled, because a code reading is exactly what got this wrong the first time
 
-So the honest position is: **there is no effort knob at the CALL, and the definition route is
-UNBUILT here** — this repo defines no agent types at all — **while one measurement says the key
-would not fire anyway.** That is enough to carry the rule as written and not one word more.
-Settling it is filed as VMCP-314 (1443); if the key is confirmed to work, the right answer is
-probably a small set of definitions, and this section and the rule both change.
+The hard part the card named is real: effort is not observable from inside a subagent, and a
+subagent's self-report about its own depth is worth nothing. So the observable used is OUTSIDE it
+— the bytes the harness sends on the subagent's behalf. A local HTTP server impersonating the
+Anthropic Messages API was pointed at with `ANTHROPIC_BASE_URL`, under a throwaway
+`CLAUDE_CONFIG_DIR` and a throwaway project holding nothing but `.claude/agents/*.md`. It answers
+the first request with a canned `tool_use` calling the `Agent` tool, so the harness really does
+spawn the subagent (`subagent_stats.spawned` came back as 1 in every run counted below), and it
+logs the SUBAGENT's own outgoing request. The definitions differ ONLY in `model:` and the
+`effort:` line. Claude Code 2.1.252 — the build `claude` resolves to today, which is NOT
+necessarily the build a running session holds: the session that ran this card is 2.1.251 and other
+live sessions on this box are older still. First-party provider, ten runs:
 
-**One surface really does expose `effort`, and it is not this one.** The human reports an
-`effort` parameter on `agent()` inside a **Workflow** script. That is a different surface from
-the `Agent` tool, and no dispatch described in this rulebook goes through it — so it neither
-rescues the orchestrator's per-card decision nor makes "there is no effort knob at the call
-site" wrong. It is recorded because a reader who finds it will otherwise think this file missed
-it.
+| `model:` | `effort:` | session effort | the SUBAGENT request's `output_config` |
+| --- | --- | --- | --- |
+| sonnet | low | (unset) | `{"effort": "low"}` |
+| sonnet | (absent) | (unset) | `{"effort": "high"}` |
+| sonnet | xhigh | (unset) | `{"effort": "xhigh"}` |
+| opus | low | (unset) | `{"effort": "low"}` |
+| fable | low | (unset) | `{"effort": "low"}` |
+| haiku | low | (unset) | **no `output_config` at all** |
+| sonnet | (absent) | `--effort xhigh` | `{"effort": "xhigh"}` |
+| sonnet | low | `--effort xhigh` | `{"effort": "low"}` |
+| haiku | low | `--effort xhigh` | **no `output_config` at all** |
+| sonnet | low | `CLAUDE_CODE_EFFORT_LEVEL=max` | `{"effort": "max"}` |
 
-The session-wide controls are real and are the wrong shape for the same reason: `effortLevel` and
-`modelSettings` in `settings.json`, the `/effort` command, the `--effort` launch flag and
-`MAX_THINKING_TOKENS` all move the whole SESSION — that is what their own documentation and the
-binary's strings say; whether the setting propagates into every subagent was NOT confirmed
-end to end here. As a per-dispatch lever they do not exist; as a blunt one they are worse than
-nothing, because lowering the session floor lowers it for the cards that most need the depth. Do not
-reach for them to implement a per-card rule.
+In all ten runs the PARENT's own three requests carried the SESSION value — `high` in the six
+runs that set none, `xhigh` in the three that passed the flag, `max` in the one that set the
+variable. That is what says the harness was configured as intended rather than ignoring the
+setting, and it is also the within-run control that makes each subagent row a DIFFERENCE rather
+than a reading. Of the 40 requests captured, 38 carry an effort and the same 38 carry the effort
+beta; the two that carry neither are the haiku subagents.
 
-**Recorded as a defect class, not as trivia.** The brief that launched this card asserted the
-asymmetry "model is per-dispatch and dynamic, effort is per-agent-type and static" and sourced it
-to the Agent tool's own documentation. It was retracted mid-tick by the human's measurement. That
-is exactly the INHERITED class SKILL.md's "A second independent pass over YOUR OWN text" names —
-a fact that arrived from a brief, carried no measurement of its own, and would have been written
-down as one. The pass caught it here because a human ran the check, not because anyone reasoned
-harder. An `effort:` key that a future reader finds in the docs is not evidence it is wired;
-construct the check.
+FOUR earlier runs are not in the table, and they are worth a sentence because all four looked
+clean. Two causes, one symptom: one run reached a leftover server whose request counter a smoke
+test had already consumed, and three classified the PARENT's request as the subagent's because the
+word the probe matched on also occurred in its own working-directory path — a check answering
+"that is the subagent" without having looked, the same family as a search that answers "there is
+none". Every one of the four dispatched NOTHING and every one printed a plausible effort value.
+What caught them was `subagent_stats.spawned`, which read 0 in all four, and that is why the field
+is quoted above rather than assumed.
 
-**Why this repo ships no `.claude/agents/` definitions — and why that is a DECISION, not a
-finding.** A definition's `model` is beaten by the per-dispatch `model` the `Agent` tool already
-takes, so a type buys nothing on that axis; the one thing it could add is exactly the `effort`
-key, which is the disputed one. Against that: `.gitignore` here excludes `.claude/*` with a
-single re-inclusion for `settings.json`, so a definition would be untracked local state or a new
-exception; and a menu of types is a COARSER instrument than the per-card judgement this rule
-asks for, so it would have to earn its place against the rule rather than beside it. That is a
-judgement call on unsettled evidence, and it is the FIRST thing to revisit if VMCP-314 (1443)
-confirms the key works.
+A second rig varied a DIFFERENT axis — what the CALL passes, and what a malformed value does —
+because the first table only ever moves the definition file. Same method, four more runs, each
+with `spawned` 1:
+
+| definition | call-site `model` | subagent wire model | the subagent's `output_config` |
+| --- | --- | --- | --- |
+| sonnet + `effort: low` | `haiku` | `claude-haiku-4-5-20251001` | **none, and no effort beta** |
+| haiku + `effort: low` | `sonnet` | `claude-sonnet-5` | `{"effort": "low"}` |
+| sonnet + `effort: 2` | — | `claude-sonnet-5` | **none, and no effort beta** |
+| sonnet + `effort: bogusvalue` | — | `claude-sonnet-5` | `{"effort": "high"}` |
+
+Eight things follow, and only these eight:
+
+1. **The key reaches the wire.** Two levels written in definitions (`low`, `xhigh`) across three
+   models (`sonnet`, `opus`, `fable`), each arriving as the file spells it.
+2. **An ABSENT key means INHERIT THE SESSION, not "the default".** With no `effort:` line the
+   subagent went out at `high` under an unset session and at `xhigh` under `--effort xhigh`.
+3. **A definition BEATS the `--effort` FLAG.** `effort: low` under `--effort xhigh` sent `low`.
+   This is the orchestrator's question from the card, and the answer is: a session running deep
+   CAN dispatch a shallower subagent — but only through a definition, never at the call site.
+   Name the CHANNEL and stop there: `--effort` is the one that was exercised. The
+   `settings.json` `effortLevel` channel was NOT, and that is the one this machine actually uses
+   — `~/.claude/settings.json` here sets `effortLevel: "xhigh"`, while every run above was
+   isolated under a throwaway `CLAUDE_CONFIG_DIR` and so ran at the model default. The resolver
+   reads both through the same fallback, which is why it is expected to behave alike; expected is
+   not measured.
+4. **On `haiku` it is dropped whole.** Not clamped, not defaulted: the request carries no
+   `output_config` at all, and the effort beta is missing from that request's beta header while
+   every other row carries it.
+5. **An environment variable outranks the definition.** `CLAUDE_CODE_EFFORT_LEVEL=max` turned an
+   `effort: low` definition into `max` on the wire.
+6. **The CALL-SITE `model` beats the definition's `model:`, and that VOIDS the definition's
+   effort.** `effort: low` on a `model: sonnet` definition, dispatched with `model: "haiku"` at
+   the call site, went out on haiku with no effort and no effort beta. The converse also holds:
+   a `model: haiku` definition dispatched with `model: "sonnet"` sent `{"effort": "low"}`. So the
+   definition route is not a lever standing BESIDE the model lever — it is one the model lever
+   can switch off, silently, and the rule below permits exactly the downgrade that does it.
+7. **An INTEGER effort is worse than no key at all.** `effort: 2` sent NO `output_config` and no
+   effort beta, where the same definition with no `effort:` line sends `{"effort": "high"}`. So
+   it does not fall back to the default — it removes it.
+8. **An invalid value degrades SILENTLY to no key.** `effort: bogusvalue` sent `{"effort":
+   "high"}`, i.e. the model default, and `claude -p` wrote nothing at all to stderr.
+
+### Why `haiku` is the exception, which is what makes the human's measurement the right one
+
+The harness's baked-in model catalog gives each model a `capabilities` list. The entry for
+`claude-haiku-4-5` carries exactly one capability, `context_management`, and neither a default
+effort nor an effort cost index; `claude-sonnet-5`, `claude-opus-5` and `claude-fable-5` each
+carry `effort`, `max_effort` and `xhigh_effort`. The request builder asks that capability question
+FIRST and, when the answer is no, deletes any effort from the outgoing config and returns before
+it can be set — which is exactly the two haiku rows, and the `effort-2025-11-24` beta is missing
+from those two requests' headers while all 38 others carry it. That the alias `haiku` reaches
+`claude-haiku-4-5` is not an inference from the catalog either: those two requests name the
+model themselves, as `claude-haiku-4-5-20251001`. And the `Agent` tool's `model` enum offers no
+other haiku to reach instead.
+
+So the human built the single definition shape in which the key provably cannot do anything, and
+reported what they saw. Their measurement was sound; the generalisation drawn from it was wider
+than it. Keep the claim at that width and no wider: what is shown here is that `model: haiku` plus
+an effort key REPRODUCES their outcome and carries a mechanism for it. Their build was not
+recorded and nothing was captured, so "this is what they saw" is an inference, not a reading.
+One competing story IS ruled out rather than argued away — that the key was simply wired later.
+Every installed build on this box from 2.1.229 to 2.1.252 carries the spawn layer that attaches
+the effort (one occurrence each) and the same haiku denylist (seven each), so the feature is not
+new. And this is no correction of the human anyway: the discriminator their repro lacked is a
+control on another model, and neither VMCP-313 nor this file had one either until it was run.
+
+The chain the value travels, named by the property names that survive minification so a later
+reader can re-find it in a later build: the frontmatter `effort` is normalised against
+`low`/`medium`/`high`/`xhigh`/`max` (or an integer) and stored on the agent definition; the
+`Agent` tool resolves `subagent_type` to that definition; the subagent runner turns it into a
+`kind: "effort"` entry in the child context's permission layers; the query reads the LAST such
+entry and falls back to the session effort when there is none; the request builder writes it to
+`output_config.effort` and adds the effort beta. Every link was read in the shipped binary, and
+every link is also pinned by a row of the table — the reading and the wire agree.
+
+### Four things that silently change or remove the value — one measured, three only read
+
+* **`CLAUDE_CODE_EFFORT_LEVEL` outranks the definition.** MEASURED, last row of the table: `max`
+  in the environment turned an `effort: low` definition into `max` on the wire. A machine-level
+  variable that silently overrides every agent definition on the box is worth knowing before
+  anyone builds a menu. Its two magic values, `unset` and `auto`, take the resolver down a branch
+  that yields no level at all — READ IN CODE, NOT MEASURED, and not the same as absence.
+* **A launch pin on the `opus-4-7`, `opus-4-8` and `fable-5` families puts the MODEL's default
+  effort AHEAD of the definition's** until that pin is cleared. READ IN CODE, NOT OBSERVED: the
+  `fable` row above honoured `low`, so the pin was not biting on this machine, and this file does
+  not claim to know when it does.
+* **An organisation ceiling clamps the level down**, and `max`/`xhigh` fall back to `high` on a
+  model lacking those capabilities. READ IN CODE, NOT EXERCISED — the probe ran on a dummy API key
+  with no organisation behind it, so no ceiling could apply.
+* **An INTEGER effort is validated and then never sent, and a BOGUS one is dropped in silence.**
+  MEASURED, the last two rows of the second table. The validation message offers an integer and
+  the normaliser accepts one, but the request builder writes the field only for a string, so
+  `effort: 2` ships NO effort — strictly worse than writing no key, which ships the model default.
+  A misspelt level does fall back to that default, and nothing is printed anywhere.
+
+### Where this evidence stops
+
+It shows what the harness SENDS. It does not show what the model then does with it: the probe's
+server was a stub that never ran a model, and whether the effort field changes the depth of the
+reasoning is a property of Anthropic's service, not of anything this repo can measure. The stub
+also never returns an error, so a service that REJECTED the field or the beta would look exactly
+like a service that accepted them — that blindness is structural to the method, not an oversight
+in this run. The
+harness's own catalog does price the levels — an effort cost index per model, which its UI turns
+into a "~Nx" label relative to that model's default — and those numbers say the levels are
+EXPECTED to differ, which is not the same as this board having observed that they do. With `high`
+normalised to 1: `claude-sonnet-5` reads low 0.47 / medium 0.74 / xhigh 2.41 / max 5.59;
+`claude-opus-5` low 0.67 / medium 0.76 / xhigh 1.6 / max 1.7; `claude-fable-5` low 0.6 /
+medium 0.77 / xhigh 1.74 / max 1.91. Read them the way the price table below is read — the shape
+of a ladder, never this repo's bill.
+
+Two further boundaries on the probe, so a reader can judge it rather than trust it. It
+authenticated with an API key against a local base URL, not with this repo's usual subscription
+session, and provider-dependent behaviour is therefore untested. And it isolated
+`CLAUDE_CONFIG_DIR` and ran in a scratch project, so no user-level settings, agents or hooks were
+in play — which is what makes the rows comparable to each other and also what stops them from
+describing any particular real session.
+
+**One surface exposes `effort` at the CALL, and it is not this one.** An `effort` option on
+`agent()` inside a **Workflow** script — recorded by the human, and confirmed in the binary by
+VMCP-313's reviewer. That is a different surface from the `Agent` tool, and no dispatch described
+in this rulebook goes through it, so it neither rescues the orchestrator's per-card decision nor
+makes "there is no effort knob at the call site" wrong. It is recorded because a reader who finds
+it will otherwise think this file missed it.
+
+The session-wide controls are real, and ONE of them now has a measured relationship to a dispatch
+rather than a suspected one. `effortLevel` and `modelSettings` in `settings.json`, the `/effort`
+command, the `--effort` launch flag and `MAX_THINKING_TOKENS` all move the whole SESSION — and a
+subagent whose definition names no effort INHERITS that value, which the two `(absent)` rows of
+the first table show end to end for the `--effort` FLAG. A round ago this file said the
+propagation was not confirmed here; for that one channel it now is, and for `settings.effortLevel`
+it still is not. Either way it makes them worse as a per-card lever, not better: lowering the
+session floor lowers it for the cards that most need the depth, and it is now measured to lower it
+for their subagents as well.
+
+**Recorded as a defect class, not as trivia — and the history is now THREE steps, not two.** The
+brief that launched VMCP-313 asserted the asymmetry "model is per-dispatch and dynamic, effort is
+per-agent-type and static" and sourced it to documentation. The human's measurement retracted it
+mid-tick. That retraction was then itself too wide, and what narrowed it was neither reading nor
+reasoning but a control on a second model. Each step was believed at the time and each was
+operationally load-bearing. The rule the class supports has not moved: an `effort:` key a future
+reader finds in the docs is not evidence it is wired, an `effort:` key that did nothing once is
+not evidence it never does, and the way out of both is a constructed check with a control in it.
+
+**Why this repo still ships no `.claude/agents/` definitions — now a DECISION on settled evidence,
+where it used to be one on unsettled evidence.** The premise that used to carry this paragraph is
+gone: the `effort` key is no longer disputed, and a maintained set of definitions IS a depth lever
+that reaches a per-dispatch choice. Three things nonetheless keep it unbuilt, and the FIRST is new
+with the measurement rather than inherited from the old argument.
+
+* **It does not compose with the lever this rule already uses.** Point 6 above: the call-site
+  `model` beats the definition's, and when the call site names `haiku` the definition's effort is
+  deleted with no warning anywhere. The rule below PERMITS a one-rung downgrade, and the bottom
+  rung is exactly the model that voids the effort — so a definition menu and the model rule would
+  quietly cancel each other on the cards where both were used. That is a design problem, not a
+  wording problem, and it has to be solved before a menu is worth writing.
+* **No rung of either ladder has been measured on this board.** Nothing here has measured whether
+  a shallower agent costs verdict quality on any role — the ladder section below says the same
+  about models. Building a menu today is picking levels by taste and shipping the taste to every
+  consumer through `stable`.
+* **The mechanical objections stand.** `.gitignore` here excludes `.claude/*` with a single
+  re-inclusion for `settings.json`, so a definition is untracked local state or a new exception;
+  and a fixed menu is coarser than the per-card judgement this rule asks for.
+
+So the rule below is UNCHANGED by this card, deliberately: what changed is a fact, not a decision.
+Building the definition set is filed as VMCP-315 (1455) — a card about measuring a rung and about
+the composition problem, not about writing a menu down.
 
 ## What each lever moves, which is where the assumption goes wrong
 
@@ -152,7 +307,11 @@ reader who greps and finds a model name has found a POLICY, an AUTHOR or a fixtu
 measurement. The two attempts are the point: the first used `git grep -E "\b(sonnet|...)\b"`
 and returned NOTHING, because `\b` is not a POSIX ERE word boundary and the pattern silently
 matched nothing at all. That is the same family as the `git log -S` case-sensitivity trap SKILL.md
-already records — a search that answers "there is none" when it never looked.
+already records — a search that answers "there is none" when it never looked. VMCP-314 added a
+third member while reading the harness bundle: a `grep` pattern holding a `${...}` placeholder is
+read as an interval quantifier by BSD `grep`, so the exact string the binary carries comes back
+0 hits, exit 1, while `grep -F` on that identical string returns 1. Reach for `-F` when the needle
+is code.
 
 Two consequences, and they are why the rule steps one rung and stops:
 
@@ -191,9 +350,12 @@ Verification by RUNNING is not the expensive part of a review — re-deriving th
 
 ## What is not known here
 
-* Whether the `effort` frontmatter key works. The doc and the measurement disagree, above; this
-  file does not re-derive either, and the rule is built so it does not have to.
-* Whether a downgrade costs verdict quality on this board, and by how much. Unmeasured.
+* Whether an effort level changes what a model actually DOES. The key reaches the request — that
+  is measured above — and the levels stop being observable there. What the wire cannot see, this
+  file does not claim.
+* Whether a downgrade costs verdict quality on this board, and by how much. Unmeasured, on BOTH
+  ladders now: no rung of the model ladder and no effort level has ever been run against a role
+  here.
 * What this repo actually pays per token. The prices above are list API rates for the ratio only.
 * Whether 643k/337k is typical. It is ONE card, reported once, and it is the reason for the rule
   rather than a distribution. A second such accounting would be worth more than any wording here.

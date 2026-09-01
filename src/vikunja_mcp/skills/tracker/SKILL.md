@@ -504,13 +504,17 @@ where. Here — what must not be broken:
 - **The model is the per-dispatch DECISION, and the only depth knob the `Agent` CALL itself
   takes.** It accepts `opus`/`sonnet`/`haiku`/`fable` — ignored for a `fork`, which inherits —
   and NO effort or reasoning parameter. **Effort is not unreachable, it is just not HERE, and
-  the difference matters:** an agent DEFINITION accepts an `effort` key (parsed and validated in
-  the harness shipped today) and `subagent_type` IS per call, so a maintained SET of definitions
-  would be a real lever — a coarse one, chosen from a fixed menu rather than fitted to the card.
-  This repo defines no agent types and a measurement taken here disputes that the key changes
-  anything, so today it is not a lever you have; do not write a rule that assumes it. The
-  session-wide controls (`effortLevel`, `/effort`, `MAX_THINKING_TOKENS`) move the whole SESSION
-  and are not a per-card substitute (`references/dispatch-depth.md`).
+  the difference matters:** an agent DEFINITION accepts an `effort` key, and that key is now
+  MEASURED to reach the wire — the value written in the file arrives on the subagent's own API
+  request, it BEATS the session's `--effort`, and an absent key INHERITS the session instead. But
+  it is deleted, silently, whenever the resolved model carries no effort capability — which is
+  what `haiku` is — and **the `model` you pass HERE overrides the definition's own**, so the one
+  rung down this rule permits is itself capable of voiding it. So a maintained SET of definitions
+  is a lever that does not yet COMPOSE with this one, and this repo defines no agent types anyway:
+  today it is not a lever you HAVE, and do not write a rule that assumes one. The session-wide
+  controls (`effortLevel`, `/effort`, `MAX_THINKING_TOKENS`) move the whole SESSION — and a
+  subagent that names no effort inherits them, which makes them worse as a per-card lever rather
+  than better (`references/dispatch-depth.md`).
 - **Choose by BLAST RADIUS and REVERSIBILITY, never by file type or diff size** — and state the
   choice with its ground in one clause of the brief, because an unstated choice is the default
   and not a decision. **Senior (Opus class), non-negotiable, if ANY of these holds:** the
@@ -527,9 +531,9 @@ where. Here — what must not be broken:
   nesting is the multiplier — and names the diff, the sha and the files, instead of leaving a
   reviewer to discover the scope by reading. It may narrow what is at STAKE; it may never waive
   verification by running.
-  → **`references/dispatch-depth.md`**: the surface as measured, the doc-versus-measurement
-  conflict over `effort` and what is actually settled, and the 643k-token card that spent 337k
-  of it on two rounds of review, the second over a `+8/-5` diff with no code in it.
+  → **`references/dispatch-depth.md`**: the surface as measured, the wire-level settlement of
+  the `effort` key and the four things that still override or delete it, and the 643k-token card
+  that spent 337k of it on two rounds of review, the second over a `+8/-5` diff with no code.
 - **Why:** a clean context per task (decisions from neighbouring tasks do not leak across), the
   orchestrator stays light and lives long, and symmetry with review — the author and the
   reviewer have their own unmixed contexts.
