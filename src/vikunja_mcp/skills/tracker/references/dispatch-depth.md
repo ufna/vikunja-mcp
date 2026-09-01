@@ -425,12 +425,22 @@ beta and the model it named:
 
 So the precedence on this build is **env > `--effort` > `settings.effortLevel` > model default**,
 and each link is a pair of rows differing in one thing — the control row being what stops the third
-link from being a reading of a value that was there anyway. That closes VMCP-314's open item, which
-said that `--effort` was the channel exercised and that the `settings.json` `effortLevel` channel
-was not, **for the SESSION's own request only**; the SUBAGENT leg of the `settings` channel is still
-unmeasured. **And none of this says anything about the 34 scored runs**: no wire was captured on a
-run that reached the real service, because the stub replaces it. What evidences the lever on the
-scored runs is `thinking_tokens` in their own responses, which is the EFFECT and not the lever.
+link from being a reading of a value that was there anyway. Each of the six rows has exactly ONE
+surviving stub capture, and for two of them — `--effort xhigh`, and the env row that carries the
+first link — that capture is a LATER re-run from the same rig: the originals were not kept, so those
+two rows rest on a reproduction of the recorded value rather than on the recording of it. Two
+further limits, both read off the files. The stub logs the REQUEST and never the INVOCATION, so no
+capture names its own row and the mapping is by filename and mtime. And the pairs carrying the
+second and third links do not literally differ in one thing: the no-flag row's capture records its
+model as the unresolved two-word string `sonnet NOFLAG` — the zsh signature described below — while
+the control's is a real `claude-sonnet-5`. Neither disturbs the effort values, which are all those
+rows are read for, but "differing in one thing" is the design and not the record. That closes
+VMCP-314's open item, which said that `--effort` was the channel exercised and that the
+`settings.json` `effortLevel` channel was not, **for the SESSION's own request only**; the SUBAGENT
+leg of the `settings` channel is still unmeasured. **And none of this says anything about the 34
+scored runs**: no wire was captured on a run that reached the real service, because the stub
+replaces it. What evidences the lever on the scored runs is `thinking_tokens` in their own
+responses, which is the EFFECT and not the lever.
 
 A shell bug is recorded because it produced a plausible false finding: a first pass through these
 arms used `set -- $SPEC` in **zsh**, which does not word-split an unquoted parameter, so every arm
@@ -463,16 +473,32 @@ read the ratio, never this repo's bill.
 | sonnet/medium | 6 | 8,9,9,10,10,10 | 9.33 | 2009 | 3091 | 0.0359 | 0.40 | 38s |
 | sonnet/low | 4 | 5,5,6,6 | **5.50** | **0** | 634 | 0.0113 | 0.13 | 14s |
 
-Exact two-sided permutation tests. The p-floor is set by the cell sizes and is what decides whether
-a cell can reach significance AT ALL: 0.029 at 4 against 4, 0.057 at 3 against 4, 0.010 at 6
-against 4. So no three-run cell here can reject whatever it scores, and that is a property of the
-design, not a result.
+Exact two-sided permutation tests: `count(|d_perm| >= |d_obs|) / C(N, n)`, enumerated over every way
+of choosing which n of the pooled N scores form the first group. **The floor that test can return
+turns on whether the two groups are the SAME SIZE, and an earlier draft of this paragraph applied
+the equal-size formula `2/C` to all three shapes it quoted — right for 4v4, and double the truth for
+the other two.** At equal n the complement of every split is itself a split of the same size with d
+exactly negated, so the extreme is always hit twice and the floor is `2/C`: 0.100 at 3v3, 0.029 at
+4v4, 0.002 at 6v6. At UNEQUAL n the complement has the wrong size and is never enumerated at all, so
+the floor is `1/C`: 0.029 at 3v4, 0.005 at 6v4 — and this data ATTAINS that floor four times, all
+four against `sonnet/low`. (3v6 is 0.012, computed from a constructed maximally separated pair: no
+pair of that shape reaches its floor in this data, and nor does any 3v3 or 6v6 pair.) Note the
+direction of the old error: doubling a floor makes the instrument look LESS able to reject, not
+more, so what it flattered was not the design but the excuse the earlier draft drew from it.
+
+Two things follow. **Every significant result below sits AT its floor**, none clear of one — so
+they are not ranked by robustness, they are each the single most extreme assignment their shape
+admits. And **the only pair SHAPE in this design that cannot reject at 0.05 whatever it scores is
+3-against-3**, of which there is exactly one pair: `opus/high` against `sonnet/high`. A three-run
+cell is NOT blind here, and the table refutes the claim that it is: `opus/high` [10,10,10] against
+`sonnet/low` [5,5,6,6] returns 1/35 = 0.029, and `sonnet/high` against `sonnet/low` returns the
+same.
 
 * effort rung on opus, xhigh->low ....... d = −0.25, **p = 1.000** — no separation
 * the MODEL rung at xhigh, opus->sonnet . d = ±0.00, **p = 1.000** — identical multisets
-* effort rung on sonnet, xhigh->low ..... d = +4.25, **p = 0.029** — at that pair's floor
-* effort rung on sonnet, medium->low .... d = +3.83, **p = 0.005** — clear of its floor
-* the model rung at low, opus->sonnet ... d = +4.50, **p = 0.029** — at that pair's floor
+* effort rung on sonnet, xhigh->low ..... d = +4.25, **p = 0.029** — 2/70, that pair's floor
+* effort rung on sonnet, medium->low .... d = +3.83, **p = 0.005** — 1/210, that pair's floor
+* the model rung at low, opus->sonnet ... d = +4.50, **p = 0.029** — 2/70, that pair's floor
 
 Among the seven cells that are not `sonnet/low` there are twenty-one pairs. **Thirteen return
 p = 1.000 and none of the other eight rejects**; those eight run 0.182 to 0.690. Six of the eight
@@ -546,18 +572,24 @@ Five things follow, and only these five.
   neither cell struggles with. Everything in the 0.35x-1.09x cost band is measured as
   INDISTINGUISHABLE, which is not EQUAL, and a failure to reject at n=3-6 is weak evidence of
   sameness.
-* **PRECISION was never measured, only recall.** Across 34 runs not one mis-flagged a sound
-  sentence — established by reading the transcripts, not from the grader's `extra` counter, which
-  logged 11 off-key findings and undercounts them. Those off-key findings were, on review, defects
-  the key had MISSED rather than false positives. The report under test carries its defects in
-  roughly 15 assertive sentences, which inverts the real base rate — a real second pass hunts one
-  or two errors among a hundred sound ones, and there, flagging everything quantified is a failure
-  mode this instrument cannot even express. **A cheap cell's fitness for the real role is therefore
-  not carried by this data at all.** VMCP-319 (1468) built the instrument that CAN express it —
-  twelve sound sentences engineered to be flagged, six of them lexical twins of its defects — and
-  measured zero false alarms in nineteen runs across the same model and effort corners. So the
-  failure mode is now measured rather than merely unexpressed; the sentence above stands for THIS
-  card's data.
+* **PRECISION was never measured, only recall.** No run was seen to mis-flag a sound sentence — but
+  note how far that is checked, and what the record even is. It is a re-score built to measure
+  RECALL, whose off-key list is a by-product; it nowhere claims to be exhaustive. The RECORDED
+  transcript reading covers 16 runs, the same 16 as the hand re-score above. For the other 18 the
+  evidence is the grader's `extra` counter, and that counter demonstrably UNDERCOUNTS: it logged 11
+  off-key findings across 9 runs, 5 of those 9 outside the 16, while the hand artifact credits six
+  FURTHER runs with off-key findings the grader scored `extra: 0`. The off-key findings that were
+  actually reviewed — the classes that artifact names, on runs inside the 16 — were defects the key
+  had MISSED rather than false positives; the rest were never reviewed one by one. So the claim is a
+  16-run reading plus an undercounting counter over the rest, not a checked universal over 34. The
+  report under test carries its defects in roughly 15 assertive sentences, which inverts the real
+  base rate — a real second pass hunts one or two errors among a hundred sound ones, and there,
+  flagging everything quantified is a failure mode this instrument cannot even express. **A cheap
+  cell's fitness for the real role is therefore not carried by this data at all.** VMCP-319 (1468)
+  built the instrument that CAN express it — twelve sound sentences engineered to be flagged, six of
+  them lexical twins of its defects — and measured zero false alarms in nineteen runs across the
+  same model and effort corners. So the failure mode is now measured rather than merely unexpressed;
+  the sentence above stands for THIS card's data.
 * **The live range is smaller than the eleven items planted.** K5, K8 and K10 were found by 34 of
   34 runs and discriminate nothing; K1 fuses two independent mistakes into one item. An eleventh
   item was DROPPED whole after review, and the reason is the same defect class the instrument
@@ -568,14 +600,24 @@ Five things follow, and only these five.
   one transcript and 0 on another, twice in one cell, manufacturing the only model-ladder gap the
   first reading contained. **Grading noise was the size of the effect being claimed**, which is why
   the item is gone rather than patched.
-* **The grader is the primary score, and the hand re-score that checked it covered 25 of the 34
-  runs.** An independent pass hand-scored those 275 cells: five disagreements, four of them K11
-  (now gone), and ONE inside K1-K10 — on `740d13c7f1` (sonnet/high) at K9, where a run named the
-  right card as the measurer but never corrected the report's "#1102 measured that on a live tree".
-  A reasonable reader can go either way on that one, unlike the K11 four. Under that hand reading
-  `sonnet/high` is 9.67 rather than 10.00 and the sweeps number three rather than four; nothing
-  else in the table moves, and finding 5 survives either way. **The nine runs added later were
-  never hand-checked at all** — they are `opus/high` and the second half of both `medium` cells.
+* **The grader is the primary score, and the hand re-score that checked it covered 16 of the 34
+  runs.** An independent pass hand-scored those 176 marks, over four cells only — `opus/xhigh`,
+  `opus/low`, `sonnet/xhigh`, `sonnet/low`. **18 runs were never hand-checked at all**: `opus/high`,
+  `sonnet/high`, and both `medium` cells. Read under the artifact's own stated convention — its
+  partial marks `p` and `w` BOTH count as FOUND, which is the only one of the four readings of those
+  two marks that reproduces the per-key totals it prints (require a bare `1` and K3, K9, K11 come
+  out 12, 13, 15 against a printed 15, 14, 16) — it disagrees with the grader THREE times, all three
+  on K11, and NOT ONCE inside K1-K10. Four marks inside K1-K10 are partial rather than plain, all
+  four in `sonnet/xhigh`: three `p` on K3, and on `b00a0c4302` one `w` at K9 that the legend never
+  defines. Read that single undefined mark as a miss and `sonnet/xhigh` goes 9.75 -> 9.50; nothing
+  else in the table moves, the four sweeps stay four, and finding 5 survives either way. So does
+  finding 4's VERDICT — both readings give p = 1.000 — but not the REASON it states: the two `xhigh`
+  multisets are identical on the grader's scores and differ by one mark under the hand reading. The
+  21-pair block below moves under it as well — eleven at p = 1.000 rather than thirteen, ten others
+  running 0.133 to 0.690 — but still none of the 21 rejects, which is all that paragraph concludes.
+  An earlier draft of this bullet put that disagreement on `740d13c7f1` (`sonnet/high`) and claimed
+  25 runs / 275 cells. That run is in no hand-score artifact and could not be: the hand-score file
+  was written at 23:42:05 and the earliest record of the run is 23:44:01.
 * **Closed-book measures half the role.** With no tools used, this scores judging the width of a
   claim against evidence PUT IN FRONT of the agent, never deciding what to go and look up — which
   is where a real second pass spends its tokens, and plausibly where a rung bites hardest.
@@ -591,14 +633,18 @@ Five things follow, and only these five.
 
 ### So: still no `.claude/agents/` set, and the reason has changed
 
-The three objections in the paragraph above — the `model:` column that does not compose, the
-`.gitignore` question, and a fixed menu being coarser than per-card judgement — are untouched. What
-this card removes is the second one, "no rung of either ladder has been measured", and what replaces
-it does not license a menu either. On one saturating closed-book task: the axis that moved COST
-monotonically was effort (0.13x to 1.09x), while the model rung moved cost by 2.8x at `low` and by
-0.91x at `xhigh` — inconsistent in direction; on QUALITY neither axis predicts anything alone, and
-what failed was a PAIRING, which is finding 2. A menu would be picking among seven cells this
-measurement could not tell apart, on an instrument that saturated for four of them outright.
+That paragraph lists THREE objections: the `model:` column that does not compose; "No rung of either
+ladder has been measured on this board"; and the mechanical pair, which is one bullet holding two
+things — the `.gitignore` question, and a fixed menu being coarser than per-card judgement. **This
+card answers the SECOND of the three, and only that one** — a rung has now been measured, so that
+bullet no longer holds as written, though it is left standing above as the record of why the rule
+was made rather than quietly edited out from under it. The first and third are untouched, and what
+answers the second does not license a menu either. On one saturating closed-book task: the
+axis that moved COST monotonically was effort (0.13x to 1.09x), while the model rung moved cost by
+2.8x at `low` and by 0.91x at `xhigh` — inconsistent in direction; on QUALITY neither axis predicts
+anything alone, and what failed was a PAIRING, which is finding 2. A menu would be picking among
+seven cells this measurement could not tell apart, on an instrument that saturated for four of them
+outright.
 **Fact, not decision: the rule above is unchanged by this card, exactly as it was by VMCP-314.**
 The follow-up the data asks for — an instrument that does not saturate and that scores precision as
 well as recall — is filed as VMCP-319 (1468) rather than attempted here, because that is a second
