@@ -744,6 +744,8 @@ Only the post-hoc seventh item tells them apart at all, and it does not tell the
 significantly. So the ceiling was raised — `sonnet/low` now sits at 4-5 rather than at the top —
 and it was not raised far enough to separate opus/xhigh, opus/low and sonnet/xhigh from each
 other. That is this card's honest boundary and it is the same one VMCP-315 hit, one rung higher up.
+Three later runs by this card's reviewer put `sonnet/low` at 3-6 rather than 4-5 and stop the
+separation rejecting — the last bullet under "What this does NOT settle" carries them.
 
 ### The finding: WHERE an item's refutation lives may decide whether it measures anything
 
@@ -911,8 +913,9 @@ opus ran 4 029-6 859 thinking tokens at `xhigh` against 948-1 113 at `low` on th
 ### What it cost, stated the way the card asked
 
 **$3.2158 for 31 runs**, of which **$2.2678** is the 19 SCORED runs and $0.9480 is everything
-around them: the pilot, the probes that showed the easy tier could not stand alone, the three
-environment controls and the five one-word thinking controls. VMCP-315's
+around them: the two pilot runs, the three probes that showed the easy tier could not stand
+alone, the TWO environment controls (three variables, two runs) and the five one-word thinking
+controls. VMCP-315's
 comparable figure is $2.4669 for its 34 scored runs — so on scored runs this card came in under
 its neighbour and all-in it came in $0.75 over. Neither number covers the instrument's own
 construction, the two audit subagents, or this prose; as VMCP-315 already said of itself, the
@@ -951,7 +954,19 @@ second pass asked for. Hard stop was $5 and was not approached.
 * **Ten pairwise tests are reported and NONE is corrected for multiplicity.** At a floor of
   0.029, no comparison here survives any correction over ten tests. Read each p as a description
   of its own pair and not as a family-wise claim.
-* **The run transcripts are not committed.** The corpus, key, prompt and grader are; the 27 JSON
+* **The `sonnet/low` cell does NOT hold at n=7, and the separation then stops rejecting.**
+  Measured by this card's independent reviewer on the same build (2.1.252), the same flags, and
+  the prompt reassembled from the committed corpus by the recipe in that directory's `README.md`
+  and `cmp`-checked against the file the recorded runs were fed: three further `sonnet/low` runs
+  scored 6, 3 and 6 on the six pre-registered defects, against the 4, 5, 5, 5 in the table.
+  Pooled to seven runs the cell spans 3-6, and d = +1.25 at p = 0.029 against a 6/6 upper cell
+  becomes d = +1.14 at **p = 0.112**; on the S64-free subscore 0.029 becomes 0.055. Nothing
+  above is thereby false — every figure in it is a true report of THESE nineteen runs — but the
+  complete separation that the 0.029 rests on is destroyed by three more runs, so the 4-5 in the
+  table is a property of four runs and not of the cell. The precision null, by contrast,
+  REPLICATED in those same three runs: zero flags on a further 36 lookalike and 150 filler
+  exposures.
+* **The run transcripts are not committed.** The corpus, key, prompt and grader are; the 31 JSON
   responses live only in this card's scratchpad, so every figure above is re-derivable only by
   re-running the instrument, not by re-reading the same bytes. And the JSON records neither the
   harness version nor the flags, so `2.1.252`, `--effort`, `--allowed-tools ""` and the scratch
