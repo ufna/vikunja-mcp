@@ -36,7 +36,10 @@ wrong about what it saw. What was missing from both was a CONTROL.
 Two boundaries belong in the same breath as the finding, because each of them is what a reader
 would otherwise over-read. TRANSMITTED is not CHANGES BEHAVIOUR — no model ran in any of these
 runs. And the lever does not COMPOSE with the model lever this rule already has: a call-site
-`model: haiku` silently deletes it, measured below.
+`model` overrides the definition's own on EVERY dispatch, and where it resolves to `haiku` the
+definition's effort is deleted along with it, silently. That deletion is not something this
+rule's permitted downgrade reaches — the step stops at Sonnet class — so read it as a constraint
+on any future MENU rather than on the model choice the rule already asks for. Measured below.
 
 ### How it was settled, because a code reading is exactly what got this wrong the first time
 
@@ -112,12 +115,17 @@ Eight things follow, and only these eight:
    every other row carries it.
 5. **An environment variable outranks the definition.** `CLAUDE_CODE_EFFORT_LEVEL=max` turned an
    `effort: low` definition into `max` on the wire.
-6. **The CALL-SITE `model` beats the definition's `model:`, and that VOIDS the definition's
-   effort.** `effort: low` on a `model: sonnet` definition, dispatched with `model: "haiku"` at
-   the call site, went out on haiku with no effort and no effort beta. The converse also holds:
-   a `model: haiku` definition dispatched with `model: "sonnet"` sent `{"effort": "low"}`. So the
-   definition route is not a lever standing BESIDE the model lever — it is one the model lever
-   can switch off, silently, and the rule below permits exactly the downgrade that does it.
+6. **The CALL-SITE `model` beats the definition's `model:`, and where it resolves to `haiku`
+   that VOIDS the definition's effort.** `effort: low` on a `model: sonnet` definition, dispatched
+   with `model: "haiku"` at the call site, went out on haiku with no effort and no effort beta.
+   The converse also holds: a `model: haiku` definition dispatched with `model: "sonnet"` sent
+   `{"effort": "low"}` — the call site wins EITHER way, and the effort SURVIVES where it wins onto
+   a model carrying the capability. So the definition route is not a lever standing BESIDE the
+   model lever: the call site overrides its `model:` on every dispatch, and additionally deletes
+   the effort on the subset that resolves to `haiku`. Those are two different widths, and the
+   second is the narrow one — the rule below never sends a call site there (see the menu
+   paragraph). Read this row as being about the MENU a definition set would need, not about a
+   downgrade this rule licenses.
 7. **An INTEGER effort is worse than no key at all.** `effort: 2` sent NO `output_config` and no
    effort beta, where the same definition with no `effort:` line sends `{"effort": "high"}`. So
    it does not fall back to the default — it removes it.
@@ -143,9 +151,20 @@ than it. Keep the claim at that width and no wider: what is shown here is that `
 an effort key REPRODUCES their outcome and carries a mechanism for it. Their build was not
 recorded and nothing was captured, so "this is what they saw" is an inference, not a reading.
 One competing story IS ruled out rather than argued away — that the key was simply wired later.
-Every installed build on this box from 2.1.229 to 2.1.252 carries the spawn layer that attaches
-the effort (one occurrence each) and the same haiku denylist (seven each), so the feature is not
-new. And this is no correction of the human anyway: the discriminator their repro lacked is a
+Every installed build on this box from 2.1.229 to 2.1.252 — seven of them — carries the spawn
+layer that attaches the effort, and the same effort ALLOWLIST that haiku is absent from. Each
+count is written with its NEEDLE beside it, because a count whose needle is not named cannot be
+re-run by anyone: `!==void 0?[{kind:"effort",effort:` occurs exactly once in each of the seven
+builds, and `capabilities:["effort"` exactly seven times in each. And 2.1.229's catalog entry for
+haiku already reads `context_management` with no effort capability, exactly as 2.1.252's does. So
+the feature is not new. (A previous round wrote "the same haiku denylist (seven each)" and named
+no needle at all. The seven is real; the description of it was not. The stable seven is the
+ALLOWLIST just named — the models that HAVE effort, haiku not among them — rather than a list of
+exclusions, and the needles that do NOT give seven include the model id `claude-haiku-4-5`, which
+gives 78/93/46/46/46/40/40 across the seven builds. Corrected rather than carried, and the lesson
+is the needle and not the number.)
+
+And this is no correction of the human anyway: the discriminator their repro lacked is a
 control on another model, and neither VMCP-313 nor this file had one either until it was run.
 
 The chain the value travels, named by the property names that survive minification so a later
@@ -175,7 +194,15 @@ every link is also pinned by a row of the table — the reading and the wire agr
   MEASURED, the last two rows of the second table. The validation message offers an integer and
   the normaliser accepts one, but the request builder writes the field only for a string, so
   `effort: 2` ships NO effort — strictly worse than writing no key, which ships the model default.
-  A misspelt level does fall back to that default, and nothing is printed anywhere.
+  A misspelt level does fall back to that default, and `claude -p` wrote nothing to STDERR —
+  which is the one channel that was WATCHED, so read "silently" as being about stderr rather
+  than about everywhere. A message does exist: the agent-file parser normalises the frontmatter
+  value and, when the value is present and the normaliser yields nothing, hands a line naming
+  the file and the bad effort to the log helper. That helper defaults its level to debug, and
+  the logger's own guard returns false when the process is neither the vendor's own nor in
+  debug mode — so outside a debug run the line is dropped before it reaches any stream or file.
+  READ IN CODE, NOT OBSERVED: no debug-mode run was made, so where it WOULD surface is a
+  reading; the only thing measured is the silent stderr.
 
 ### Where this evidence stops
 
@@ -232,12 +259,26 @@ gone: the `effort` key is no longer disputed, and a maintained set of definition
 that reaches a per-dispatch choice. Three things nonetheless keep it unbuilt, and the FIRST is new
 with the measurement rather than inherited from the old argument.
 
-* **It does not compose with the lever this rule already uses.** Point 6 above: the call-site
-  `model` beats the definition's, and when the call site names `haiku` the definition's effort is
-  deleted with no warning anywhere. The rule below PERMITS a one-rung downgrade, and the bottom
-  rung is exactly the model that voids the effort — so a definition menu and the model rule would
-  quietly cancel each other on the cards where both were used. That is a design problem, not a
-  wording problem, and it has to be solved before a menu is worth writing.
+* **Its MODEL column does not compose with the lever this rule already uses.** Point 6 above:
+  the call-site `model` beats the definition's, in both directions. So a menu entry that PAIRS a
+  model with an effort is already half-overridden by the per-card model decision — the PAIRING is
+  what fails to compose, it fails on EVERY model, and nothing has to be voided for it to fail.
+  **The voiding case is real but sits outside this rule, and an earlier round of this file said
+  otherwise.** It claimed the rule's permitted downgrade lands on the model that deletes the
+  effort. It does not: deleting the effort needs the resolved model to be `haiku`, while the rule
+  below permits ONE step, names its destination as Sonnet class — which carries the capability,
+  and which point 6 measured KEEPING an effort — and names the bottom rung UNMEASURED rather than
+  free. Nothing reaches `haiku` by another door either: the baseline is stated absolutely rather
+  than relative to the dispatching agent's own model, so a downgraded agent does not step again;
+  `model` is ignored for a `fork`; and the auditor dispatch is excluded by name. So the deletion
+  bites a DELIBERATE haiku dispatch, which this rule does not license. What remains is a hazard of
+  the MENU rather than of the rule, and it is worth designing around: a menu that itself wrote
+  `model: haiku` for some cheap role would carry a DEAD `effort:` key, with nothing announcing it
+  on any channel that was watched (points 4 and 6). Note the width: no logging site for the
+  DELETION path was located at all, so that is unverified in both directions rather than
+  established — a wire capture cannot see a local log line. That is a design problem, not a
+  wording problem,
+  and it has to be solved before a menu is worth writing.
 * **No rung of either ladder has been measured on this board.** Nothing here has measured whether
   a shallower agent costs verdict quality on any role — the ladder section below says the same
   about models. Building a menu today is picking levels by taste and shipping the taste to every
@@ -308,10 +349,24 @@ measurement. The two attempts are the point: the first used `git grep -E "\b(son
 and returned NOTHING, because `\b` is not a POSIX ERE word boundary and the pattern silently
 matched nothing at all. That is the same family as the `git log -S` case-sensitivity trap SKILL.md
 already records — a search that answers "there is none" when it never looked. VMCP-314 added a
-third member while reading the harness bundle: a `grep` pattern holding a `${...}` placeholder is
-read as an interval quantifier by BSD `grep`, so the exact string the binary carries comes back
-0 hits, exit 1, while `grep -F` on that identical string returns 1. Reach for `-F` when the needle
-is code.
+third member while reading the harness bundle, and its REWORK round had to re-measure it, because
+the first wording named the wrong tool and the wrong single cause. The `grep` an agent gets in
+this harness is a SHELL FUNCTION, not `/usr/bin/grep`: it runs the harness binary as ugrep 7.8.4
+with `-G` and `-I`, and each of those two flags answers "no hits" for a reason of its own.
+`-I` skips a BINARY haystack whatever the needle — on the bundle even a brace-free needle returns
+exit 1 and prints no count at all, where `/usr/bin/grep` finds it. `-G` then stops a `${...}`
+placeholder from matching as literal text: with `-a` lifting the first cause, a braced needle
+still comes back 0 hits, exit 1, while `-aF` on that identical string returns 1. The brace is the
+discriminator — a brace-free needle matches under both tools, and `-F` on the braced one matches —
+but note that the 0 hits are what was MEASURED; reading it as a BRE interval quantifier is the
+natural explanation, not an observation of the parser. And `/usr/bin/grep`, the real BSD grep
+2.6.0-FreeBSD, does NEITHER of these, with or without `-F`: the tool the first wording blamed is
+the one on this box that gets it right, which is why a reader who reproduced on `/usr/bin/grep`
+would have read the whole record as false. Two lessons rather than one: reach for `-F` when the
+needle is code, and for `-a` when the haystack is a binary. On a binary, `-F` alone does NOT
+suffice — it takes `-aF`, and it was reporting `-F` as sufficient that hid the second cause. Say
+WHICH grep you ran, too: "grep" names two different programs on this box, and the record is not
+reproducible without that word.
 
 Two consequences, and they are why the rule steps one rung and stops:
 

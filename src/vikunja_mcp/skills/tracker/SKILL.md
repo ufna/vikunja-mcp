@@ -508,9 +508,11 @@ where. Here — what must not be broken:
   MEASURED to reach the wire — the value written in the file arrives on the subagent's own API
   request, it BEATS the session's `--effort`, and an absent key INHERITS the session instead. But
   it is deleted, silently, whenever the resolved model carries no effort capability — which is
-  what `haiku` is — and **the `model` you pass HERE overrides the definition's own**, so the one
-  rung down this rule permits is itself capable of voiding it. So a maintained SET of definitions
-  is a lever that does not yet COMPOSE with this one, and this repo defines no agent types anyway:
+  what `haiku` is — and **the `model` you pass HERE overrides the definition's own**, BOTH ways,
+  so a definition's `model:` does no work on any dispatch that names one. Deleting the effort
+  needs a call site that RESOLVES to `haiku`, and the rule below never permits that: its one step
+  stops at Sonnet class, which HAS the capability. So a maintained SET of definitions is a lever
+  whose model half this one already overrides, and this repo defines no agent types anyway:
   today it is not a lever you HAVE, and do not write a rule that assumes one. The session-wide
   controls (`effortLevel`, `/effort`, `MAX_THINKING_TOKENS`) move the whole SESSION — and a
   subagent that names no effort inherits them, which makes them worse as a per-card lever rather
