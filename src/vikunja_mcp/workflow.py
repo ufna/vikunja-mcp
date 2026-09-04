@@ -21,7 +21,18 @@ from .config import DEFAULT_LANGUAGE, DEFAULT_WIP_LIMIT
 from .formatting import html_to_text
 from .notify import WebhookNotifier
 
-STAGES = ["Backlog", "Queue", "Design", "Build", "Review", "Your Call", "Done"]
+STAGES = ["Backlog", "Queue", "Design", "Build", "Review", "Your Call", "Done", "Icebox"]
+# Icebox (#1640) is the "backlog of the backlog": very minor work, lyricism, permanent legacy
+# — cards nobody is expected to pick up and nobody should burn tokens gold-plating. It is the
+# ONE canonical column a board may legitimately lack, and that is not a nicety: `stable` is a
+# moving channel re-resolved at every session start, so the release carrying this stage reaches
+# every consumer board before any human runs `vikunja-mcp setup` on it. Were the presence check
+# below run over STAGES, the FIRST call of ANY tool on such a board would answer "run
+# `vikunja-mcp setup`" — the whole fleet down until each board is migrated by hand.
+# Note where it does NOT appear: not in NEXT_TASK_STAGES (so the column gates the pump for
+# free), not in ACTIVE_STAGES, and not in READY_STAGES — see the frozen-predecessor clause in
+# `_predecessor_frozen` for what that last one costs and how the cost is paid.
+REQUIRED_STAGES = [s for s in STAGES if s != "Icebox"]
 ACTIVE_STAGES = ("Design", "Build")
 # The only stages next_task ever inspects (Queue for free/stuck tasks, Design/Build for my
 # active ones, Review for bug re-review). It never reads Done/Backlog/Your Call, so its board
@@ -35,6 +46,18 @@ LABEL_EPIC_READY = "epic-ready"
 LABEL_BUG = "bug"
 LABEL_REVIEWED = "reviewed"            # прошёл независимое агентское ревью
 LABEL_REVIEW_FAILED = "review-failed"  # отбит на доработку, сейчас переделывается
+# #1640: the freezer's marker. English like the other twelve — `language` governs card PROSE,
+# never a marker. IT IS NOT A GATE, and that is the card's central decision: it is deliberately
+# absent from `offerable_queue`, where LABEL_BLOCKED and LABEL_EPIC sit, because that filter
+# drops a card SILENTLY (two lines below it, `withheld` is built exclusively from `excluded`).
+# The COLUMN gates; the label is what survives a move out of it, and what rides in the payload
+# as ICEBOX_HINT so an agent working such a card knows to spend the minimum.
+LABEL_ICEBOX = "icebox"
+ICEBOX_HINT = (
+    "this card is iceboxed (label `icebox`): legacy/very-minor work. Do the MINIMUM that is "
+    "correct — no refactor, no adjacent cleanup, no gold-plating. If it turns out to need real "
+    "work, say so in your report and let a human re-prioritise it rather than doing it here."
+)
 
 # Hard sequence gate (option C, epic #94). A predecessor is "ready" — no longer blocks its
 # successor — only at Review or Done. The human chose REVIEW (not Done) as the bar so a chain
@@ -83,6 +106,26 @@ _OWNERLESS_EXITS: dict[str, str] = {
         "from THERE is the ordinary queue's business, not a promise this refusal can make. Leave "
         "it and take the next task"
     ),
+    # Icebox (#1640) takes Backlog's shape for Backlog's reason, one step further out: the
+    # freezer holds cards nobody has undertaken, so having no assignee is not merely ordinary
+    # there, it is the DEFINITION of the column. Nothing to report and nothing to fix — but
+    # unlike Backlog there is no triage coming either, so the exit says so rather than leaving
+    # an agent waiting for a human who is not on their way.
+    # The last clause is scoped to THIS branch on purpose. `return_task` and `decompose` are not
+    # gated on Icebox and would work on a card there that an agent OWNS — which is why the text
+    # says "while it has no owner" rather than the flat "only a human moves a card out of
+    # Icebox" an earlier draft carried. That flat claim was false, and the asymmetry with Done
+    # is what makes leaving those two ungated right: the ordinary lifecycle parks an ASSIGNED
+    # card in Done (#626's whole point — `_require_mine` passes on the very card that must be
+    # untouchable), while an assigned card in Icebox takes a deliberate human hand, and a human
+    # who assigns an agent to a frozen card is saying "do this one after all".
+    "Icebox": (
+        ", so no call of yours can make it yours. That is not damage and not yours to fix: "
+        "Icebox is the freezer — legacy and very-minor cards nobody has undertaken, where an "
+        "ownerless card is the ordinary state and no triage is pending. Nothing here is work "
+        "for you. While it has no owner no tool of yours moves it, so if you believe this one "
+        "genuinely must be done, say so in your report and leave it where it is."
+    ),
     # Review is the ONE non-Queue stage an agent can move this card out of (measured), so the
     # shared "only a human can move it back" would be a LIE here — and the reviewer's own tool
     # never needs ownership in the first place. Reached by `advance` only: call_human,
@@ -122,7 +165,8 @@ _OWNERLESS_EXITS: dict[str, str] = {
 # map like `_OWNERLESS_EXITS` above, and the asymmetry is measured rather than lazy: for an
 # OWNERLESS card the true exit really does differ by stage (an agent can walk one out of Review
 # and out of none of the others), while for a card with an OWNER the stage axis COLLAPSES —
-# `claim` refuses from all seven, and "leave it to its owner" is the same right action in each.
+# `claim` refuses from all eight (#1640 added Icebox), and "leave it to its owner" is the same
+# right action in each.
 #
 # This REVERSES a decision #705 and #734 each took deliberately — keep the bare message here,
 # since "not assigned to you" is already an accurate diagnosis and "leave it alone" an unchanged
@@ -131,8 +175,8 @@ _OWNERLESS_EXITS: dict[str, str] = {
 # price named out loud: two pins on STRING EQUALITY had to be rewritten for it. What moved the
 # balance is exactly two measurements neither earlier card had, and no third argument:
 # (1) `claim` refuses a card that HAS an owner from QUEUE TOO (`already taken (…) — grab the next
-# one via next_task`), so "claim it first" is unfollowable for a foreign card in all seven stages
-# rather than in the six outside Queue; and (2) the refusal an agent gets when it follows the
+# one via next_task`), so "claim it first" is unfollowable for a foreign card in all eight stages
+# rather than in the seven outside Queue; and (2) the refusal an agent gets when it follows the
 # advice outside Queue — `task is in '<stage>', you can only claim from Queue` — says nothing
 # about the owner at all. Correct, and not about the thing the agent needs to know.
 #
@@ -486,12 +530,26 @@ class Workflow:
         if self._buckets_cache is None:
             found = self.api.buckets(self.project_id, self._view()["id"])
             self._buckets_cache = {b["title"]: b for b in found}
-            missing = [s for s in STAGES if s not in self._buckets_cache]
+            # REQUIRED_STAGES, not STAGES (#1640): Icebox is optional, so an un-migrated board
+            # must keep answering every OTHER call. Widening this back to STAGES takes the whole
+            # fleet down at the next `stable` resolve — see the constant's own comment.
+            missing = [s for s in REQUIRED_STAGES if s not in self._buckets_cache]
             if missing:
                 raise WorkflowError(
                     f"the project board has no columns {missing} — run `vikunja-mcp setup`"
                 )
-        return self._buckets_cache[title]
+        try:
+            return self._buckets_cache[title]
+        except KeyError:
+            # Reachable ONLY for an optional stage — every required one was just checked. A bare
+            # KeyError here would not be a refusal but a CRASH: `server._tool` converts
+            # WorkflowError/ConfigError/VikunjaError/httpx.HTTPError and nothing else, so it
+            # would escape the decorator and take the stdio server down mid-session.
+            raise WorkflowError(
+                f"this project's board has no '{title}' column — run `vikunja-mcp setup` to "
+                f"add it (it is the one canonical column a board may lack, so nothing else on "
+                f"this board is wrong). Nothing was changed."
+            ) from None
 
     # --- поиск и проверки ---
     def _board(self, require_titles: set[str] | None = None) -> list[dict]:
@@ -737,6 +795,17 @@ class Workflow:
                 if found is None or found[1] in READY_STAGES:
                     continue  # genuinely gone (absent even from the full board) or already ready
                 pred_task, pred_stage = found
+                # #1640: a predecessor in the freezer RESOLVED fine — its stage is known — but
+                # it is not finishable, because no agent tool moves a card out of Icebox (claim
+                # takes only Queue). Marking it here is what drops the generic "finish that one
+                # first" tail, which is the single action nobody can take. It rides the same
+                # `finishable` key #1190 introduced, but NOT that card's `escape` key: those
+                # escapes print under a lead that says the stage "could NOT be established",
+                # which is false of this one and would make the refusal lie. Its clause is
+                # `_predecessor_frozen`, kept separate for exactly that reason. The merge (not
+                # an overwrite) leaves an unresolvable blocker's advice untouched.
+                if pred_stage == "Icebox":
+                    advice = {**advice, "finishable": False}
                 entry = {
                     "id": pid, "ref": self._ref(pred_task),
                     "title": pred_task["title"], "stage": pred_stage,
@@ -754,7 +823,7 @@ class Workflow:
         """{task_id: stage} for ANOTHER project's kanban board, or None when it cannot be read.
 
         Deliberately separate from _board/_view/_bucket and their caches, for the same reason
-        _target_backlog is: those are pinned to self.project_id and feed every hot gate, while
+        _target_bucket is: those are pinned to self.project_id and feed every hot gate, while
         this is a rare coordination read. No cache -> no new staleness surface.
 
         None is "UNKNOWN", never "empty": 403 (the token was never shared this project), 404
@@ -943,12 +1012,43 @@ class Workflow:
         the card is about: there the generic sentence is the one action that cannot be taken and
         it was the only one printed."""
         unresolvable = Workflow._predecessor_escapes(blockers)
-        if not unresolvable:
+        # #1640 adds a SECOND unactionable-blocker clause beside #1190's. Two clauses and not
+        # one because the two are unactionable for different reasons and only one of them is
+        # about the stage being unknown — `_predecessor_escapes` prints under a lead that says
+        # so out loud, and a frozen predecessor's stage is perfectly well known. Composition,
+        # not replacement: a card can wait on one of each.
+        frozen = Workflow._predecessor_frozen(blockers)
+        tail = " ".join(clause for clause in (unresolvable, frozen) if clause)
+        if not tail:
             return generic
         if not any(blocker.get("finishable", True) for blocker in blockers):
-            return unresolvable
+            return tail
         separator = "" if generic.rstrip().endswith((".", "!", "?")) else "."
-        return f"{generic}{separator} {unresolvable}"
+        return f"{generic}{separator} {tail}"
+
+    @staticmethod
+    def _predecessor_frozen(blockers: list[dict]) -> str:
+        """The clause for a predecessor parked in Icebox, or "" when none is (#1640).
+
+        Keying off the STAGE and not off a per-blocker key is deliberate: every caller that can
+        see a blocker already carries its stage, so a frozen predecessor reads the same whether
+        it was resolved on this board or on a neighbour's, and no new key has to be threaded
+        through `_offboard_predecessor`.
+
+        ONE sentence however many blockers are frozen, like `_predecessor_escapes` dedupes: the
+        refs are printed above this clause by every caller, so repeating them here would say
+        the same thing twice. What it must NOT do is imply waiting helps — Icebox is not a
+        queue, and the successor of a frozen card is blocked until a person acts."""
+        frozen = [b for b in blockers if b.get("stage") == "Icebox"]
+        if not frozen:
+            return ""
+        return (
+            f"{len(frozen)} of those sit(s) in Icebox — the freezer for legacy and very-minor "
+            f"work nobody has undertaken. That does NOT clear by being worked and no tool of "
+            f"yours moves a card out of Icebox, so waiting will not help: either a human pulls "
+            f"it back into Backlog/Queue, or the follows/blocked link to it is the thing to "
+            f"drop. Report it rather than sitting behind it."
+        )
 
     @staticmethod
     def _predecessor_escapes(blockers: list[dict]) -> str:
@@ -1598,13 +1698,21 @@ class Workflow:
 
     @staticmethod
     def _summary(task: dict) -> dict:
-        return {
+        summary = {
             "id": task["id"],
             "ref": Workflow._ref(task),
             "title": task["title"],
             "priority": task.get("priority", 0),
             "description": (task.get("description") or "")[:500],
         }
+        # #1640: the `icebox` label's ONLY job — it is not a gate (see LABEL_ICEBOX), it is an
+        # effort budget delivered to whoever ends up working the card. Present only when the
+        # label is, so every ordinary card's payload is byte-for-byte what it was; the value is
+        # the instruction itself rather than a bare True, because the reader is an agent and a
+        # flag it has to look up somewhere else is a flag it will not honour.
+        if Workflow._has_label(task, LABEL_ICEBOX):
+            summary["icebox"] = ICEBOX_HINT
+        return summary
 
     # --- тулзы ---
     def next_task(self, exclude: list[int] | None = None) -> dict:
@@ -2136,6 +2244,14 @@ class Workflow:
         escapes = self._predecessor_escapes([b for w in waiting for b in w["blocked_by"]])
         if escapes:
             message += f". {escapes}"
+        # #1640: the same additive-clause shape once more, for the third kind of tail that does
+        # not self-clear. It matters MOST here of the three places a frozen predecessor can be
+        # named: claim's refusal reaches an agent that asked for this card by id, while an
+        # ordinary /loop drain never claims a gated card at all — it skips it — so without this
+        # sentence a chain frozen behind an iceboxed head is a queue that quietly never moves.
+        frozen = self._predecessor_frozen([b for w in waiting for b in w["blocked_by"]])
+        if frozen:
+            message += f". {frozen}"
         return {
             "task": None,
             "starving": True,
@@ -2421,8 +2537,8 @@ class Workflow:
             self.project_id, self._view()["id"], self._bucket(stage)["id"], task_id
         )
 
-    def _target_backlog(self, project_id: int) -> tuple[int, int]:
-        """(view_id, bucket_id) колонки Backlog на ЧУЖОЙ доске — кросс-проектная половина
+    def _target_bucket(self, project_id: int, stage: str = "Backlog") -> tuple[int, int]:
+        """(view_id, bucket_id) КОЛОНКИ `stage` на ЧУЖОЙ доске — кросс-проектная половина
         file_task. Сознательно ОТДЕЛЬНА от _view/_bucket/_move: те (и их кэши) привязаны к
         self.project_id и питают каждый горячий гейт, а кросс-файлинг — редкое событие
         координации, поэтому здесь свежий kanban_view+buckets на каждый вызов (без кэша ->
@@ -2446,14 +2562,26 @@ class Workflow:
                     f"wrong, or the project has no kanban board. Nothing was created."
                 ) from exc
             raise
-        backlog = next((b for b in found if b["title"] == "Backlog"), None)
-        if backlog is None:
+        bucket = next((b for b in found if b["title"] == stage), None)
+        if bucket is None:
+            # #1640 split this one refusal in two, because the two absences mean opposite
+            # things. No 'Backlog' says the target is not a tracker board AT ALL; no 'Icebox'
+            # says it is a perfectly good board that predates this stage — telling that human
+            # their board is "not tracker-managed" would send them to re-run setup on a fear
+            # rather than on the reason. Both still refuse BEFORE the card exists.
+            if stage == "Backlog":
+                raise WorkflowError(
+                    f"can't file into project {project_id}: its board has no 'Backlog' "
+                    f"column — not a tracker-managed board (run `vikunja-mcp setup` for it "
+                    f"first). Nothing was created."
+                )
             raise WorkflowError(
-                f"can't file into project {project_id}: its board has no 'Backlog' "
-                f"column — not a tracker-managed board (run `vikunja-mcp setup` for it "
-                f"first). Nothing was created."
+                f"can't file into project {project_id}'s '{stage}': that board has no "
+                f"'{stage}' column yet — it is a tracker board from before this stage "
+                f"existed, and a human must run `vikunja-mcp setup` for it. File without "
+                f"icebox=True to reach their Backlog instead. Nothing was created."
             )
-        return view["id"], backlog["id"]
+        return view["id"], bucket["id"]
 
     def _mark_epic_if_children_complete(self, child: dict, board: list[dict]) -> None:
         """Best-effort epic-complete marker (#118 Part 2). When THIS child's advance→review makes
@@ -3067,7 +3195,7 @@ class Workflow:
     def file_task(
         self, title: str, description: str = "", priority: int = 0,
         related_task_id: int | None = None, project_id: int | None = None,
-        queue: bool = False,
+        queue: bool = False, icebox: bool = False,
     ) -> dict:
         """File a finding (a bug/tech-debt OUTSIDE the current task) into Backlog for
         human triage — NOT into Queue (a human prioritizes). Optionally: a 'related'
@@ -3086,7 +3214,19 @@ class Workflow:
         with work nobody there sanctioned), so queue+cross is refused before anything
         is created. The result's filed.ref (#735) is the card's readable name — echo it
         VERBATIM, never reconstruct one from the id (it is not searchable, so nobody
-        downstream can check a fabricated one; see _ref)."""
+        downstream can check a fabricated one; see _ref).
+
+        icebox=True (#1640) files into the freezer instead: the Icebox column plus the
+        `icebox` label, for a finding that is real but very minor — cosmetic legacy, lyricism,
+        something nobody is ever expected to pick up. It is the honest destination for the
+        finding an agent would otherwise drop in Backlog to sit forever, and it exists so that
+        Backlog keeps meaning "work a human still has to triage". It is NOT combinable with
+        queue (opposite instructions: "do this now" against "nobody will do this") and, unlike
+        queue, it IS allowed cross-project — the asymmetry is the whole reason queue is
+        refused there. Another project's Queue injects work their human never sanctioned and
+        wakes their fleet; another project's Icebox wakes nobody and claims nothing of theirs.
+        Both destinations are resolved BEFORE the card is created, so a board that predates
+        this stage refuses with nothing left behind."""
         if not (title or "").strip():
             raise WorkflowError("a non-empty title is required for the new task")
         target = self.project_id if project_id is None else int(project_id)
@@ -3099,29 +3239,60 @@ class Workflow:
                 "someone else's Queue. Drop queue to file into their Backlog, or ask "
                 "via call_human. Nothing was created."
             )
+        if queue and icebox:
+            raise WorkflowError(
+                "queue=True can't be combined with icebox=True: they are opposite "
+                "instructions. queue means a human asked for this work NOW (it lands "
+                "claimable), icebox means nobody is expected to do it at all. Pick the one "
+                "the human actually said, or file plainly into Backlog and let them triage. "
+                "Nothing was created."
+            )
         if cross and target <= 0:
             raise WorkflowError(
                 f"project_id must be a positive Vikunja project id, got {target} "
                 f"(negative ids are Vikunja pseudo-projects like favorites)"
             )
-        # кросс: резолвим доску ЦЕЛИ до create_task (fail-fast, см. _target_backlog);
+        # явно в Backlog/Queue/Icebox: не полагаемся на то, что default-бакет проекта == Backlog
+        stage = "Icebox" if icebox else ("Queue" if queue else "Backlog")
+        # кросс: резолвим доску ЦЕЛИ до create_task (fail-fast, см. _target_bucket);
         # свой проект: порядок сегодняшний (create -> _move), байт-в-байт.
-        coords = self._target_backlog(target) if cross else None
+        coords = self._target_bucket(target, stage) if cross else None
+        # #1640: свой проект — та же проверка ДО create_task, и только для Icebox. Backlog/Queue
+        # обязательны (REQUIRED_STAGES), их отсутствие ловит первый же _bucket; Icebox же может
+        # законно отсутствовать на не мигрированной доске, а _move зовётся ПОСЛЕ create_task —
+        # то есть без этой строки отказ оставлял бы карточку сиротой в дефолт-бакете. Кэш
+        # бакетов один на Workflow, так что лишнего запроса это не стоит.
+        if icebox and not cross:
+            self._bucket("Icebox")
         created = self.api.create_task(
             target, title.strip(),
             description=(description or "").strip(), priority=int(priority or 0),
         )
         new_id = created["id"]
-        # явно в Backlog/Queue: не полагаемся на то, что default-бакет проекта == Backlog
-        stage = "Queue" if queue else "Backlog"
         if cross:
             view_id, bucket_id = coords
             self.api.move_task(target, view_id, bucket_id, new_id)
         else:
             self._move(new_id, stage)
+        # #1640: the label goes on in BOTH branches — it is what survives the card being dragged
+        # out of the column, and the only part of "iceboxed" a cross-project reader can see
+        # without knowing which column it landed in. Through `_add_label` like every other label
+        # write in this class, so the already-labelled case is a no-op rather than a 400.
+        if icebox:
+            self._add_label(created, LABEL_ICEBOX)
         if related_task_id is not None:
             self.api.add_relation(new_id, related_task_id, "related")
-        if cross:
+        # #1640 adds the fourth and fifth provenance bases beside the three below, rather than a
+        # suffix on them: an iceboxed card is NOT "for human triage" and must not say it is —
+        # Backlog's whole meaning is that a human still owes it a decision, and the freezer's is
+        # that one has already been made. The cross variant stays separate for the same reason
+        # the cross base itself does: the target's humans read it, and what they need first is
+        # where the card came from.
+        if cross and icebox:
+            body = card_text(self.language, "filed_cross_icebox", project_id=self.project_id)
+        elif icebox:
+            body = card_text(self.language, "filed_icebox")
+        elif cross:
             # provenance: люди ЦЕЛЕВОГО проекта должны видеть, откуда пришла карточка
             body = card_text(self.language, "filed_cross_project", project_id=self.project_id)
         elif queue:
@@ -3169,13 +3340,29 @@ class Workflow:
                 "title": created["title"], "stage": stage,
             },
             "note": (
-                "in Queue, unassigned — immediately claimable (Backlog triage bypassed; "
+                "in Icebox, labelled `icebox` — the freezer: very minor / legacy work nobody "
+                "is expected to pick up. next_task never offers it (the COLUMN is the gate), "
+                "and if a human later drags it into Queue it IS offered, carrying the label "
+                "as an instruction to do the minimum. Do not treat filing here as fixing it"
+                if icebox
+                else "in Queue, unassigned — immediately claimable (Backlog triage bypassed; "
                 "queue=True is only for tasks a human explicitly asked to file as work)"
                 if queue
                 else "in Backlog for human triage (not Queue — a human prioritizes)"
             ),
         }
-        if cross:
+        if cross and icebox:
+            result["filed"]["project_id"] = target
+            result["note"] = (
+                f"filed into project {target}'s Icebox, labelled `icebox` — their freezer "
+                f"for very minor / legacy work. It wakes nobody there and claims nothing of "
+                f"theirs, which is why this is allowed cross-project where queue=True is not. "
+                f"The card lives on the TARGET board: your other tools (get_task/comment/"
+                f"next_task) are bound to your own project and won't see it — the 'related' "
+                f"link is the cross-reference. `ref` carries the TARGET project's identifier "
+                f"prefix, not yours"
+            )
+        elif cross:
             result["filed"]["project_id"] = target
             result["note"] = (
                 f"filed into project {target}'s Backlog for THAT project's human to "
@@ -3270,9 +3457,9 @@ class Workflow:
                 f"for a neighbour without pausing anything, use file_task(project_id=...)."
             )
         self._require_mine(task, stage)
-        # fail-fast, the _target_backlog rule: a target the token cannot reach refuses here,
+        # fail-fast, the _target_bucket rule: a target the token cannot reach refuses here,
         # with nothing created and this card untouched.
-        view_id, bucket_id = self._target_backlog(target)
+        view_id, bucket_id = self._target_bucket(target)
         created = self.api.create_task(
             target, title.strip(),
             description=(description or "").strip(), priority=int(priority or 0),
@@ -3363,7 +3550,7 @@ class Workflow:
                 f"first (or transfer them individually). Nothing was changed."
             )
         # fail-fast before the first write, exactly as in handoff/file_task
-        view_id, bucket_id = self._target_backlog(target)
+        view_id, bucket_id = self._target_bucket(target)
         source_project = self.project_id
         self.api.update_task(task_id, project_id=target)
         # Vikunja parks a moved card in the target's DEFAULT bucket (measured), so Backlog is
@@ -3430,6 +3617,12 @@ class Workflow:
             }
             for a in task.get("attachments") or []
         ]
+        # #1640: `labels` below already NAMES the label, so this is not the fact — it is the
+        # INSTRUCTION that follows from it, the same one _summary attaches to an offer. A
+        # dossier is read by an agent about to work the card, which is precisely the moment the
+        # effort budget applies; leaving it to be inferred from a label list is how it gets
+        # missed. Absent on an ordinary card, so the dossier's shape does not move.
+        icebox = ICEBOX_HINT if Workflow._has_label(task, LABEL_ICEBOX) else None
         return {
             "id": task["id"],
             "ref": self._ref(task),
@@ -3448,6 +3641,7 @@ class Workflow:
                  "text": html_to_text(c.get("comment", ""))}
                 for c in raw_comments
             ],
+            **({"icebox": icebox} if icebox else {}),
         }
 
     def download_attachment(self, task_id: int, attachment_id: int) -> dict:

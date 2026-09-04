@@ -373,7 +373,11 @@ def test_every_key_carries_every_language():
 # mechanism delivers "no Latin run outside this list", which catches text LEFT BEHIND in ordinary
 # words, and that is the failure that actually happens.
 _LATIN_KEPT_IN_RU = {
-    "Backlog", "Build", "Done", "Queue", "Review",   # board columns / stages, shown as-is by the UI
+    # board columns / stages, shown as-is by the UI. `Icebox` (#1640) joins them for exactly the
+    # reason the other five are here and not for a weaker one: the column TITLE is the identifier
+    # Vikunja keys the bucket by, `setup` reconciles boards against it, and a human reading the
+    # card comment has to find that same word on their own board.
+    "Backlog", "Build", "Done", "Icebox", "Queue", "Review",
     "Evidence",   # pre-#1164 text: this label was already English while the block around it was not
     "id",         # a field name, rendered as `id={project_id}`
     "precedes",   # the relation kind, a wire term rather than a word

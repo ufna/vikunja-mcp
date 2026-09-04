@@ -54,7 +54,7 @@ class _ReportingWorkflow:
         return {"task_id": task_id, "to": to, "to_type": type(to).__name__, "reason": reason}
 
     def file_task(self, title, description="", priority=0, related_task_id=None,
-                  project_id=None, queue=False):
+                  project_id=None, queue=False, icebox=False):
         # The CONTROL for the two above: the cross-project door that already existed.
         return {"project_id": project_id, "project_id_type": type(project_id).__name__}
 

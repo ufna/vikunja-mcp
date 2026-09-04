@@ -3854,8 +3854,10 @@ def test_the_rulebook_names_BOTH_stages_return_task_refuses_from():
         wf.return_task(under_review["id"], reason="внешний блок")
     assert api.stage_of(under_review["id"]) == "Review"
 
-    # ...and the five stages the same bullet still promises are genuinely open
-    for stage in ("Backlog", "Queue", "Design", "Build", "Your Call"):
+    # ...and the six stages the same bullet still promises are genuinely open. Icebox joined
+    # them in #1640 and is pinned like the rest rather than trusted: it is the one whose prose
+    # explains why it is NOT gated, so a later card adding the gate has to come through here.
+    for stage in ("Backlog", "Queue", "Design", "Build", "Your Call", "Icebox"):
         card = api.add_task(f"blocked in {stage}", stage, assignee=api.me_user)
         assert wf.return_task(card["id"], reason="чужой сервис лежит")["moved_to"] == "Backlog", \
             f"the bullet promises return_task still works from {stage}; it does not"
@@ -4020,7 +4022,7 @@ def test_the_rulebook_names_BOTH_stages_decompose_refuses_from():
         "SKILL.md says decompose refuses from Review and points at review_task; it no longer does"
     assert api.stage_of(under_review["id"]) == "Review", "the refusal split the card under review"
 
-    for stage in ("Backlog", "Queue", "Design", "Build", "Your Call"):
+    for stage in ("Backlog", "Queue", "Design", "Build", "Your Call", "Icebox"):
         card = api.add_task(f"big job in {stage}", stage, assignee=api.me_user)
         assert wf.decompose(card["id"], [{"title": "A"}, {"title": "B"}])["parent"]["moved_to"] \
             == "Backlog", f"the bullet promises decompose still works from {stage}; it does not"

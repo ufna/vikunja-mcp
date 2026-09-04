@@ -103,6 +103,20 @@ _TABLE: dict[str, dict[str, str]] = {
         "en": "filed by an agent for human triage",
         "ru": "заведено агентом для триажа человеком",
     },
+    # #1640: the freezer's two. Neither says "for human triage" — that is Backlog's promise,
+    # and repeating it here would tell a reader a decision is still owed when the point of the
+    # column is that one was already made.
+    "filed_icebox": {
+        "en": "filed by an agent straight into Icebox: very minor / legacy, not expected "
+              "to be picked up",
+        "ru": "заведено агентом сразу в Icebox: очень мелкое / легаси, браться не планируется",
+    },
+    "filed_cross_icebox": {
+        "en": "filed by an agent from project id={project_id} into Icebox: very minor / "
+              "legacy, not expected to be picked up",
+        "ru": "заведено агентом из проекта id={project_id} в Icebox: очень мелкое / легаси, "
+              "браться не планируется",
+    },
     "filed_related": {
         "en": " (found while working on #{related_task_id})",
         "ru": " (по ходу работы над #{related_task_id})",

@@ -126,3 +126,26 @@ def test_setup_refuses_an_unknown_language_before_touching_the_board(capsys):
     else:
         raise AssertionError("setup accepted --language de")
     assert "invalid choice: 'de'" in capsys.readouterr().err
+
+
+def test_icebox_is_created_rightmost_and_an_existing_one_is_reused():
+    """#1640. `setup` needed no code change — the column rides in on STAGES — so what is pinned
+    here is that riding in, in both directions: a board that never had the freezer GAINS it at
+    the far right (positions come from `enumerate(STAGES)`, and Done sorting before it is the
+    human's choice), and a board that already has one keeps the SAME bucket, tasks and all.
+
+    The reuse half is the one that matters in the field: the dogiators boards this card came
+    from already carry a hand-made `Icebox`, so a reconcile that created a second one beside it
+    would strand every card a human had already frozen there."""
+    api = FakeAPI(buckets=[])
+    api.project = {"id": -999, "title": "nothing"}
+    reconcile(api, "voice", shares=[])
+    titles = bucket_titles(api)
+    assert titles[-1] == "Icebox"                    # far right, after Done
+    assert titles == STAGES
+
+    frozen = api.add_task("legacy nit a human froze by hand", "Icebox")
+    icebox_id = api.bucket_id("Icebox")
+    reconcile(api, "voice", shares=[])
+    assert api.bucket_id("Icebox") == icebox_id      # reused, not re-created beside the old one
+    assert api.stage_of(frozen["id"]) == "Icebox"    # and the frozen card did not move

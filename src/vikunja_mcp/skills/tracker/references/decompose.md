@@ -18,9 +18,14 @@
   previous one has reached Review, and by that moment its commit is ALREADY in the main branch
   (the push is part of the move to Review), so the next one will take its own tree off a base where
   the predecessor exists.
-  **It REFUSES from TWO stages — Review and Done — and works from the other five** (Backlog,
-  Queue, Design, Build, Your Call). "Works" here is about the STAGE: the ownership guard is in
-  place there too, `decompose` will not break up someone else's card from any of the five. From
+  **It REFUSES from TWO stages — Review and Done — and works from the other six** (Backlog,
+  Queue, Design, Build, Your Call, Icebox). "Works" here is about the STAGE: the ownership guard
+  is in place there too, `decompose` will not break up someone else's card from any of the six.
+  Icebox is on that list rather than gated, and the asymmetry with Done is the reason (#1640):
+  the ordinary lifecycle parks an ASSIGNED card in Done, which is exactly why the ownership guard
+  could not stand in for a stage gate there — while a card in the freezer is ownerless by
+  definition, so reaching it at all takes a human hand-assigning you to it, and a human who does
+  that is saying "do this one after all". From
   Review (#663) — because the decision "this work has to be split" is taken in Build, not over a
   card that is already being reviewed. Measured: before the gate `decompose` took a card standing
   under review off to Backlog with no assignee, with the `epic` label and two new children in
@@ -55,6 +60,19 @@
   pass the `related_task_id` of your current task to tie the finding to its context.
   This is orthogonal to decompose: decompose splits YOUR big task into subtasks in
   Queue, `file_task` parks a finding that belongs elsewhere in Backlog for a human to triage.
+- **`icebox=True` when the finding is REAL but nobody will ever prioritise it** (#1640) — cosmetic
+  legacy, wording, a nit in code nobody maintains. The card goes to the `Icebox` column with the
+  `icebox` label instead of Backlog. The point is what it protects: Backlog means "a human still
+  owes this a decision", and a stream of findings nobody will ever pick makes that promise false,
+  so the freezer is where you put the ones you would otherwise be filing into oblivion.
+  Two ways to get this wrong, and they pull in opposite directions. Do NOT freeze work you simply
+  did not want to do — the test is whether a reasonable human WOULD prioritise it, not whether you
+  would enjoy it. And do NOT treat filing there as having dealt with the finding: say in your
+  report that you froze it and why, so the human can disagree while it is still cheap.
+  It is refused together with `queue=True` (opposite instructions), and it IS allowed
+  cross-project where `queue` is not — their Queue injects work their human never sanctioned,
+  their Icebox wakes nobody. On a board created before the freezer existed the call refuses with
+  NOTHING created and names `vikunja-mcp setup`; file without `icebox=True` to reach their Backlog.
 - **The THRESHOLD for filing: a finding about PROSE becomes a CARD only if it changes what the
   reader WILL DO. Otherwise — a COMMENT on the card whose text is under discussion.** The QUESTION
   itself is not new — "change not a single decision of the reader" already stands in the stopping

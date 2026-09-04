@@ -142,6 +142,11 @@ measured shape of both exemptions.
   not just bug fixes — tracker #117: `advance(to='review')` nudges `review_needed` +
   `review_kind` (`'bug'`|`'change'`) for any card WITHOUT the `epic` label, and resets a
   stale verdict). An epic container is the lone exception: its code lives in its children.
+  **`Icebox` (#1640) is the eighth stage and the ONE OPTIONAL column**: `_bucket` checks
+  `REQUIRED_STAGES`, NEVER `STAGES` — widening it fails every tool on every board that has not
+  run `setup`, at the next `stable` resolve. The COLUMN gates (it is not in `NEXT_TASK_STAGES`);
+  the `icebox` LABEL never does — that filter drops a card SILENTLY, and a human's drag into
+  Queue is an instruction, not an oversight. Agent entrance: `file_task(icebox=True)`.
   **A predecessor may live in ANOTHER project, and the gate must resolve it there** (tracker
   #1179). Vikunja relations are task-to-task and cross projects freely — measured: a card moved
   between projects kept a `blocked` link to one left behind — but `_unfinished_predecessors`

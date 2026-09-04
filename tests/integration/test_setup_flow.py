@@ -19,7 +19,10 @@ def test_fresh_setup_and_idempotency(boss_jwt):
     api = VikunjaAPI(BASE, boss_jwt)
     name = f"proj-{uuid.uuid4().hex[:8]}"
     pid = reconcile(api, name, shares=[("agent1", 1), ("agent2", 1)])
-    assert titles(api, pid) == STAGES     # включая ПОРЯДОК колонок (Done — последняя)
+    # включая ПОРЯДОК колонок. Последняя — Icebox, а не Done (#1640): она стоит СПРАВА от
+    # Done, так что этот ассерт заодно проверяет, что опциональность колонки в _bucket не
+    # означает опциональности её СОЗДАНИЯ — на свежей доске setup обязан её завести.
+    assert titles(api, pid) == STAGES
     view = api.kanban_view(pid)
     # если GET вида не отдаёт done_bucket_id — проверять возврат configure_kanban (тогда
     # поправить reconcile, чтобы он возвращал/логировал ответ), но не ослаблять проверку
