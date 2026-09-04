@@ -146,7 +146,9 @@ measured shape of both exemptions.
   `REQUIRED_STAGES`, NEVER `STAGES` — widening it fails every tool on every board that has not
   run `setup`, at the next `stable` resolve. The COLUMN gates (it is not in `NEXT_TASK_STAGES`);
   the `icebox` LABEL never does — that filter drops a card SILENTLY, and a human's drag into
-  Queue is an instruction, not an oversight. Agent entrance: `file_task(icebox=True)`.
+  Queue is an instruction, not an oversight. Agent entrance: `file_task(icebox=True)`; the exit
+  is a HUMAN's — `_find_task` refuses Icebox beside Done (reads opt out), because a drag into
+  the freezer KEEPS the assignee, so `decompose` from there put children back in Queue.
   **A predecessor may live in ANOTHER project, and the gate must resolve it there** (tracker
   #1179). Vikunja relations are task-to-task and cross projects freely — measured: a card moved
   between projects kept a `blocked` link to one left behind — but `_unfinished_predecessors`

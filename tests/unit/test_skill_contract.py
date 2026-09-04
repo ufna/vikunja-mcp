@@ -3433,7 +3433,12 @@ def test_exactly_ONE_agent_tool_walks_a_card_out_of_Review(tmp_path):
         "the reviewer's bullet no longer states the one-mover invariant it was rewritten around"
 
 
-_SHUT_STAGES = ("Review", "Done")
+# #1640 added the third. Icebox joined Done at the `_find_task` chokepoint after review
+# measured the card's first answer wrong: a human dragging a card into the freezer does
+# not clear its assignee, so `decompose` from there put children in Queue — the #649
+# shape. Both pins below derive their OPEN list as the complement of this tuple, so the
+# rulebook had to move with the gate, which is what those pins are for.
+_SHUT_STAGES = ("Review", "Done", "Icebox")
 
 
 def _top_level_parens(region: str) -> list[str]:
@@ -3791,13 +3796,17 @@ def test_the_rulebook_names_BOTH_stages_return_task_refuses_from():
     bullet = _return_task_bullet(text)
 
     # the RULE, not its vocabulary: which stages are shut, spelled out
-    assert "It REFUSES from TWO stages — Review and Done" in bullet, \
-        "the bullet no longer states WHICH stages return_task refuses from (#590 Review, #626 Done)"
+    # #1640 rewrote this from TWO to THREE, which is the pin doing its job rather than being in
+    # the way: the gate moved (Icebox joined Done at the `_find_task` chokepoint) and the rule
+    # in the file every agent reads had to move in the same commit.
+    assert "It REFUSES from THREE stages — Review, Done and Icebox" in bullet, \
+        "the bullet no longer states WHICH stages return_task refuses from (#590 Review, " \
+        "#626 Done, #1640 Icebox)"
     # ...and it must be stated ONCE. A second copy — a card quoting an older formulation of the
     # gate, which this bullet's meta-prose invites — would leave the pin unable to tell the live
     # rule from the quotation, and measurably lets the promise be gutted next to a quote that
     # still reads correctly (#700, «quoted anchor» in the docstring).
-    assert bullet.count("It REFUSES from TWO stages — Review and Done") == 1, \
+    assert bullet.count("It REFUSES from THREE stages — Review, Done and Icebox") == 1, \
         "the rule is spelled out TWICE in this bullet; the pin can no longer tell which is live"
     assert "file_task" in bullet, \
         "the bullet no longer routes unusable Done work to file_task, the one channel left"
@@ -3821,7 +3830,7 @@ def test_the_rulebook_names_BOTH_stages_return_task_refuses_from():
     # brackets, and a span ending at the first «)» reddens on any bracket that lands between the
     # anchor and the list — a card ref, an inline-code aside, a gloss on one stage inside the
     # list, or the list simply being written before the rule. All four measured; see the docstring.
-    head_end = bullet.find("\n  - **", bullet.find("It REFUSES from TWO stages"))
+    head_end = bullet.find("\n  - **", bullet.find("It REFUSES from THREE stages"))
     assert head_end != -1, "the return_task bullet no longer has the sub-bullets naming its gates"
     open_list = "\n".join(_top_level_parens(bullet[:head_end]))
     for stage in workflow.STAGES:
@@ -3854,10 +3863,8 @@ def test_the_rulebook_names_BOTH_stages_return_task_refuses_from():
         wf.return_task(under_review["id"], reason="внешний блок")
     assert api.stage_of(under_review["id"]) == "Review"
 
-    # ...and the six stages the same bullet still promises are genuinely open. Icebox joined
-    # them in #1640 and is pinned like the rest rather than trusted: it is the one whose prose
-    # explains why it is NOT gated, so a later card adding the gate has to come through here.
-    for stage in ("Backlog", "Queue", "Design", "Build", "Your Call", "Icebox"):
+    # ...and the five stages the same bullet still promises are genuinely open
+    for stage in ("Backlog", "Queue", "Design", "Build", "Your Call"):
         card = api.add_task(f"blocked in {stage}", stage, assignee=api.me_user)
         assert wf.return_task(card["id"], reason="чужой сервис лежит")["moved_to"] == "Backlog", \
             f"the bullet promises return_task still works from {stage}; it does not"
@@ -3956,10 +3963,10 @@ def test_the_rulebook_names_BOTH_stages_decompose_refuses_from():
     bullet = _decompose_bullet(text)
 
     # the RULE, not its vocabulary: which stages are shut, spelled out
-    rule_at = bullet.find("**It REFUSES from TWO stages — Review and Done")
+    rule_at = bullet.find("**It REFUSES from THREE stages — Review, Done and Icebox")
     assert rule_at != -1, \
         "the decompose bullet no longer states WHICH stages decompose refuses from " \
-        "(#663 Review, #649 Done)"
+        "(#663 Review, #649 Done, #1640 Icebox)"
     assert "file_task" in bullet, \
         "the bullet no longer routes work an accepted card revealed to file_task"
     assert "needs_work" in bullet, \
@@ -4022,7 +4029,7 @@ def test_the_rulebook_names_BOTH_stages_decompose_refuses_from():
         "SKILL.md says decompose refuses from Review and points at review_task; it no longer does"
     assert api.stage_of(under_review["id"]) == "Review", "the refusal split the card under review"
 
-    for stage in ("Backlog", "Queue", "Design", "Build", "Your Call", "Icebox"):
+    for stage in ("Backlog", "Queue", "Design", "Build", "Your Call"):
         card = api.add_task(f"big job in {stage}", stage, assignee=api.me_user)
         assert wf.decompose(card["id"], [{"title": "A"}, {"title": "B"}])["parent"]["moved_to"] \
             == "Backlog", f"the bullet promises decompose still works from {stage}; it does not"

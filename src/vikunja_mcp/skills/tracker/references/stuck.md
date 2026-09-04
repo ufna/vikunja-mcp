@@ -29,12 +29,12 @@
     that column.
 - **`return_task`** — an external blocker (someone else's service is down, a dependency is
   missing, the task has lost its point). The claim is dropped and the task goes to Backlog
-  for re-triage. **It REFUSES from TWO stages — Review and Done — and works from the other
-  six** (Backlog, Queue, Design, Build, Your Call, Icebox). "Works" here is about the STAGE: the
+  for re-triage. **It REFUSES from THREE stages — Review, Done and Icebox — and works from the
+  other five** (Backlog, Queue, Design, Build, Your Call). "Works" here is about the STAGE: the
   ownership guard is in place from an open stage too, so it will not hand over someone
-  else's card from any of the six. On Icebox specifically, see the same note in
-  `references/decompose.md`: it is open rather than gated because a card there is ownerless by
-  definition, so you can only reach it if a human deliberately assigned it to you.
+  else's card from any of the five. From Icebox (#1640) because returning a frozen card to
+  Backlog silently reverts a human's decision to freeze it: if you think that decision was
+  wrong, say so in your report and leave the card where it is.
   - **From Review** (a stage gate, #590): dragging a card that is standing under review
     off to re-triage is not "stuck", it is carrying someone else's finished work out of
     the pipeline.

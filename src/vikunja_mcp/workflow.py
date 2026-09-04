@@ -106,26 +106,16 @@ _OWNERLESS_EXITS: dict[str, str] = {
         "from THERE is the ordinary queue's business, not a promise this refusal can make. Leave "
         "it and take the next task"
     ),
-    # Icebox (#1640) takes Backlog's shape for Backlog's reason, one step further out: the
-    # freezer holds cards nobody has undertaken, so having no assignee is not merely ordinary
-    # there, it is the DEFINITION of the column. Nothing to report and nothing to fix — but
-    # unlike Backlog there is no triage coming either, so the exit says so rather than leaving
-    # an agent waiting for a human who is not on their way.
-    # The last clause is scoped to THIS branch on purpose. `return_task` and `decompose` are not
-    # gated on Icebox and would work on a card there that an agent OWNS — which is why the text
-    # says "while it has no owner" rather than the flat "only a human moves a card out of
-    # Icebox" an earlier draft carried. That flat claim was false, and the asymmetry with Done
-    # is what makes leaving those two ungated right: the ordinary lifecycle parks an ASSIGNED
-    # card in Done (#626's whole point — `_require_mine` passes on the very card that must be
-    # untouchable), while an assigned card in Icebox takes a deliberate human hand, and a human
-    # who assigns an agent to a frozen card is saying "do this one after all".
-    "Icebox": (
-        ", so no call of yours can make it yours. That is not damage and not yours to fix: "
-        "Icebox is the freezer — legacy and very-minor cards nobody has undertaken, where an "
-        "ownerless card is the ordinary state and no triage is pending. Nothing here is work "
-        "for you. While it has no owner no tool of yours moves it, so if you believe this one "
-        "genuinely must be done, say so in your report and leave it where it is."
-    ),
+    # ICEBOX HAS NO ENTRY, and its absence is Done's, not Queue's (#1640). This card's first
+    # pass DID write one here, on the argument that `return_task`/`decompose` stayed ungated on
+    # Icebox so an agent could still meet an ownerless card there. Review disproved the premise
+    # and the gate went into `_find_task` beside Done's, after which the row became DEAD DATA by
+    # the same mechanism #662 recorded one paragraph up — measured on this tree with an
+    # ownerless Icebox card and all seven ownership-gated tools: every one answers with the
+    # frozen guard, none reaches `_require_mine` at all. Deleting it rather than leaving it is
+    # the honesty #662 chose for its own dead rows: a stale row in a table a reader trusts is
+    # worse than no row, and nothing is lost from the message, since the frozen refusal says
+    # what this row said and says it for an OWNED card too, which this row never covered.
     # Review is the ONE non-Queue stage an agent can move this card out of (measured), so the
     # shared "only a human can move it back" would be a LIE here — and the reviewer's own tool
     # never needs ownership in the first place. Reached by `advance` only: call_human,
@@ -187,7 +177,9 @@ _OWNERLESS_EXITS: dict[str, str] = {
 # human-only guard (#662) refuses before `_require_mine` runs, so no foreign card in Done ever
 # reaches this text — measured on this tree, all five ownership-gated forms and `claim` answer
 # with the Done rule instead, which is also why the sweep this card is titled from finds the
-# foreign-card message in SIX stages and not seven.
+# foreign-card message in SIX stages and not seven. ICEBOX joined Done in that exclusion at
+# #1640, by the same guard and the same vacuum, so the SIX is unchanged while the total it is
+# measured against is now EIGHT — the count to re-derive if a stage is ever added again.
 #
 # The last sentence is load-bearing and is NOT padding: #734 deliberately refused to promise a
 # card will not become claimable, because a human can clear the assignee. This text stops at
@@ -230,6 +222,35 @@ _DONE_IS_THE_HUMANS = (
 # _ATTACHMENT_TTL сносятся (только что записанный всегда свежий, под нож не попадёт). Так течь
 # ограничена ~одним TTL скачиваний БЕЗ фонового потока и БЕЗ atexit (который на долгоживущем
 # stdio-сервере не срабатывает до его остановки). Размер режем ДО скачивания по метаданным.
+# #1640 second pass. The freezer's counterpart to `_DONE_IS_THE_HUMANS`, and it exists because
+# the card's FIRST pass argued it did not need to — "a card in Icebox is ownerless by
+# definition, so reaching a mutating tool takes a human hand-assigning an agent to it, which
+# means do this one after all". An independent review built the state and the premise is false:
+# dragging a card in Vikunja does not touch its assignees (which is the whole reason #626 was
+# needed for Done), so the ORDINARY lifecycle parks an ASSIGNED card here by two routes, and
+# both mean the opposite of "do this one after all" — a human freezing a card mid-Build because
+# the agent is burning tokens on legacy, and a human answering a `call_human` question with
+# "freeze it" (call_human KEEPS the assignee, and Icebox is one drag from Your Call).
+# Measured from that state, with Done as the control in the same round: `decompose` SUCCEEDED,
+# parking the parent in Backlog and TWO CHILDREN IN QUEUE, which `next_task` then offered on the
+# very next call — verbatim the #649 shape this repo already closed once; `return_task`
+# SUCCEEDED, reverting the freeze to Backlog + `blocked`; `transfer_task` SUCCEEDED, walking the
+# frozen card off the board into a neighbour's Backlog. Done refused all three.
+# It lives at the `_find_task` chokepoint rather than in those three tools for #662's reason,
+# which the review's third door demonstrates: `transfer_task` was on nobody's list, and the
+# next mutating tool would not be either.
+_ICEBOX_IS_FROZEN = (
+    "task {task_id} is in Icebox — the freezer, and moving a card OUT of it is the human's "
+    "call, not an agent's. A card lands here when somebody decides the work is legacy or too "
+    "minor to be worth doing; it can still be READ, COMMENTED on and have files attached, so "
+    "if you have found something worth saying about it, say it there. What no tool of yours "
+    "does is take it out: not return_task, not decompose (which would put children in Queue "
+    "and hand frozen work straight back to the fleet), not transfer_task. If you believe this "
+    "one genuinely must be done, say so in your report and leave the card where it is — a "
+    "human drags it back to Backlog or Queue, and then it is ordinary work again."
+)
+
+
 _ATTACHMENT_ROOT = os.path.join(tempfile.gettempdir(), "vikunja-mcp-attachments")
 _ATTACHMENT_TTL = 3600  # сек: подкаталоги скачиваний старше этого best-effort сносятся
 _MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024  # 25 МБ: щедро для скринов/доков, отсекает рантаймы
@@ -672,7 +693,8 @@ class Workflow:
         return self._wip_limit_with_origin()[0]
 
     def _find_task(
-        self, task_id: int, board: list[dict] | None = None, *, allow_done: bool = False,
+        self, task_id: int, board: list[dict] | None = None, *,
+        allow_done: bool = False, allow_icebox: bool = False,
     ) -> tuple[dict, str]:
         """Locate a task on the board and answer (task, stage) — and, unless the caller opts out,
         REFUSE a card in Done (#662).
@@ -709,6 +731,14 @@ class Workflow:
                     stage = bucket["title"]
                     if stage == "Done" and not allow_done:
                         raise WorkflowError(_DONE_IS_THE_HUMANS.format(task_id=task_id))
+                    # #1640: a SECOND branch rather than a widened condition above, and the
+                    # separation is load-bearing twice over. `test_done_is_human_only` reads the
+                    # AST of that BoolOp, so folding Icebox into it would silently change what
+                    # that pin measures; and the two stages refuse for different reasons, which
+                    # a shared message could not say — Done is finished work, Icebox is work
+                    # deliberately not started.
+                    if stage == "Icebox" and not allow_icebox:
+                        raise WorkflowError(_ICEBOX_IS_FROZEN.format(task_id=task_id))
                     return task, stage
         raise WorkflowError(f"task {task_id} not found on the board of project {self.project_id}")
 
@@ -805,7 +835,7 @@ class Workflow:
                 # `_predecessor_frozen`, kept separate for exactly that reason. The merge (not
                 # an overwrite) leaves an unresolvable blocker's advice untouched.
                 if pred_stage == "Icebox":
-                    advice = {**advice, "finishable": False}
+                    advice = {**advice, "frozen": True, "finishable": False}
                 entry = {
                     "id": pid, "ref": self._ref(pred_task),
                     "title": pred_task["title"], "stage": pred_stage,
@@ -985,6 +1015,20 @@ class Workflow:
             )
         if stage in READY_STAGES:
             return None
+        # #1640 second pass. This branch DECORATES the stage — `Icebox (project 108)`, not
+        # `Icebox` — so a caller comparing against the bare literal never matches here, and that
+        # is exactly the defect an independent review measured: through the shipped `handoff`
+        # flow (our card parked on a `blocked` link into the neighbour's Backlog, their human
+        # freezing it) the refusal printed "finish that one first" about a card in another
+        # team's freezer, while the same-project control printed the frozen clause. The FIX is
+        # to decide it HERE, where the stage is still raw, and hand the verdict out as a key —
+        # the shape `escape`/`finishable` already use. Deciding it downstream off the rendered
+        # string would work today and break the next time this f-string is reworded.
+        # `finishable` rides along for the reason the three branches above set it: no tool of
+        # ours moves a card out of a freezer on any board, so the generic "finish that one
+        # first" tail is FALSE of this blocker and must be dropped rather than printed.
+        if stage == "Icebox":
+            return (pred, f"{stage} (project {proj})", {"frozen": True, "finishable": False})
         return (pred, f"{stage} (project {proj})", None)
 
     @staticmethod
@@ -1030,16 +1074,21 @@ class Workflow:
     def _predecessor_frozen(blockers: list[dict]) -> str:
         """The clause for a predecessor parked in Icebox, or "" when none is (#1640).
 
-        Keying off the STAGE and not off a per-blocker key is deliberate: every caller that can
-        see a blocker already carries its stage, so a frozen predecessor reads the same whether
-        it was resolved on this board or on a neighbour's, and no new key has to be threaded
-        through `_offboard_predecessor`.
+        KEYED OFF THE `frozen` KEY, AND THE FIRST DRAFT KEYED OFF THE STAGE STRING INSTEAD —
+        which is this method's own post-mortem, not a preference. That draft argued the stage
+        needed no new key because "a frozen predecessor reads the same whether it was resolved
+        on this board or on a neighbour's". It does not: `_offboard_predecessor`'s resolved
+        branch renders `Icebox (project 108)`, so `== "Icebox"` matched only same-project
+        blockers and the cross-project case printed the very tail this clause exists to remove.
+        Measured through the shipped `handoff` flow with a same-project control in the round.
+        Note WHERE the sentence went wrong: it was a claim about a method it never read, written
+        into the docstring as settled — the failure this repo's rulebook names first.
 
         ONE sentence however many blockers are frozen, like `_predecessor_escapes` dedupes: the
         refs are printed above this clause by every caller, so repeating them here would say
         the same thing twice. What it must NOT do is imply waiting helps — Icebox is not a
         queue, and the successor of a frozen card is blocked until a person acts."""
-        frozen = [b for b in blockers if b.get("stage") == "Icebox"]
+        frozen = [b for b in blockers if b.get("frozen")]
         if not frozen:
             return ""
         return (
@@ -3585,7 +3634,7 @@ class Workflow:
         # allow_done (#662): READING an accepted card stays open — the guard in `_find_task`
         # is fail-closed, so a reader has to say so. Refusing here would make a human's own
         # accepted card unreadable, the regression #649 measured as worse than the hole.
-        self._find_task(task_id, allow_done=True)
+        self._find_task(task_id, allow_done=True, allow_icebox=True)
         self.api.add_comment(task_id, text.strip())
         return {"commented": task_id}
 
@@ -3595,7 +3644,9 @@ class Workflow:
         attachments lists each file's METADATA only ({id, name, mime, size}) — no bytes, so a
         card that is nothing but a screenshot is SEEN, not guessed at; fetch the bytes with
         download_attachment(task_id, attachment_id) using the `id` here."""
-        _, stage = self._find_task(task_id, allow_done=True)   # a READ path (#662)
+        _, stage = self._find_task(
+            task_id, allow_done=True, allow_icebox=True,   # a READ path (#662, #1640)
+        )
         task = self.api.get_task(task_id)
         raw_comments = self.api.comments(task_id)
         related_raw = task.get("related_tasks") or {}
@@ -3651,7 +3702,7 @@ class Workflow:
         Fails in agent-actionable ways: a wrong/absent id lists the task's real attachments; an
         oversized file (metadata size > cap) is refused BEFORE downloading, naming the size."""
         # same board-membership check as get_task/comment, and the same #662 read opt-in
-        self._find_task(task_id, allow_done=True)
+        self._find_task(task_id, allow_done=True, allow_icebox=True)
         task = self.api.get_task(task_id)
         attachments = task.get("attachments") or []
         match = next((a for a in attachments if a.get("id") == attachment_id), None)
@@ -3729,7 +3780,7 @@ class Workflow:
         tasks_attachments:create token scope — a 401 means the token is read-only for attachments
         and a human must add the `create` op (verified on real 2.3.0: create governs the upload)."""
         # same board-membership check as comment/download_attachment, same #662 read opt-in
-        self._find_task(task_id, allow_done=True)
+        self._find_task(task_id, allow_done=True, allow_icebox=True)
         try:
             real = os.path.realpath(path)
         except ValueError as exc:

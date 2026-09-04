@@ -34,6 +34,16 @@ it read exactly like a passing guard. And the two frozen-predecessor pins origin
 `"Icebox" in message`, which `_starving_tail` satisfies on its own: it renders every blocker as
 `<ref> in '<stage>'`, so with the clause deleted outright the round still scored 0. Both pins
 now key on `waiting will not help`, a phrase only the clause carries.
+
+SECOND-PASS SWEEP, after an independent review sent the card back. Same stand and same
+discipline, selection widened by `test_done_is_human_only.py` because the new gate sits beside
+that card's, `collected` 95 on every round. Control 0 failed, 0 errors, 0 skipped; delete the
+Icebox branch from the `_find_task` chokepoint -> 3 failed; default `allow_icebox` to True so
+the read paths' opt-in leaks to every caller -> 3 failed; stop flagging a neighbour's frozen
+predecessor in `_offboard_predecessor` -> 2 failed; key the clause off the rendered stage
+string again -> 2 failed. That last round is the first pass's actual defect replayed, and it is
+the one worth keeping: it scored 0 before this file grew a cross-project case with a
+same-project control in the same test.
 """
 import pytest
 
@@ -178,8 +188,50 @@ def test_next_task_never_offers_a_card_parked_in_icebox(env):
 def test_claim_refuses_a_card_sitting_in_icebox(env):
     api, wf = env
     frozen = api.add_task("frozen legacy", "Icebox")
-    with pytest.raises(WorkflowError, match="Queue"):
+    with pytest.raises(WorkflowError, match="the freezer"):
         wf.claim(frozen["id"])
+
+
+def test_no_agent_tool_takes_an_OWNED_card_out_of_icebox(env):
+    """THE gate this card's first pass argued was unnecessary, and the argument was measurably
+    wrong. It claimed a card in Icebox is ownerless by definition, so a mutating tool could only
+    be reached if a human hand-assigned an agent to it — which would mean "do this one after
+    all". Dragging a card in Vikunja does NOT clear its assignees (the whole reason #626 was
+    needed for Done), so the ordinary lifecycle parks an ASSIGNED card here two ways, both
+    meaning the opposite: a human freezing a card mid-Build, and a human answering a `call_human`
+    question with "freeze it" (call_human keeps the assignee, and Icebox is one drag from Your
+    Call). Both routes are built below, and `decompose` is the one that mattered — ungated it
+    put TWO CHILDREN IN QUEUE, which next_task offered on the very next call: the #649 shape.
+
+    Done is the control, in this same test: every door shut here is shut there too."""
+    for route in ("dragged from Build", "answered out of Your Call"):
+        for stage, expect in (("Icebox", "the freezer"), ("Done", "human")):
+            api = FakeAPI(buckets=STAGES)
+            wf = Workflow(api, project_id=3)
+            card = api.add_task(f"legacy grind, {route}", "Build", assignee=api.me_user)
+            if route == "answered out of Your Call":
+                wf.call_human(card["id"], question="worth doing at all?")
+            api.move_task(3, api.view["id"], api.bucket_id(stage), card["id"])
+            assert api.tasks[card["id"]]["assignees"], "the drag was supposed to KEEP the owner"
+            doors = {
+                "decompose": lambda: wf.decompose(
+                    card["id"], [{"title": "A"}, {"title": "B"}]),
+                "return_task": lambda: wf.return_task(card["id"], reason="x"),
+                "transfer_task": lambda: wf.transfer_task(card["id"], to=999, reason="x"),
+                "advance": lambda: wf.advance(
+                    card["id"], to="review", worklog="w", evidence="e"),
+                "call_human": lambda: wf.call_human(card["id"], question="q"),
+                "claim": lambda: wf.claim(card["id"]),
+            }
+            for name, call in doors.items():
+                with pytest.raises(WorkflowError, match=expect):
+                    call()
+                assert api.stage_of(card["id"]) == stage, \
+                    f"{name} moved the card out of {stage} ({route})"
+            # ...and the card stays READABLE and COMMENTABLE, which is what the gate is for:
+            # a frozen card is where an agent's finding about it belongs.
+            assert wf.get_task(card["id"])["stage"] == stage
+            assert wf.comment(card["id"], "worth saying about this one")
 
 
 def test_a_queue_card_carrying_the_icebox_label_is_still_offered(env):
@@ -236,6 +288,78 @@ def test_a_predecessor_in_icebox_blocks_and_the_refusal_names_who_can_unfreeze_i
     assert "follows/blocked link to it is the thing to drop" in message
 
 
+def _neighbour_card_in(api, stage):
+    """A card on a SIBLING project's board, in `stage` — the shape `handoff` leaves behind."""
+    proj = api.add_project("dogiators-backend", buckets=STAGES, identifier="BACK")
+    entry = api.other_projects[proj["id"]]
+    task = api.create_task(proj["id"], "their legacy endpoint")
+    bucket = next(b for b in entry["buckets"] if b["title"] == stage)
+    api.move_task(proj["id"], entry["view"]["id"], bucket["id"], task["id"])
+    return proj, task
+
+
+def test_a_predecessor_frozen_on_a_NEIGHBOURS_board_is_recognised_too(env):
+    """The cross-project half, and it shipped BROKEN in the card's first pass (found by review).
+
+    `_offboard_predecessor`'s resolved branch renders the stage DECORATED — `Icebox (project N)`
+    — so the original `== "Icebox"` comparison matched only same-project blockers, and the
+    refusal for a card parked by `handoff` behind a neighbour's frozen work printed the generic
+    "finish that one first": the one instruction nobody can carry out, about a card on a board
+    this token does not even write to. The verdict is decided in `_offboard_predecessor` now,
+    where the stage is still raw, and travels as the `frozen` key.
+
+    The same-project CONTROL is in this test rather than only next door on purpose — that is the
+    comparison that makes the round mean something, and it was its absence that let the defect
+    read as working."""
+    api, wf = env
+    _proj, blocker = _neighbour_card_in(api, "Icebox")
+    successor = api.add_task("our card, parked by handoff", "Queue")
+    api.add_relation(successor["id"], blocker["id"], "blocked")
+    with pytest.raises(WorkflowError) as exc:
+        wf.claim(successor["id"])
+    cross = str(exc.value)
+
+    control_api = FakeAPI(buckets=STAGES)
+    control_wf = Workflow(control_api, project_id=3)
+    frozen = control_api.add_task("our own frozen card", "Icebox")
+    control_succ = control_api.add_task("successor", "Queue")
+    control_api.add_relation(control_succ["id"], frozen["id"], "blocked")
+    with pytest.raises(WorkflowError) as control_exc:
+        control_wf.claim(control_succ["id"])
+    control = str(control_exc.value)
+
+    for message in (cross, control):
+        assert "waiting will not help" in message
+        assert "finish that one first" not in message
+    assert "(project" in cross          # the cross round really did resolve off-board
+    assert "(project" not in control    # ...and the control really was same-project
+
+
+def test_a_neighbours_frozen_predecessor_also_reaches_the_starving_tail(env):
+    api, wf = env
+    _proj, blocker = _neighbour_card_in(api, "Icebox")
+    successor = api.add_task("our card, parked by handoff", "Queue")
+    api.add_relation(successor["id"], blocker["id"], "blocked")
+    res = wf.next_task()
+    assert res["starving"] is True
+    assert "waiting will not help" in res["message"]
+
+
+def test_a_neighbours_UNFROZEN_predecessor_keeps_the_generic_tail(env):
+    """The other direction of the same pin: the `frozen` key must not leak onto an ordinary
+    off-board blocker, or every cross-project wait would claim to be a freeze."""
+    api, wf = env
+    _proj, blocker = _neighbour_card_in(api, "Build")
+    successor = api.add_task("our card", "Queue")
+    api.add_relation(successor["id"], blocker["id"], "blocked")
+    with pytest.raises(WorkflowError) as exc:
+        wf.claim(successor["id"])
+    message = str(exc.value)
+    assert "waiting will not help" not in message
+    assert message.endswith("A predecessor becomes ready only at Review or Done; "
+                            "finish that one first")
+
+
 def test_the_starving_tail_names_a_frozen_predecessor(env):
     """next_task SKIPS a gated card rather than refusing it, so under an ordinary /loop
     drain this message is the only place a human is ever told the chain froze."""
@@ -268,11 +392,24 @@ def test_an_ordinary_blocked_chain_keeps_its_wording(env):
 
 # --- ownership advice ---
 
-def test_an_ownerless_icebox_card_reads_as_ordinary_not_as_damage(env):
-    """Same shape as Backlog's entry, for the same reason: a card with no assignee is the
-    EVERYDAY state of the freezer, so the advice must not send an agent looking for a fix."""
+def test_the_frozen_guard_answers_before_the_ownership_one_ever_runs(env):
+    """Why `_OWNERLESS_EXITS` has no "Icebox" row — it would be DEAD DATA, exactly as #662's
+    Done row became. The first pass wrote one; once the gate moved to the `_find_task`
+    chokepoint nothing can reach `_require_mine` from Icebox, and a stale row in a table a
+    reader trusts is worse than no row. Pinned by measurement, not by reading: every
+    ownership-gated tool on an OWNERLESS frozen card answers with the freezer rule."""
     api, wf = env
-    frozen = api.add_task("frozen legacy", "Icebox")
-    with pytest.raises(WorkflowError) as exc:
-        wf.return_task(frozen["id"], reason="x")
-    assert "Icebox" in str(exc.value) or "not damage" in str(exc.value)
+    frozen = api.add_task("frozen legacy", "Icebox")          # ownerless: the ordinary state
+    for call in (
+        lambda: wf.return_task(frozen["id"], reason="x"),
+        lambda: wf.decompose(frozen["id"], [{"title": "A"}, {"title": "B"}]),
+        lambda: wf.call_human(frozen["id"], question="q"),
+        lambda: wf.review_task(frozen["id"], verdict="approve", report="r"),
+        lambda: wf.transfer_task(frozen["id"], to=999, reason="x"),
+        lambda: wf.handoff(frozen["id"], to=999, title="T"),
+        lambda: wf.advance(frozen["id"], to="review", worklog="w", evidence="e"),
+    ):
+        with pytest.raises(WorkflowError) as exc:
+            call()
+        assert "the freezer" in str(exc.value)
+        assert "not damage and not yours to fix" not in str(exc.value)

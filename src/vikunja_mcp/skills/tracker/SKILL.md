@@ -16,7 +16,10 @@ right of Done: very minor / legacy cards nobody is expected to pick up. `next_ta
 offers one while it sits there, so the column is the gate; the `icebox` LABEL is not a gate at
 all — a card a human drags into Queue is offered like any other, carrying the label as an
 instruction to do the MINIMUM that is correct. File a finding there yourself with
-`file_task(icebox=True)` (see `references/decompose.md`). Boards created before the freezer
+`file_task(icebox=True)` (see `references/decompose.md`). What no tool of yours does is take a
+card OUT: `return_task`, `decompose` and `transfer_task` all refuse from Icebox, like they do
+from Done. A frozen card stays readable and commentable, so a finding about one goes in a
+comment on it — and if you think the freeze was wrong, say so in your report and leave it. Boards created before the freezer
 existed simply have no such column, and everything else keeps working; only `icebox=True`
 refuses there, naming `vikunja-mcp setup`. The hard rules are wired into the MCP
 tools — they refuse if something is off. These rules are about HOW to work.

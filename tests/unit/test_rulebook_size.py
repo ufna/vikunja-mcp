@@ -69,14 +69,14 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 #
 # The script is load-bearing, not a label: characters are a PROXY for the tokens this gate
 # actually cares about, and the rate differs by language (see the script test at the bottom).
-# BOTH ARE LATIN SINCE #997, so the two ceilings are finally in one currency: 3.11x apart in
-# characters against 3.02x in tokens (126 000 x 0.2534 = 31 934 against 40 500 x 0.2608 =
-# 10 562). They used to disagree by nearly half — 2.88x in characters was 5.12x in tokens at
+# BOTH ARE LATIN SINCE #997, so the two ceilings are finally in one currency: 3.10x apart in
+# characters against 3.01x in tokens (126 000 x 0.2534 = 31 934 against 40 652 x 0.2608 =
+# 10 602). They used to disagree by nearly half — 2.88x in characters was 5.12x in tokens at
 # `d3884bc`, when SKILL.md was 85.6% Cyrillic by letter and CLAUDE.md 0.0%.
-# BOTH HALVES MOVED TOGETHER when #1640 raised CLAUDE.md 40 000 -> 40 500, which is what this
+# BOTH HALVES MOVED TOGETHER when #1640 raised CLAUDE.md 40 000 -> 40 652, which is what this
 # pair is for. The token half is arithmetic over the SAME anchored per-character rates, not a
 # fresh tokenizer run: nothing about the text's script changed, only the ceiling, so re-deriving
-# 40 500 x 0.2608 is exactly as valid as the 40 000 x 0.2608 it replaces — and stating that is
+# 40 652 x 0.2608 is exactly as valid as the 40 000 x 0.2608 it replaces — and stating that is
 # the point, since a reader must be able to tell a recomputation from a re-measurement.
 #
 # SKILL.md's ceiling ROSE from 115 000 to 126 000 in this unit while the budget it stands for
@@ -97,18 +97,25 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 # ratchet step is condensing those two in place, not relocating them.
 _CEILINGS = {
     "CLAUDE.md": (
-        # RAISED 40 000 -> 40 500 by #1640, and the increment is the RULE that had to be added,
-        # not a budget granted for future ones. Icebox is a new canonical stage, so CLAUDE.md
-        # could not stay silent about it: the one fact a reader must have BEFORE touching
-        # `_bucket` is that its presence check runs over REQUIRED_STAGES, because widening it
-        # back to STAGES fails every tool on every un-migrated board at the next `stable`
-        # resolve. The evidence went where the gate prescribes — `docs/dossier/workflow.md`
-        # gained ~7 KB on this card — and what is here is what was left after that.
-        # It is 163 characters of headroom at the landing, i.e. LESS than before (124 -> 163 is
-        # the measured figure, and the file grew 461). The next card to need a line here should
-        # condense this bullet rather than move the number again: the workflow bullet is now the
-        # longest in the Architecture section and is the honest next ratchet step.
-        40_500, "latin",
+        # RAISED 40 000 -> 40 652 by #1640, and the increment is EXACTLY what the rule cost:
+        # the file went 39 876 -> 40 528, i.e. +652, and the ceiling moved by the same 652, so
+        # the headroom is 124 characters before and after. That arithmetic is the whole
+        # justification, and stating it that way is this entry's own correction: the first
+        # version raised the ceiling by 500 against a file that grew 461, GRANTING 39 characters
+        # of budget, and then described the result as headroom "LESS than before" while writing
+        # the measured pair `124 -> 163` in the same sentence — 163 is more than 124. An
+        # independent review caught it. A ceiling that moves by more than the rule cost is the
+        # "bumped until the file fitted" move this gate's own header rejects.
+        # WHY THE RULE HAD TO GO IN AT ALL: Icebox is a new canonical stage, and the one fact a
+        # reader needs BEFORE touching `_bucket` is that its presence check runs over
+        # REQUIRED_STAGES — widening it back to STAGES fails every tool on every un-migrated
+        # board at the next `stable` resolve. The evidence went where this gate prescribes;
+        # `docs/dossier/workflow.md` gained ~14 KB on this card.
+        # The honest next ratchet step is NOT this bullet: measured at the landing, the
+        # Architecture bullets are `workspace_cmd.py` 4 319, `config.py` 3 624, `workflow.py`
+        # 2 947 — so the workflow bullet is the THIRD longest, and the first version of this
+        # comment pointed the next card at the wrong one.
+        40_652, "latin",
         "the repo rulebook — read by every session in this checkout",
     ),
     "src/vikunja_mcp/skills/tracker/SKILL.md": (
@@ -151,7 +158,7 @@ def test_the_two_rulebooks_are_in_the_same_script_so_their_ceilings_compare():
     WHAT REPLACES IT IS THE FACT THE TRANSLATION CREATED. The two ceilings used to be quoted in
     different currencies — measured at `d3884bc`, 2.88x apart in characters and 5.12x in
     tokens, because Cyrillic costs roughly 0.46 tokens per character against 0.25 for Latin.
-    Now both files are Latin, the two units nearly agree (3.11x in characters against ~3.02x in
+    Now both files are Latin, the two units nearly agree (3.10x in characters against ~3.01x in
     tokens), and the character ceiling finally means what it appears to mean. That is worth a
     gate rather than a sentence: if one rulebook drifts back into another script, the pair stops
     being comparable and the neighbouring assert on their ratio silently starts measuring
@@ -307,9 +314,9 @@ def test_each_ceiling_declares_the_script_it_was_derived_in():
     ratio = (
         _CEILINGS["src/vikunja_mcp/skills/tracker/SKILL.md"][0] / _CEILINGS["CLAUDE.md"][0]
     )
-    assert abs(ratio - 3.11) < 0.01, (
-        f"the ceilings are now {ratio:.2f}x apart in characters, not the 3.11x this test's "
-        f"docstring quotes beside its ~3.02x in tokens. Re-measure the token side before "
+    assert abs(ratio - 3.10) < 0.01, (
+        f"the ceilings are now {ratio:.2f}x apart in characters, not the 3.10x this test's "
+        f"docstring quotes beside its ~3.01x in tokens. Re-measure the token side before "
         f"editing the prose: the whole point of the pair is that the two units disagree, and "
         f"updating only the half that needs no tokenizer would hide exactly that"
     )

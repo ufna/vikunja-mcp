@@ -18,14 +18,14 @@
   previous one has reached Review, and by that moment its commit is ALREADY in the main branch
   (the push is part of the move to Review), so the next one will take its own tree off a base where
   the predecessor exists.
-  **It REFUSES from TWO stages — Review and Done — and works from the other six** (Backlog,
-  Queue, Design, Build, Your Call, Icebox). "Works" here is about the STAGE: the ownership guard
-  is in place there too, `decompose` will not break up someone else's card from any of the six.
-  Icebox is on that list rather than gated, and the asymmetry with Done is the reason (#1640):
-  the ordinary lifecycle parks an ASSIGNED card in Done, which is exactly why the ownership guard
-  could not stand in for a stage gate there — while a card in the freezer is ownerless by
-  definition, so reaching it at all takes a human hand-assigning you to it, and a human who does
-  that is saying "do this one after all". From
+  **It REFUSES from THREE stages — Review, Done and Icebox — and works from the other five**
+  (Backlog, Queue, Design, Build, Your Call). "Works" here is about the STAGE: the ownership
+  guard is in place there too, `decompose` will not break up someone else's card from any of the
+  five. From Icebox (#1640) because splitting a frozen card puts its CHILDREN IN QUEUE, which
+  hands work a human deliberately froze straight back to the fleet — measured, and `next_task`
+  offered the first child on the very next call. Do not read "the card had an assignee, so
+  somebody must have meant me to work it": dragging a card in Vikunja does not clear assignees,
+  so a card frozen mid-Build still carries yours. From
   Review (#663) — because the decision "this work has to be split" is taken in Build, not over a
   card that is already being reviewed. Measured: before the gate `decompose` took a card standing
   under review off to Backlog with no assignee, with the `epic` label and two new children in

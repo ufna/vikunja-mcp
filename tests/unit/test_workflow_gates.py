@@ -2411,14 +2411,14 @@ def test_ownerless_card_gets_a_TRUE_exit_in_every_stage_claim_refuses_from():
 
     # NEGATIVE PIN 1 — the "all four refuse identically" enumeration is a Design/Build fact, and
     # saying it anywhere else would be false: call_human answers about the STAGE in the other four
-    for stage in ("Backlog", "Review", "Your Call", "Done"):
+    for stage in ("Backlog", "Review", "Your Call", "Done", "Icebox"):
         orphan = api.add_task(f"ownerless in {stage}", stage)
         with pytest.raises(WorkflowError) as exc:
             wf.advance(orphan["id"], to="build", spec="s")
         assert "refuse it identically" not in str(exc.value), \
             f"{stage}: claims four tools answer alike, but call_human refuses by STAGE there"
-        if stage == "Done":
-            continue    # from Done nothing reaches call_human's stage gate any more (#662)
+        if stage in ("Done", "Icebox"):
+            continue    # nothing reaches call_human's stage gate from either (#662, #1640)
         # ...and the stage gate really is what call_human answers with, so the pin is about a
         # real divergence and not about a phrase nobody would have written
         with pytest.raises(WorkflowError) as ch:
@@ -2470,17 +2470,23 @@ def test_ownerless_card_gets_a_TRUE_exit_in_every_stage_claim_refuses_from():
     # direction: there the card is refused by STAGE before ownership is consulted at all, so a
     # Done card belonging to someone else reads "this is the human's transition" instead of
     # "claim it first" — which for an accepted card was never an answer that could be acted on.
-    # That is also why the foreign-card clause is reachable in SIX stages, not seven, even though
-    # `claim` refuses such a card from all seven. Both halves are asserted, because "not the bare
+    # That is also why the foreign-card clause is reachable in SIX stages, not EIGHT, even though
+    # `claim` refuses such a card from all eight. Both halves are asserted, because "not the bare
     # message" alone would pass on any wording at all.
     for stage in STAGES:
         theirs = api.add_task(f"their work in {stage}", stage,
                               assignee={"id": 99, "username": "someone-else"})
         with pytest.raises(WorkflowError) as other:
             wf.advance(theirs["id"], to="build", spec="s")
-        if stage == "Done":
+        if stage in ("Done", "Icebox"):
+            # #1640 added the second one, by the same mechanism and in the same place: the
+            # chokepoint refuses before ownership is consulted, so a foreign card in the freezer
+            # reads the freezer rule rather than "claim it first" — which for a frozen card was
+            # never actionable either. The SIX in the comment above is unchanged; what changed
+            # is the total it is measured against, now EIGHT stages rather than seven.
             msg = str(other.value)
-            assert "Done" in msg and "file_task" in msg, msg
+            marker = "file_task" if stage == "Done" else "the freezer"
+            assert stage in msg and marker in msg, msg
             assert "not assigned to you" not in msg, msg
             continue
         want = _BARE.format(id=theirs["id"])
