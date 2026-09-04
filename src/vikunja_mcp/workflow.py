@@ -1062,13 +1062,38 @@ class Workflow:
         # so out loud, and a frozen predecessor's stage is perfectly well known. Composition,
         # not replacement: a card can wait on one of each.
         frozen = Workflow._predecessor_frozen(blockers)
-        tail = " ".join(clause for clause in (unresolvable, frozen) if clause)
+        # The clauses are joined the SAME way `generic` is joined to them below — by asking each
+        # whether it already ends in terminal punctuation — and not with a bare space. Review
+        # found the bare space: `_predecessor_escapes` ends its clause without a full stop, so a
+        # card waiting on one unreadable AND one frozen predecessor read "...clears the gate
+        # outright 1 of those sit(s) in Icebox...", two sentences run together at the seam. Every
+        # clause here is author-written prose whose punctuation is nobody's contract, so the join
+        # asks rather than assumes; `_sentence_join` is that question, used at both seams.
+        tail = Workflow._sentence_join(clause for clause in (unresolvable, frozen) if clause)
         if not tail:
             return generic
         if not any(blocker.get("finishable", True) for blocker in blockers):
             return tail
-        separator = "" if generic.rstrip().endswith((".", "!", "?")) else "."
-        return f"{generic}{separator} {tail}"
+        return Workflow._sentence_join((generic, tail))
+
+    @staticmethod
+    def _sentence_join(clauses) -> str:
+        """Join advice clauses so the seam between two of them is a sentence break (#1640).
+
+        Pulled out of the inline `separator` expression `_predecessor_advice` used for its
+        generic/tail seam, because review measured a SECOND seam — escape against frozen — that
+        the inline form did not cover, and a third would have been written the same way. It adds
+        the stop only where the left clause does not already carry one, so every wording pinned
+        byte-for-byte elsewhere is untouched: those clauses end in a full stop and get nothing."""
+        joined = ""
+        for clause in clauses:
+            if not clause:
+                continue
+            if joined:
+                joined += "" if joined.rstrip().endswith((".", "!", "?")) else "."
+                joined += " "
+            joined += clause
+        return joined
 
     @staticmethod
     def _predecessor_frozen(blockers: list[dict]) -> str:

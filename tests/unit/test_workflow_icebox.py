@@ -360,6 +360,38 @@ def test_a_neighbours_UNFROZEN_predecessor_keeps_the_generic_tail(env):
                             "finish that one first")
 
 
+def test_two_unactionable_clauses_do_not_run_together_at_the_seam(env):
+    """Review's L1. `_predecessor_escapes` ends its clause with no full stop, so joining it to
+    the frozen clause with a bare space produced "...clears the gate outright 1 of those sit(s)
+    in Icebox..." — two sentences welded together. Both seams ask the same question now.
+
+    The stand needs BOTH kinds of blocker at once: one whose stage could not be established
+    (403 on the task itself) and one frozen on our own board."""
+    api, wf = env
+    frozen = api.add_task("our own frozen card", "Icebox")
+    successor = api.add_task("successor", "Queue")
+    api.add_relation(successor["id"], frozen["id"], "blocked")
+    # the escape half: a neighbour whose kanban view is gone, so its stage cannot be established
+    dark_proj, dark_card = _neighbour_card_in(api, "Build")
+    api.drop_kanban_view(dark_proj["id"])
+    api.add_relation(successor["id"], dark_card["id"], "blocked")
+
+    with pytest.raises(WorkflowError) as exc:
+        wf.claim(successor["id"])
+    message = str(exc.value)
+    # the stand is only a stand if BOTH clauses are really in the message — asserted, because
+    # the first version of this test produced only the frozen one and still passed: a seam pin
+    # with nothing at the seam cannot fail.
+    assert "At least one of those stages" in message, message
+    assert "1 of those sit(s) in Icebox" in message, message
+    assert "waiting will not help" in message
+    for opener in ("At least one of those stages", "1 of those sit(s) in Icebox"):
+        if opener in message:
+            before = message[:message.index(opener)].rstrip()
+            assert before.endswith((".", "!", "?")), \
+                f"clause {opener!r} starts mid-sentence: ...{before[-60:]!r}"
+
+
 def test_the_starving_tail_names_a_frozen_predecessor(env):
     """next_task SKIPS a gated card rather than refusing it, so under an ordinary /loop
     drain this message is the only place a human is ever told the chain froze."""
