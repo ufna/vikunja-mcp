@@ -256,9 +256,74 @@ def _cyrillic_share_of_letters(text: str) -> float:
 # Which script each ceiling was derived in. NOT decoration: see the test below.
 _EXPECTED_SHARE = {"cyrillic": (0.5, 1.0), "latin": (0.0, 0.1)}
 
+# THE PINNED CENTRE AND ITS WIDTH, named once instead of retyped — VMCP-329 (1753).
+#
+# Of the two numbers only the CENTRE was ever written twice, and it was kept in step by hand
+# across five commits: 2.88 at `f12bfdc` -> 3.15 at `7bc02c9` -> 3.11 at `9302d48` -> 3.10 at
+# `6d347ff` -> 3.11 at `bc1e413`, each of them retyping it into the refusal to match. That
+# worked five times out of five — on care, with nothing checking it. The WIDTH the refusal
+# never stated at all, so for that half there is no track record to lean on in either
+# direction. Naming both removes the sixth chance to get either one wrong.
+#
+# What those same five commits did NOT keep in step is the PROSE the refusal sent its reader
+# to, and that is the card: the pointer was true at `f12bfdc` alone, where the centre and the
+# docstring's pair were both 2.88.
+#
+# This is a rename, not a re-centring. The band is 3.11 +/- 0.01 as it shipped, and
+# 126 470 / 40 652 = 3.111040, so a centre of 3.10 puts the live ratio outside it and this gate
+# red — VMCP-328 (1739) measured that, and the sweep in
+# `test_the_ratio_refusal_routes_to_the_live_pair` re-runs it against this spelling.
+_PINNED_RATIO = 3.11
+_RATIO_BAND = 0.01
+
+
+def _ratio_refusal(ratio: float) -> str:
+    """The ratio assert's refusal, built as a STRING a test can render rather than inline.
+
+    An assert message is RENDERED only when the assert fails, so nothing automatically reads
+    this text on a green tree — which is how the version this replaced stood wrong from
+    `7bc02c9` to this change: 120 commits, 60 of them non-bump landings, four of which rewrote
+    the message itself. Making it a function is what lets an assertion hold it; the check is
+    `test_the_ratio_refusal_routes_to_the_live_pair`.
+
+    Formatted to FOUR places, not two, and the reason is arithmetic rather than taste. The band
+    is +/- 0.01, so everything that decides a refusal lives in the third and fourth decimal:
+    126 470 / 40 652 = 3.111040, and VMCP-328 (1739)'s finding that a centre of 3.10 turns this
+    gate red rests on 0.011040 > 0.01, which two places cannot show at all. At `.2f` every ratio
+    from 3.1200 to 3.1249 reads as the same `3.12`, so a reader learns that the band was missed
+    and not by how much.
+    """
+    return (
+        f"the ceilings are {ratio:.4f}x apart in characters, outside the band this gate pins "
+        f"({_PINNED_RATIO} +/- {_RATIO_BAND}). GO TO THE `_CEILINGS` HEADER ABOVE: it is the "
+        f"only place carrying BOTH halves of the pair together with the arithmetic each is "
+        f"derived from, and re-deriving both there is the first step — updating only the half "
+        f"that needs no tokenizer is how the two drift apart. DO NOT take the pair out of THIS "
+        f"TEST'S OWN docstring. Its 2.88x in characters against 5.12x in tokens was measured "
+        f"at `d3884bc`, when SKILL.md was majority Cyrillic, and there the two units disagreed "
+        f"by 78% — which reads as the character ceiling not meaning what it appears to mean, "
+        f"and makes this band look arbitrary at the very moment it is being moved. Live they "
+        f"agree to within 3%"
+    )
+
 
 def test_each_ceiling_declares_the_script_it_was_derived_in():
     """THE UNIT IS A PROXY, AND A PROXY IS ONLY VALID FOR THE TEXT IT WAS CALIBRATED ON.
+
+    EVERY RATIO BELOW IS HISTORY. Read that before acting on one, because the ratio assert at
+    the bottom of this test fires exactly when someone is deciding how far to move a ceiling.
+    The LIVE pair is in the `_CEILINGS` header above — the only place carrying both halves
+    together with the arithmetic each is derived from. (The sibling test's docstring carries
+    the pair too, and has been kept in step; what it does not carry is the derivation.) What
+    THIS docstring holds instead is the tree the two units DIVERGED on: 2.88x in characters
+    against 5.12x in tokens, measured at `d3884bc`, when SKILL.md was majority Cyrillic. Those
+    numbers are kept because the ARGUMENT needs them — a proxy is only shown to be a proxy by a
+    tree where it fails — and not because they describe this one. Taken as current they do a
+    specific harm: 5.12 against 2.88 is a 78% disagreement between the units, which reads as
+    the character ceiling not meaning what it appears to mean and makes this band look
+    arbitrary. The live pair agrees to within 3%. That is VMCP-329 (1753), filed because the
+    refusal used to send its reader here for a live pair this docstring has not held since
+    `7bc02c9`.
 
     This gate exists to bound what these files cost in an agent's CONTEXT, and that cost is
     counted in TOKENS. It counts CHARACTERS. While a file stays in one language the two move
@@ -285,9 +350,13 @@ def test_each_ceiling_declares_the_script_it_was_derived_in():
     docstring). For those, the sha anchor is the substitute the repo already has — it does not
     re-derive the number, it guarantees the tree is named and reachable
     (test_measured_figure_anchors.py). The rest is checked rather than trusted: the Cyrillic
-    SHARES are what this test computes itself, and 2.88x is plain arithmetic over `_CEILINGS`,
-    so it is asserted below instead of quoted — CLAUDE.md's rule that a figure a reader will ACT
-    on should be an assert, applied to the one figure here that can be.
+    SHARES are what this test computes itself, and the CHARACTER half of the pair is plain
+    arithmetic over `_CEILINGS`, so it is asserted below instead of quoted — CLAUDE.md's rule
+    that a figure a reader will ACT on should be an assert, applied to the one figure here that
+    can be. Note what the rule costs this paragraph, since it is the reason the 2.88x above is
+    not a typo: the assert RECOMPUTES, so the figure it pins has moved four times since, while
+    the one written here stayed at the tree it was measured on. The assert is the live one; this
+    sentence never was.
 
     NAME THE POPULATION OR DO NOT WRITE THE RANGE. This took THREE rounds, each failing the same
     way, which is why the rule is stated rather than the numbers merely fixed:
@@ -309,9 +378,12 @@ def test_each_ceiling_declares_the_script_it_was_derived_in():
 
     Two consequences, and the second is why this test exists rather than a paragraph:
 
-    * The two ceilings below are not comparable to each other. In characters SKILL.md's is 2.88x
-      CLAUDE.md's; converted at each file's own measured rate (0.4645, 0.2608) it is 5.12x — so
-      the gate understates, by nearly half, how much more context SKILL.md is allowed to cost.
+    * AT `d3884bc` the two ceilings were not comparable to each other. In characters SKILL.md's
+      was 2.88x CLAUDE.md's; converted at each file's own measured rate (0.4645, 0.2608) it was
+      5.12x — so the gate understated, by nearly half, how much more context SKILL.md was
+      allowed to cost. THAT IS THE DIVERGENCE THIS TEST DEFENDS AGAINST, NOT THE STATUS QUO:
+      #997 translated SKILL.md, both rulebooks are Latin now, and the live pair in `_CEILINGS`
+      agrees to within a few per cent. Read this bullet as the failure case, never as headroom.
     * Translating a rulebook would push it AGAINST its ceiling while cutting the cost the
       ceiling exists to control. A ceiling raised at that moment "because we hit it" would be
       the gate defeating its own purpose. Re-DERIVE it from a token measurement of the new
@@ -338,24 +410,26 @@ def test_each_ceiling_declares_the_script_it_was_derived_in():
     catch; the declared script dropped from the entries -> 2 failed; control (closing, restored)
     0 failed, 0 errors, collected 4.
 
-    The 2.88x assert was swept separately, same discipline, same control: control 0 failed,
-    collected 4; CLAUDE.md's ceiling raised 40 000 -> 50 000 -> 1 failed, collected 4; control
-    0 failed. Deleting the assert itself was also run and gives 0 failed — recorded because it
+    The ratio assert — pinned at 2.88x then — was swept separately, same discipline, same
+    control: control 0 failed, collected 4; CLAUDE.md's ceiling raised 40 000 -> 50 000 -> 1
+    failed, collected 4; control 0 failed. Deleting the assert itself was also run and gives
+    0 failed — recorded because it
     is DEGENERATE rather than informative: removing an assertion cannot fail the test that
     holds it, so that round is not evidence of anything and the raise above is.
     """
-    # The one figure in the prose above that needs no tokenizer, so it is derived rather than
-    # quoted: if the ceilings move, this recomputes instead of going stale, and the docstring's
-    # "2.88x in characters against 5.12x in tokens" cannot silently drift on its character half.
+    # The character half needs no tokenizer, so it is DERIVED here rather than quoted: it
+    # recomputes when a ceiling moves instead of going stale. The token half is derived nowhere
+    # in this file, by the module docstring's decision, so the refusal routes to the only place
+    # carrying both halves WITH their arithmetic — the `_CEILINGS` header — and NOT to the
+    # docstring above, whose pair is frozen at `d3884bc`. (The sibling test's docstring carries
+    # the pair as well, and has been kept in step; it just does not show the derivation.)
+    # Nothing here tracks that frozen pair, and the refusal now says so: four commits rewrote
+    # it while it claimed the opposite, and 60 non-bump landings went past. See
+    # `_ratio_refusal`.
     ratio = (
         _CEILINGS["src/vikunja_mcp/skills/tracker/SKILL.md"][0] / _CEILINGS["CLAUDE.md"][0]
     )
-    assert abs(ratio - 3.11) < 0.01, (
-        f"the ceilings are now {ratio:.2f}x apart in characters, not the 3.11x this test's "
-        f"docstring quotes beside its ~3.02x in tokens. Re-measure the token side before "
-        f"editing the prose: the whole point of the pair is that the two units disagree, and "
-        f"updating only the half that needs no tokenizer would hide exactly that"
-    )
+    assert abs(ratio - _PINNED_RATIO) < _RATIO_BAND, _ratio_refusal(ratio)
 
     for relative, entry in _CEILINGS.items():
         assert len(entry) == 3, (
@@ -384,3 +458,118 @@ def test_each_ceiling_declares_the_script_it_was_derived_in():
             f"Re-derive the ceiling from a token measurement of the NEW text so it preserves "
             f"the same budget, then update the declared script in the same commit"
         )
+
+
+def test_the_ratio_refusal_routes_to_the_live_pair():
+    """The refusal a reader gets at the worst possible moment must not route to a stale pair.
+
+    WHY THIS EXISTS — VMCP-329 (1753). The ratio assert fires exactly when someone is deciding
+    how far to move a ceiling, so its text is ACTED on rather than read. Five commits wrote
+    that text, and every one of them told the reader the live pair was in this test's own
+    docstring. It held at `f12bfdc` alone, where the assert pinned 2.88 and the docstring
+    carried 2.88x against 5.12x. The centre moved four times afterwards — 3.15, 3.11, 3.10,
+    3.11 — and each of those commits hand-edited the message's two figures to match while
+    nobody touched the docstring. A reader following the pointer landed on 2.88x against
+    5.12x: a 78% disagreement between the units, where the live pair agrees to within 3%,
+    which is what makes a band look arbitrary at the moment it is being moved.
+
+    IT WAS NOT A FIGURE NOBODY MAINTAINED, and that is what makes it a ROUTING bug. From
+    `7bc02c9` on — where both first carried one — the `_CEILINGS` header and the sibling test's
+    docstring held the live pair in every commit that moved the centre, and moved with it each
+    time: 3.15/3.06, 3.11/3.02, 3.10/3.01, 3.11/3.02, checked with `git show`. The message was
+    aimed away from the two copies that move. The docstring it aimed AT did also carry a stale
+    figure — its "2.88x is plain arithmetic over `_CEILINGS`" was false at HEAD, that
+    arithmetic giving 3.111040 — and re-tensing that is the other half of this change; an
+    independent pass caught the first draft of this paragraph denying it.
+
+    HOW LONG IT STOOD, because the first draft of this record said "four landings" and
+    understated its own evidence by an order of magnitude. Four commits REWROTE the message
+    while it was already wrong; between `7bc02c9` and this change 120 commits went past it, 60
+    of them non-bump landings, each with the gates green.
+
+    WHY NOTHING CAUGHT IT, narrowly — the first draft of this paragraph claimed a repo-wide
+    universal and an independent pass refuted it. The message was never HIDDEN: it is an
+    f-string literal in this file. What kept it out of reach is a CORPUS CHOICE rather than
+    unreachability — test_repo_quotation_claims.py builds its corpus from docstrings and
+    comment runs, so a bare string literal sits outside it by construction. And what the
+    scanners check is SHAPE: that a sha resolves, that a quoted phrase occurs elsewhere in the
+    tree, that a round names its control. None of that reaches the question this message got
+    wrong, which is whether the place it points at holds what it says it holds. Rendering the
+    text in `_ratio_refusal` is what lets an assertion ask that.
+
+    WHAT IS PINNED — four clauses, and be exact about which were DEFECTS, because the first
+    draft of this paragraph called all of them that. MISSING OUTRIGHT: the routing target
+    `_CEILINGS` is named in the text, and the `d3884bc` fence around the historical pair is
+    present. RIGHT BUT BY HAND: the centre and band are INTERPOLATED from the constants rather
+    than retyped — all five commits that wrote the message retyped the centre, correctly every
+    time, and none of them stated the band's WIDTH at all, so the drift history vouches for one
+    of the two constants. ALREADY TRUE: the live computed ratio is in the text. The old message
+    interpolated it too, as `{ratio:.2f}`, so that clause is a regression guard and not a fix;
+    all this change did there is widen it to four places.
+
+    WHAT IS NOT PINNED, so nobody reads this as more than it is: not the wording, not the
+    routing target beyond that one NAME, and not the truth of anything in the docstring above.
+    Four clauses over one string, dumb on purpose.
+
+    MUTATION SWEEP, this file as the whole selection so no collateral can stand in for it,
+    `__pycache__` deleted and PYTHONDONTWRITEBYTECODE=1 each round, rounds read by COUNTING
+    lines beginning `FAILED ` and `ERROR ` separately and naming which, with SKIPPED recorded
+    beside them so a round that never ran cannot read as a clean one. Control (opening) 0
+    failed, 0 errors, 0 skipped, collected 5; the refusal stripped of its `{ratio:.4f}`
+    interpolation so that it states no live figure -> 1 failed, here; the `d3884bc` anchor
+    taken out of the refusal -> 1 failed, here; the routing target renamed to one no module
+    defines -> 1 failed, here; control (closing, restored) 0 failed, 0 errors, 0 skipped,
+    collected 5, and the file byte-identical to the pre-sweep copy. Re-run in full against the
+    FINAL wording, because the prose moved twice after the first pass and a round that measured
+    an earlier draft measures nothing.
+
+    THE ROUTING ROUND EXISTS BECAUSE THE CLAIM ABOUT IT WAS FALSE FIRST, which is the one
+    finding here worth more than the clause it produced. An earlier draft asserted three
+    clauses while this very paragraph's neighbour said the routing target was pinned. An
+    independent pass built that mutation against that draft and measured it: control 0 failed,
+    the mutation 0 failed as well, collected 5 both times — the name was one nothing looked
+    for. The fourth clause was written afterwards, which is why the round above is a kill and
+    not a formality. A "must not happen" sentence naming the wrong guard is the cheapest thing
+    in this repo to ship green, and this one shipped as far as a commit.
+
+    THE SHARPEST ROUND IS THE RETYPED CENTRE, and it is what this pin buys over the gate
+    beside it.
+    Retype the centre inside the refusal as the literal `3.11` and move `_PINNED_RATIO` to
+    3.12 — INSIDE the band, since 126 470 / 40 652 = 3.111040 and 3.12 - 3.111040 = 0.00896 —
+    and the ratio gate is GREEN while the refusal states a centre nothing enforces. Against the
+    same control of 0 failed that round is 1 failed, here ALONE. That is the shape a MISSED one
+    of those four hand-edits takes, caught on a tree the gate itself is happy with.
+
+    THE BAND WAS RE-MEASURED in the same sweep, since VMCP-328 (1739) measured it and this card
+    renamed its constant: against a control of 0 failed, `_PINNED_RATIO` put back to 3.10 -> 1
+    failed, and NOT here — on `test_each_ceiling_declares_the_script_it_was_derived_in`. So the
+    extraction is a rename, the band is still load-bearing at the shipped ceilings, and this
+    test stays green at either centre, which is what interpolating it is for.
+    """
+    refusal = _ratio_refusal(3.5)
+    assert "`_CEILINGS`" in refusal, (
+        "the refusal no longer names where the live pair is maintained, which is the whole of "
+        "VMCP-329 (1753). Five commits wrote a refusal that routed the reader to this test's "
+        "docstring instead — deliberately frozen at `d3884bc` — and it fires while someone is "
+        "deciding how far to move a ceiling. Send them to the header, never to a docstring"
+    )
+    assert "d3884bc" in refusal, (
+        "the refusal no longer fences the historical pair. The docstring the ratio assert "
+        "stands in is frozen at that tree on purpose, and a reader arriving here is deciding "
+        "how far to move a ceiling: un-fenced, 5.12x in tokens reads as live, and 5.12 against "
+        "2.88 is a 78% split between the units where the live pair agrees to within 3%. Name "
+        "the tree, or it is not a fence"
+    )
+    assert f"{_PINNED_RATIO}" in refusal and f"{_RATIO_BAND}" in refusal, (
+        f"the refusal does not carry the band it enforces ({_PINNED_RATIO} +/- {_RATIO_BAND}) "
+        f"as an interpolation of the constants. Retyping is how a figure drifts, and the "
+        f"centre has been retyped in all five commits that wrote this message — correctly "
+        f"every time, on care alone. The WIDTH none of them stated at all, so for that half "
+        f"there is no track record to lean on. Interpolate both and neither can get it wrong"
+    )
+    assert "3.5000x" in refusal, (
+        "the refusal does not state the ratio it was handed, so it tells the reader the band "
+        "was missed without saying by how much or in which direction. This clause is a "
+        "regression guard rather than a repair: the message this replaced already interpolated "
+        "the live ratio, at two decimal places. Keep it stated, and keep it at four"
+    )
