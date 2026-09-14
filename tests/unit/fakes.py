@@ -395,6 +395,20 @@ class FakeAPI:
         )
         return t
 
+    def search_tasks(self, query):
+        # 1:1 with GET /tasks?s=… (api.search_tasks): the WHOLE query as ONE substring over
+        # title AND description; hits from EVERY readable project, tasks in a _forbidden
+        # project silently EXCLUDED (the real server filters at permission, it does not 403
+        # the whole search); id-ascending for determinism; blank s= models the real
+        # server's "everything matches" by matching the empty substring in every task.
+        needle = query
+        hits = [
+            t for t in self.tasks.values()
+            if t.get("project_id") not in self._forbidden
+            and (needle in (t.get("title") or "") or needle in (t.get("description") or ""))
+        ]
+        return [self._snapshot(t) for t in sorted(hits, key=lambda t: t["id"])]
+
     def download_attachment(self, task_id, attachment_id):
         # keyed off the OUTER attachment id (task["attachments"][].id), 1:1 with the real
         # endpoint GET /tasks/{id}/attachments/{attachment_id}; a missing pair 404s like the

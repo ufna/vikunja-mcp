@@ -18,7 +18,7 @@ def test_exposes_exactly_the_workflow_tools():
     tools = asyncio.run(server.mcp.list_tools())
     names = {t.name for t in tools}
     assert names == {
-        "next_task", "claim", "get_task", "comment",
+        "next_task", "claim", "get_task", "search", "comment",
         "advance", "call_human", "return_task", "decompose", "review_task",
         "file_task", "download_attachment", "attach_file",
         "handoff", "transfer_task",
@@ -917,7 +917,7 @@ def test_no_non_mcp_cli_path_imports_the_mcp_sdk():
         assert modules == [], f"{path} imported the MCP SDK: {modules[:5]}... ({len(modules)})"
     # The negative assertions above are only meaningful if the SDK CAN be imported at all:
     assert data["seen"]["touched server.mcp"], "the lazy build imported no SDK — probe is vacuous"
-    assert len(data["tools"]) == 14, data["tools"]
+    assert len(data["tools"]) == 15, data["tools"]
 
 
 def test_the_lazy_server_is_a_single_cached_instance():

@@ -3720,6 +3720,61 @@ class Workflow:
             **({"icebox": icebox} if icebox else {}),
         }
 
+    def search(self, query: str) -> dict:
+        """Board-wide keyword search over the REST collection route (GET /tasks?s=…). The
+        server matches the WHOLE query as one substring against title AND description, so
+        pass one distinctive word — a two-word query that appears verbatim nowhere returns
+        nothing while each word alone would hit. Results are REFUSALS-FREE to act on: the
+        read is exhaustive (a truncated "no hits" is what gets a duplicate filed), every hit
+        carries its `done` flag and `project_id`, and a hit on THIS tracker's board also
+        carries its `stage` — one board read annotates all in-project hits, never one per
+        hit. NOT a key lookup: `ref` is not searchable (upstream #757 measured identifier
+        search dead on REST and UI both) — the id beside it is what get_task addresses."""
+        if not (query := query.strip()):
+            raise WorkflowError(
+                "search needs a non-blank query — the server matches it as ONE substring "
+                "over title and description, and an empty s= returns every task your token "
+                "can read. Pass one distinctive word from the card's title or body."
+            )
+        hits = self.api.search_tasks(query)
+        # One board read annotates EVERY in-project hit with its kanban stage; hits outside
+        # the tracker's board keep project_id only (their project has no board of ours to
+        # read, and per-hit _find_task calls would re-page the board once per hit).
+        stages: dict[int, str] = {}
+        if hits and any(t.get("project_id") == self.project_id for t in hits):
+            for bucket in self._board():
+                for task in bucket.get("tasks") or []:
+                    stages[task["id"]] = bucket["title"]
+        results = []
+        for task in hits:
+            hit = {
+                "id": task["id"],
+                "ref": self._ref(task),
+                "title": task["title"],
+                "project_id": task.get("project_id"),
+                "done": bool(task.get("done")),
+            }
+            if task["id"] in stages:
+                hit["stage"] = stages[task["id"]]
+            results.append(hit)
+        # Always the same TRUE sentence: the query is global (no project filter is sent), so
+        # a scope derived from where the HITS landed would imply a restriction that never
+        # existed — an all-in-project result page would read as "only project 3 was
+        # searched" and invite a pointless second, global search.
+        scope = "all projects readable by this token"
+        return {
+            "query": query,
+            "scope": scope,
+            "results": results,
+            "hint": (
+                "no hits: the WHOLE query is matched as one substring over title and "
+                "description — try one distinctive word, not a phrase"
+                if not results
+                else "get_task(id) for the full dossier; ref is not a search key — search "
+                "by a word from the title instead"
+            ),
+        }
+
     def download_attachment(self, task_id: int, attachment_id: int) -> dict:
         """Download a task attachment's bytes to a TEMP FILE and return its path (an agent then
         Reads the path — a PNG/JPG renders visually — instead of a base64 blob that bloats the

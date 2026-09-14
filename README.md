@@ -20,7 +20,7 @@
 
 Most task-tracker integrations are CRUD wrappers: they hand an agent `create_task`,
 `update_task`, `delete_task` and hope the prompt keeps it honest. This one does the opposite.
-It exposes twelve narrow tools, and each one refuses the moves that would break the process:
+It exposes fifteen narrow tools, and each one refuses the moves that would break the process:
 
 ```
 Backlog → Queue → Design → Build → Review → [human] → Done
@@ -145,13 +145,14 @@ the hook emits nothing.
 
 Then run the loop. `/loop 10m` for unattended work, plain `/loop` when you're watching.
 
-## The twelve tools
+## The fifteen tools
 
 | Tool | Gate / behavior |
 | --- | --- |
 | `next_task()` | One thing, in order: your active Design/Build card (including one bounced back from Your Call), then a Queue card already assigned to you, then a card in Review awaiting an independent verdict, then the top free Queue card. Never offers Backlog, a `blocked`-labeled card, or an epic container. |
 | `claim(task_id)` | Queue → Design only, and only under the WIP limit. Assign-then-verify: it assigns you, re-reads the card, and backs off if someone else won the same window. |
 | `get_task(task_id)` | The dossier: description, stage, assignees, labels, attachments, full comment thread. |
+| `search(query)` | Find cards by a keyword, board-wide — the duplicate check before `file_task`. The whole query is matched as ONE substring over title and description, so pass one distinctive word. Read-only; every hit carries `id`, `ref`, `project_id`, `done`, and its stage when it is on this board. |
 | `comment(task_id, text)` | A progress note on the card. |
 | `advance(task_id, to, spec=, worklog=, evidence=)` | `to="build"` needs a `spec`; `to="review"` needs a `worklog` **and** an `evidence` sha. `to="done"` is always rejected. The card must be assigned to you. |
 | `review_task(task_id, verdict, report)` | `approve` or `needs_work`, with a report of what you ran. Applies the `reviewed` / `review-failed` label; `needs_work` sends the card back to the implementer in Build. You must not be the author — enforceable as a hard gate once a second identity exists. |
@@ -159,6 +160,8 @@ Then run the loop. `/loop 10m` for unattended work, plain `/loop` when you're wa
 | `return_task(task_id, reason)` | For *external* blockers (no access, a dependency missing, someone else's service down). Unassigns you, adds `blocked`, returns the card to Backlog for re-triage. |
 | `decompose(task_id, subtasks)` | Splits your own oversized task into ≥2 Queue subtasks linked to the parent; the parent becomes an `epic` container in Backlog. |
 | `file_task(title, …)` | Files an out-of-scope finding into **Backlog** for human triage — never straight into Queue. Optionally linked to the card you found it on. |
+| `handoff(task_id, to, title)` | Parks YOUR active card and files the work it waits for onto a NEIGHBOUR project's board — their human triages it. Your card stands down in **Queue**, carrying NO `blocked` label: the blocked *relation* to their new card is what withholds it now and re-offers it the moment their card reaches Review. |
+| `transfer_task(task_id, to, reason)` | Moves a card — whole comment history riding along — onto a neighbour board's Backlog: a misfile anyone can see, no ownership needed. |
 | `attach_file(task_id, path, note=)` | Attaches a local file — typically a screenshot of the finished work — so the reviewer can *see* the result. Journals itself on the card. |
 | `download_attachment(task_id, attachment_id)` | Returns a path to read, not base64, so a screenshot never bloats the agent's context. |
 

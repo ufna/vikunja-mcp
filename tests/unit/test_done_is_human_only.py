@@ -135,7 +135,8 @@ def test_the_pointable_tool_roster_is_derived_and_the_argument_map_covers_it_exa
         f"_OTHER_ARGS names tool(s) that are gone or no longer take a task_id: {stale}"
     )
     assert _READING_TOOLS <= pointable, sorted(_READING_TOOLS - pointable)
-    assert registered - pointable == {"next_task", "file_task"}, sorted(registered - pointable)
+    assert registered - pointable == {"next_task", "file_task", "search"}, \
+        sorted(registered - pointable)
 
     # every pointable tool is also a Workflow method of the same name — that identity is what
     # lets this file drive the real gate instead of a mock of it
