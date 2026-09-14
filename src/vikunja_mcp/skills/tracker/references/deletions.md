@@ -173,9 +173,13 @@ the same commit REPLACED.
 | `abs(r-3.11)<0.01` (shipped) | 126 022 - 126 834 | 126 834 | 836 characters |
 
 Second version — the rework that corrected the cap — then carried every figure DERIVED from it
-across unchanged, while its own edits added 47 characters to the file. Each of those figures moved.
-That is the same defect one layer down: a headline re-measured, its consequences copied. Both
-rounds are recorded here because the second is the likelier one to repeat.
+across unchanged, while its own edits added 28 characters to the file. Each of those figures moved.
+That is the same defect one layer down: a headline re-measured, its consequences copied. A third
+round re-derived them all and cost 19 more, so the +472 above is three steps and not two:
+125 934 -> 126 359 (+425, the rule) -> 126 387 (+28, the pointer) -> 126 406 (+19, the complete
+list of what may follow the slash). All three are recorded because the second is the likeliest to
+repeat — and naming only two of them is how this very paragraph read until a third reviewer added
+the arithmetic up and found the last round costing nothing.
 
 The figures, re-derived from the shipped tree rather than carried: **364 characters** of ceiling
 slack remain. The 950-character first draft would have put the ceiling at 126 948, past either
