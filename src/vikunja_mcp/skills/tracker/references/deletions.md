@@ -24,7 +24,8 @@ Read out of the installed binary, the check returns an `ask` decision carrying a
 breaker (fields other than the two that matter elided):
 
 ```js
-{behavior:"ask", message:…, decisionReason:{type:"safetyCheck", classifierApprovable:false,
+{behavior:"ask", message:…, decisionReason:{type:"safetyCheck", reason:…,
+                                            classifierApprovable:false,
                                             circuitBreaker:"dangerousRemoval"}, suggestions:[]}
 ```
 
@@ -153,40 +154,49 @@ only one.
   returning `allow` and watched it be downgraded.
 - The originating incident (a stalled `/loop` round) is the author's own observation, not replayed.
 
-## What the rule cost in the rules layer, and the arithmetic that was wrong the first time
+## What the rule cost in the rules layer, and the arithmetic that was wrong twice
 
-SKILL.md 125 934 -> 126 359 characters, i.e. +425, and its ceiling in `test_rulebook_size.py` moved
-by the same +425, 125 998 -> 126 423, so headroom is 64 characters before and after. That is the
-RAISE case the gate's own header allows rather than the ratchet: the rules layer genuinely grew.
+SKILL.md 125 934 -> 126 406 characters, i.e. +472 for the rule, its pointer to this file and the
+complete list of what may follow the slash; its ceiling in `test_rulebook_size.py` moved by the same
++472, 125 998 -> 126 470, so headroom is 64 characters before and after. That is the RAISE case the
+gate's own header allows rather than the ratchet: the rules layer genuinely grew.
 
-The sizing story shipped WRONG and is corrected here, because a gate figure a future editor will
-act on is exactly the kind of number this repo does not get to leave stale. The claim was that the
-ratio assert capped the ceiling at 126 427 and that the 425 characters had consumed the slack.
-Under the assert that actually ships — `abs(ratio - 3.11) < 0.01`, band 3.10 to 3.12 — the cap is
-`3.12 x 40 652` = **126 834**, and 126 427 is `3.11 x 40 652`: the cap under the assert the same
-commit REPLACED. So:
+**The sizing story shipped wrong TWICE, and the second way is the one worth learning from.** First
+version: it claimed the ratio assert capped the ceiling at 126 427 and that the rule had consumed
+the slack. Under the assert that actually ships — `abs(ratio - 3.11) < 0.01`, band 3.10 to 3.12 —
+the cap is `3.12 x 40 652` = **126 834**, and 126 427 is `3.11 x 40 652`: the cap under the assert
+the same commit REPLACED.
 
 | assert | ceiling band | max ceiling | max rule |
 | --- | --- | --- | --- |
 | `abs(r-3.10)<0.01` (replaced) | 125 615 - 126 427 | 126 427 | 429 characters |
 | `abs(r-3.11)<0.01` (shipped) | 126 022 - 126 834 | 126 834 | 836 characters |
 
-Three things follow, and all three contradict what the card first said. The gate that really sized
-the rule was the one being replaced, not the one shipped. There are 411 characters of ceiling slack
-left, so the next rule does NOT require a joint re-derivation of both ceilings. And the 950-
-character first draft would have failed either band (126 884 > 126 834), so the cut was necessary —
-just not to 425.
+Second version — the rework that corrected the cap — then carried every figure DERIVED from it
+across unchanged, while its own edits added 47 characters to the file. Each of those figures moved.
+That is the same defect one layer down: a headline re-measured, its consequences copied. Both
+rounds are recorded here because the second is the likelier one to repeat.
 
-**The cost of re-centring, which the card did not state at all.** Moving the assert from 3.10 to
-3.11 raised the band's FLOOR from 125 615 to 126 022. The ratchet's stated preferred direction is
-DOWN, and a future shrink now meets the ratio assert 337 characters below today's file instead of
-744. The move was defensible as truth-maintenance — the docstring quotes `{ratio:.2f}`, which
-prints 3.11 for the new ratio, so leaving 3.10 would have made the prose stale — but unlike the
-#1640 precedent it cites, it was NOT forced: 126 423 passes the old assert with 0.0001 to spare.
-Cite #1640 for the arithmetic being a recomputation rather than a fresh tokenizer run; do not cite
-it as precedent for re-centring a band that was not yet red.
+The figures, re-derived from the shipped tree rather than carried: **364 characters** of ceiling
+slack remain. The 950-character first draft would have put the ceiling at 126 948, past either
+cap, so cutting it was necessary either way.
 
-One more piece of bookkeeping, since the same commit's stated point is that a reader must be able
-to tell a recomputation from a re-measurement: the figure it replaced was itself slightly wrong —
-`126 000 x 0.2534` is 31 928, not the 31 934 the old header carried — and the commit corrected it
-silently while presenting the edit as a pure recomputation.
+**RE-CENTRING IS NOW LOAD-BEARING, WHICH IS THE OPPOSITE OF WHAT THE FIRST CORRECTION SAID.** At
+the ceiling that ships, 126 470 / 40 652 = 3.111040, so `abs(r - 3.10) < 0.01` FAILS: reverting the
+assert to 3.10 turns this gate RED. It was defensible as truth-maintenance when the rule cost 425
+characters and the ceiling was 126 423 — that ceiling did pass the old assert — but the rule now
+costs 472, past the old band's 429-character maximum, so the move has become necessary rather
+than tidy. Do not read the earlier "it was not forced" wording; it described a tree that is no
+longer this one.
+
+**What re-centring costs, which no version stated until now.** It raised the band's FLOOR from
+125 615 to 126 022. The ratchet's stated preferred direction is DOWN, and a future shrink now
+meets the ratio assert 384 characters below today's file instead of 791. Cite #1640 for the
+token half being a recomputation rather than a fresh tokenizer run; do NOT cite it as precedent for
+re-centring, because #1640's move was forced by a band that had already gone red.
+
+One more piece of bookkeeping, since the point of that comment is that a reader must be able to tell
+a recomputation from a re-measurement: the figure it replaced was itself slightly wrong —
+`126 000 x 0.2534` is 31 928, not the 31 934 the old header carried — and it was corrected silently
+while the edit was presented as a pure recomputation. Today's pair is 126 470 x 0.2534 = 32 047
+against 40 652 x 0.2608 = 10 602, i.e. 3.02x in tokens beside 3.11x in characters.
