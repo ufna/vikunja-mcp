@@ -235,8 +235,11 @@ between — and the same card's `[worklog]` carries the right 1139, so the autho
 the tracker and not for the prose. The sweep's own deltas reproduced exactly and no pin was blind:
 what breaks is only the figure that certifies round and control measured the same tree, which is
 the whole point of the cross-check. Two remedies, and the second is not the one that suggests
-itself. The rule — measure a tree-property figure AFTER the last rebase, immediately before the
-push — now lives in SKILL.md beside that chain, where the re-run is already prescribed. And the
+itself. The rule — "A FIGURE OR A QUOTATION claimed as a property of the TREE is measured AFTER the
+last rebase", and right before the push — now lives in SKILL.md beside that chain, where the re-run
+is already prescribed. That is the LIVE wording: #888 wrote the rule scoped to FIGURES, #1794
+widened both copies — the subject of the next paragraph — and this gloss kept the narrower noun
+through that landing, which is what this sentence closes. And the
 ANCHOR: `N at `<sha>`` extends to sweep records, so `test_measured_figure_anchors.py` can resolve
 the tree; it checks the LABEL and not the value, which is enough, because a named tree is one a
 reader can open. **A gate that DERIVES `collected` and compares it to the record is deliberately
@@ -254,8 +257,11 @@ SKILL.md line it copied was written in that same commit and then trimmed. The au
 a later round of size-trimming, `too` was cut from the SKILL.md line and the quotation already
 written was left alone. `3d0ffaf` corrected it to *"And the FORM matters"*. Re-derived here rather
 than taken from the card: `e57bc3f^` carries no `FORM matters` line in SKILL.md at all, `e57bc3f`
-carries it WITHOUT `too`, `git log -S` on the fabricated form returns exactly those two commits,
-and `e57bc3f`'s author-date equals its commit-date with a bot bump for a parent. So **NOTHING
+carries it WITHOUT `too`, `git log -S` on the fabricated form returned 2 at `3d0ffaf` and 3 at
+`05bda7e` — the third being the commit that wrote this account, since `-S` lists whatever CHANGED
+the string's occurrence count and spelling the phantom out put it back into the tracked corpus, a
+point the #1784 paragraph below makes of `git grep -F` and not of this command — and `e57bc3f`'s
+author-date equals its commit-date with a bot bump for a parent. So **NOTHING
 REBASED AND NO SIBLING WAS INVOLVED** — author, quotation and cut sat in one working tree, which is
 why the rebase framing of the rule above read as not applying. That agent's own second-pass auditor
 had warned it that the prose stood on a tree which had moved under it; its response was to
@@ -294,8 +300,15 @@ even inside SKILL.md, where it also wraps. The second is how to read a MISS, and
 that nearly shipped unstated: applied literally to the very bullet it sits in, the rule no-hits
 on SKILL.md's own quotation of
 card 840's COMMIT MESSAGE, because `git ls-files` does not carry commit messages and that span can
-therefore never have a tree hit. Five of the quotations in this card's own diff miss for reasons of
-that kind, every one of them benign. Both failures are safe in DIRECTION — a false alarm, not a
+therefore never have a tree hit. The ruler first, because the count that stood here named none:
+every double-quoted span OPENING on an added line of the diff, put through the prescribed command.
+By that ruler 6 at `05bda7e` miss, for reasons of that kind and every one of them benign. The
+figure that stood here was five, and it dropped one of the six without saying which. Several of them would serve
+and they are not equivalent: the retracted phantom above is a class BOTH copies of the rule name,
+while this file's own scare-quoted `last change` is a phrase credited to the paragraph above, which
+does not carry it — a class neither copy names. It is the unstated ruler and not the digit that is
+this paragraph's complaint in miniature.
+Both failures are safe in DIRECTION — a false alarm, not a
 silent pass — but an author who "corrects" a true quotation on the strength of one has made the
 tree worse. So both copies now say to grep a FRAGMENT and to read a MISS as a PROMPT and not a
 verdict, and SKILL.md names the exemption classes inline rather than pointing at them, because it
@@ -308,8 +321,12 @@ condensing connective prose in its own bullet, with every quoted string and ever
 the fuller account of #840 sitting above, naming the sha `04c126b` that SKILL.md never did.
 CLAUDE.md went 40 528 -> 40 642 against 40 652, and that is the half worth recording: its headroom
 falls 124 -> 10, so this one card spent 92% of what the repo rulebook had. Neither ceiling moved
-and the documented 126 428 floor was never approached, but the next rule entering either file will
-have to move one — and with SKILL.md's ceiling where it is, the ratio assert permits a CLAUDE.md
+and neither documented bound under SKILL.md's ceiling was approached: the ratio band's FLOOR at
+126 022, and — well above it — the 126 428 BELOW which the live ratio drops under the pinned CENTRE
+(`3.11 x 40 652` = 126 427.72) and two mutation rounds recorded in `test_rulebook_size.py` silently
+stop reproducing. This paragraph first called 126 428 the floor, which both of its sources say
+outright it is not. The next rule entering either file will have to move a ceiling — and with
+SKILL.md's ceiling where it is, the ratio assert permits a CLAUDE.md
 ceiling no higher than **40 796** (126 470 / 3.10 = 40 796.77; at 40 797 it goes RED). That bound
 earns its space because the FIRST figure written here was 40 896: carried over from a ceiling-bump
 plan this card abandoned, never re-derived, and RED rather than merely loose. A stale tree-property
