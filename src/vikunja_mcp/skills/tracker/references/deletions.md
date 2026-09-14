@@ -1,13 +1,14 @@
 # Deleting your own scratch files: the one refusal no setting of yours lifts
 
 Evidence for SKILL.md's `$VAR/` rule, which lives in the scratchpad bullet of "What does
-collide" — *"And the FORM matters too"*. The rule is five lines because it has to be acted on,
+collide" — *"And the FORM matters"*. The rule is five lines because it has to be acted on,
 not studied; this is what it was cut down from, and what a later editor needs before rewording it.
 
 Cards: VMCP-328 (1739) measured the refusal and filed it in the second-pass stand recipe;
-VMCP-330 (1777) moved it to the bullet that actually governs teardown, after a live incident
-showed the filing was the defect. Everything below was measured against Claude Code 2.1.270 as
-installed at `~/.local/share/claude/versions/2.1.270`.
+VMCP-330 (1777) moved it to the bullet that actually governs teardown — prompted by a live
+incident, but carried by the section argument set out later, not by that one report. Everything
+below was measured against Claude Code 2.1.270 as installed at
+`~/.local/share/claude/versions/2.1.270`.
 
 ## What happened
 
@@ -152,12 +153,14 @@ only one.
 ## Where the rule is filed, and why it moved
 
 VMCP-328 (1739) put the rule in SKILL.md's second-pass stand recipe, on the reasoning that the
-refusal is a fact about the STAND. That reasoning was wrong, and a live incident refuted it the
-SAME DAY: #1739's first commit is timestamped 12:49:16 and its last 16:02:47 on 2026-09-14, and
-#1777 was filed that evening. The true interval may well be ZERO — the installed copy of SKILL.md
-refreshes once per session at MCP server start, so that consumer session may never have carried
-the rule at all. A per-task agent in a sibling repo (dogiators back-end), reported on this same
-Claude Code 2.1.270, tearing down its own scratchpad after finishing work, wrote
+refusal is a fact about the STAND. That reasoning was wrong. What SHOWS it is the regex re-run
+over teardown forms below — measured, and independent of any one incident; the incident only
+PROMPTED the move, and it reached this repo the SAME DAY: #1739's first commit is timestamped
+12:49:16 and its last 16:02:47 on 2026-09-14, and #1777 was filed that evening. The true
+interval may well be ZERO — the installed copy of SKILL.md refreshes once per session at MCP
+server start, so that consumer session may never have carried the rule at all. A per-task agent
+in a sibling repo (dogiators back-end), reported on this same Claude Code 2.1.270, tearing down
+its own scratchpad after finishing work, wrote
 
 ```sh
 rm -rf $SP/stmt $SP/f-*.go $SP/player.go.ORIG $SP/test.ORIG $SP/b-*.txt \

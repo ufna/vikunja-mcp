@@ -138,9 +138,11 @@ _CEILINGS = {
         # down scratch trees, and the obvious spelling of the tear-down — `rm -f $D/*_test.go` —
         # stops the round DEAD on a harness permission prompt that no mode, allow rule or hook can
         # lift. That was read as a fact about the STAND, so the rule was filed beside the stand —
-        # REFUTED by #1777: an agent doing ordinary scratchpad TEARDOWN hit the same prompt, and
-        # nothing sent it to the stand recipe, so the rule now lives in the scratchpad bullet of
-        # "What does collide" and the recipe keeps a pointer. The measurement behind it is in
+        # REFUTED by #1777, and by MEASUREMENT rather than by the live incident that prompted the
+        # card: the refusal fires on ordinary teardown, with no stand anywhere near it — the regex
+        # re-run over teardown forms has `$SP/1777/*` clean and `D=$SP/1777; rm -f $D/*.log`
+        # FIRING. So the rule now lives in the scratchpad bullet of "What does collide" and the
+        # recipe keeps a pointer. The measurement behind it is in
         # `skills/tracker/references/deletions.md`, which is where this
         # gate sends SKILL.md's evidence — `docs/dossier/` is CLAUDE.md's layer, and the first
         # version of this card put it there. Why that was a defect and not a preference: the wheel
