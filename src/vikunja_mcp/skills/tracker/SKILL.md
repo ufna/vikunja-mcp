@@ -1287,6 +1287,12 @@ unchanged or was found correct on the first try, and what spun was the wordings 
   not preserve `cd` between calls, so `find .` means "wherever I end up", and in the worst case
   that is precisely the scratchpad, which is exactly what the bullet below forbids.
 
+  A DELETION THROUGH A VARIABLE hangs the round: the harness answers `rm -f $D/*_test.go` with
+  a hardcoded BYPASS-IMMUNE prompt — no mode, allow rule or hook lifts it. It fires on `$VAR/`
+  (braces and quotes included) before a glob, `$`, `/` or token end. Delete with
+  `find "$D" -maxdepth 1 -name '*_test.go' -delete`, or with `rm -f "${D:?}"/*_test.go`: `:?`
+  aborts on an empty variable, which is the check's point.
+
   The steps; none of them cancels the others, and each is a measurement or a direct consequence of
   one:
   - **The clone carries what is COMMITTED, and that has to be topped up TWICE — with a patch and
