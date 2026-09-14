@@ -1,11 +1,13 @@
-# Deleting inside a scratch stand: the one refusal no setting of yours lifts
+# Deleting your own scratch files: the one refusal no setting of yours lifts
 
-Evidence for SKILL.md's rule in the second-pass stand recipe — *"A DELETION THROUGH A VARIABLE
-stops the round"*. The rule is five lines because it has to be acted on, not studied; this is what
-it was cut down from, and what a later editor needs before rewording it.
+Evidence for SKILL.md's `$VAR/` rule, which lives in the scratchpad bullet of "What does
+collide" — *"And the FORM matters too"*. The rule is five lines because it has to be acted on,
+not studied; this is what it was cut down from, and what a later editor needs before rewording it.
 
-Card: VMCP-328 (1739). Everything below was measured against Claude Code 2.1.270 as installed at
-`~/.local/share/claude/versions/2.1.270`.
+Cards: VMCP-328 (1739) measured the refusal and filed it in the second-pass stand recipe;
+VMCP-330 (1777) moved it to the bullet that actually governs teardown, after a live incident
+showed the filing was the defect. Everything below was measured against Claude Code 2.1.270 as
+installed at `~/.local/share/claude/versions/2.1.270`.
 
 ## What happened
 
@@ -138,7 +140,7 @@ hazard would be worth nothing, and would deserve to stop working.
 The other prescribed form, `find "$D" -maxdepth 1 -name '*_test.go' -delete`, wins differently:
 with no `rm` word in the command the detector never starts at all.
 
-## What "stops the round" means, and where it does not mean "hangs"
+## What the refusal COSTS, and where it does not mean a hang
 
 Scope it, because the two agent shapes this repo runs differ. In an INTERACTIVE session — the
 `/loop` orchestrator and the per-task agents it dispatches, which is who the rule addresses — the
@@ -147,12 +149,70 @@ hgdev-acp repo-agent runs, the same `ask` resolves to an automatic DENY: the run
 and the refusal arrives as a `permission_denials` entry. Fatal to the command in both, a hang in
 only one.
 
+## Where the rule is filed, and why it moved
+
+VMCP-328 (1739) put the rule in SKILL.md's second-pass stand recipe, on the reasoning that the
+refusal is a fact about the STAND. That reasoning was wrong, and a live incident refuted it the
+SAME DAY: #1739's first commit is timestamped 12:49:16 and its last 16:02:47 on 2026-09-14, and
+#1777 was filed that evening. The true interval may well be ZERO — the installed copy of SKILL.md
+refreshes once per session at MCP server start, so that consumer session may never have carried
+the rule at all. A per-task agent in a sibling repo (dogiators back-end), reported on this same
+Claude Code 2.1.270, tearing down its own scratchpad after finishing work, wrote
+
+```sh
+rm -rf $SP/stmt $SP/f-*.go $SP/player.go.ORIG $SP/test.ORIG $SP/b-*.txt \
+       $SP/p_*.txt $SP/p_*.n $SP/r_*.txt $SP/*.py $SP/*.sh $SP/status.before
+```
+
+and stopped on *"Dangerous rm operation on possibly-empty variable path: $SP/*.py"*.
+
+Read against the trigger table above — through its regex, run rather than read off it — the model
+predicted the SET exactly: of the eleven arguments only `$SP/*.py` and `$SP/*.sh` fire, every
+other one carrying a literal character after the slash, which the table calls clean. The harness
+named `$SP/*.py`; WHICH of a firing pair it names is predicted by nothing here, and the nine-run
+table never exercised a multi-argument command at all.
+
+So the defect was never the rule's CONTENT. It was that this agent was not building a stand. It
+was doing ordinary teardown, which SKILL.md governs in "What does collide", and that bullet was
+thorough about WHICH files to delete while saying nothing about the FORM.
+
+**One correction to the card's own account, which said the agent had followed that bullet
+correctly.** It had not, quite. `$SP/*.py` and `$SP/*.sh` are unqualified globs over the SHARED
+scratchpad root, and the same bullet forbids those for an unrelated reason: they would have taken
+a live neighbour's files along with its own. On this command the two rules happen to agree, and
+the stop was right on the merits.
+
+That does not rescue the filing, and being exact about why is the whole justification for the
+move. The FORM rule fires on `$VAR/` + glob whether or not the variable holds a directory that is
+yours alone — #1739's own originating command, `rm -f $D/*_test.go` over an agent's private stand,
+is the case where it stops a delete nothing else objects to. And the scratchpad bullet's OWN
+prescription leads straight into it. Re-running the regex above over teardown forms: `$SP/1777`,
+`"$SP/1777"`, `$SP/1777/*` and `$SP/1777-*.log` are all clean, while `D=$SP/1777; rm -f $D/*.log`
+FIRES. So an agent that takes the bullet's advice to give itself a subdirectory, and then holds
+that subdirectory in a variable — the obvious next step — meets the refusal on a delete that is
+correctly scoped and harms nobody. That is why the rule belongs in that bullet, and why its
+example there is rooted at `$D` rather than at the shared `$SP` the incident used: prescribing a
+rewrite of `rm -f $SP/*.py` would make a neighbour-destroying delete RUN.
+
+The rule now lives in that bullet; the stand recipe keeps a one-line pointer, because a sweep
+round's own mutate-and-restore deletions are exactly where #1739's originating incident happened.
+The general lesson, and the reason this section is worth its space: a rule's SECTION is part of
+the rule. One that only a specialist reader reaches is not filed, it is hidden.
+
 ## What could not be verified
 
 - The negative about settings and environment variables, as qualified above.
 - The hook-downgrade half is read from the binary only; nobody constructed a `PreToolUse` hook
   returning `allow` and watched it be downgraded.
 - The originating incident (a stalled `/loop` round) is the author's own observation, not replayed.
+- **#1777's incident likewise.** It is a human's report from a live consumer session plus a
+  screenshot; nobody replayed it. What WAS re-run is the regex — over the eleven arguments, and
+  over the teardown forms in the relocation section.
+- **That the FILING was the defect is consistent with that incident but not ISOLATED by it.** The
+  consumer session's installed SKILL.md may have predated #1739 outright, in which case no filing
+  would have reached it and the incident says nothing about where the rule sat. What carries the
+  relocation is the section argument — that teardown is governed by a bullet the rule was not in,
+  and that the bullet's own prescription walks into the refusal — not this one report.
 
 ## What the rule cost in the rules layer, and the arithmetic that was wrong twice
 
@@ -204,3 +264,24 @@ a recomputation from a re-measurement: the figure it replaced was itself slightl
 `126 000 x 0.2534` is 31 928, not the 31 934 the old header carried — and it was corrected silently
 while the edit was presented as a pure recomputation. Today's pair is 126 470 x 0.2534 = 32 047
 against 40 652 x 0.2608 = 10 602, i.e. 3.02x in tokens beside 3.11x in characters.
+
+**VMCP-330 (1777) RELOCATED the rule, and the ceiling did not move in either direction.** Moving
+it into the scratchpad bullet and leaving a one-line pointer at the stand recipe took SKILL.md
+126 406 -> 126 450 characters, i.e. **+44**: a 77-character pointer, less the 33 the rule shed
+being reworded for its new home (471 -> 438). Headroom therefore falls 64 -> 20 and `_CEILINGS`
+is untouched, which is the point — a relocation teaches nothing new, so it may not buy new
+budget, and it should not cost more than the cross-reference it leaves behind.
+
+**Why it was not made to SHRINK instead, when DOWN is this gate's preferred direction.** The
+obvious way to pay for the move was to send the glob-over-your-own-prefix evidence in that same
+bullet down here too, and that edit was built: SKILL.md 126 406 -> 126 141, i.e. -265, with the
+ceiling following to 126 205. It was REVERTED, and nothing of it survives to inspect — redo the
+arithmetic rather than checking a measurement. Every ceiling below **126 428** — the point at
+which the live ratio falls under the pinned CENTRE itself, `3.11 x 40 652` = 126 427.72, which is
+well inside the band and nowhere near its floor of 126 022 — silently stops two mutation rounds
+recorded in `test_rulebook_size.py` from reproducing: `_PINNED_RATIO` put back to 3.10 goes GREEN
+where VMCP-328 (1739) measured it red, and the 3.12 mutant that VMCP-329 (1753)'s sweep calls
+INSIDE the band falls outside it. Nothing in the gate goes red; the records simply become false,
+and a shrink whose cost is rewriting somebody else's evidence is not bookkeeping. Read it as a
+bound on the next ratchet step rather than as a reason never to take one: below 126 428, re-run
+those rounds and re-state them in the same commit, or leave the ceiling alone.

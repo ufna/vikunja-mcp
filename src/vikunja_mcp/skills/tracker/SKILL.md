@@ -409,6 +409,11 @@ is forbidden (see "Free slots GET FILLED"), and what is listed below is verified
   `702r3*` (no trace was left in the tree — this is his `[worklog]`, not a commit). Nothing live
   was lost that time, but `rm -rf` over a glob is silent — unlike an occupied docker name, which
   fails loudly.
+  **And the FORM matters: `rm` through a `$VAR/` is BYPASS-IMMUNE** — no mode, allow rule or hook
+  lifts it, and EVERY argument is tested. Fires on `$VAR/`, quotes and braces included, before a
+  glob, `$`, `/`, a quote, `$(…)` or token end, so empty the subdirectory above with
+  `find "$D" -maxdepth 1 -name '*.log' -delete` or `rm -f "${D:?}"/*.log`: `:?` aborts on an
+  empty variable, the check's point (`references/deletions.md`).
 - **The container name and the port from the docs are FIXED, and therefore shared.** The recipes
   in README/CLAUDE.md were written for one agent: in this repository integration means
   `--name vikunja-test -p 3456:3456`. Copy it as is while a sibling is doing the same, and you
@@ -1287,12 +1292,7 @@ unchanged or was found correct on the first try, and what spun was the wordings 
   not preserve `cd` between calls, so `find .` means "wherever I end up", and in the worst case
   that is precisely the scratchpad, which is exactly what the bullet below forbids.
 
-  A DELETION THROUGH A VARIABLE stops the round: the harness answers `rm -f $D/*_test.go` with
-  a hardcoded BYPASS-IMMUNE prompt — no mode, allow rule or hook lifts it. It fires on `$VAR/`
-  (braces and quotes included) before a glob, `$`, `/`, a quote, `$(…)` or token end. Delete
-  with
-  `find "$D" -maxdepth 1 -name '*_test.go' -delete`, or with `rm -f "${D:?}"/*_test.go`: `:?`
-  aborts on an empty variable, which is the check's point (`references/deletions.md`).
+  Deleting inside the stand goes by the `$VAR/` rule in "What does collide".
 
   The steps; none of them cancels the others, and each is a measurement or a direct consequence of
   one:

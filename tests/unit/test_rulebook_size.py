@@ -119,6 +119,17 @@ _CEILINGS = {
         "the repo rulebook — read by every session in this checkout",
     ),
     "src/vikunja_mcp/skills/tracker/SKILL.md": (
+        # UNCHANGED at 126 470 by VMCP-330 (1777), which RELOCATED the rule below into the
+        # scratchpad bullet and left a one-line pointer at the stand: the file went
+        # 126 406 -> 126 450, i.e. +44 — a 77-character pointer, less the 33 the rule shed being
+        # reworded for its new home — so headroom falls 64 -> 20 and no ceiling moves. It was left
+        # alone DELIBERATELY, in BOTH directions. Raising it for a relocation would buy budget
+        # for text that teaches nothing new. Lowering it is the shape this gate prefers, but the
+        # relocation did not shrink the file; and had it been made to, every ceiling below
+        # 126 428 — where the live ratio falls under the pinned CENTRE, not the band's floor —
+        # silently flips two rounds recorded in this file: `_PINNED_RATIO` back to 3.10 goes
+        # GREEN, and the 3.12 mutant leaves the band. Neither turns anything red, so a shrink
+        # here is not free bookkeeping — it is a rewrite of somebody else's evidence.
         # RAISED 125 998 -> 126 470 by VMCP-328 (1739), and the increment is EXACTLY what the rule
         # cost: the file went 125 934 -> 126 406, i.e. +472, and the ceiling moved by the same 472,
         # so headroom is 64 characters before and after — the same arithmetic #1705 ran in the
@@ -126,8 +137,11 @@ _CEILINGS = {
         # WHY THE RULE HAD TO GO IN AT ALL: the sweep-stand recipe teaches agents to build and tear
         # down scratch trees, and the obvious spelling of the tear-down — `rm -f $D/*_test.go` —
         # stops the round DEAD on a harness permission prompt that no mode, allow rule or hook can
-        # lift. That is a fact about the stand, so the rule belongs beside the stand; the
-        # measurement behind it is in `skills/tracker/references/deletions.md`, which is where this
+        # lift. That was read as a fact about the STAND, so the rule was filed beside the stand —
+        # REFUTED by #1777: an agent doing ordinary scratchpad TEARDOWN hit the same prompt, and
+        # nothing sent it to the stand recipe, so the rule now lives in the scratchpad bullet of
+        # "What does collide" and the recipe keeps a pointer. The measurement behind it is in
+        # `skills/tracker/references/deletions.md`, which is where this
         # gate sends SKILL.md's evidence — `docs/dossier/` is CLAUDE.md's layer, and the first
         # version of this card put it there. Why that was a defect and not a preference: the wheel
         # carries `src/vikunja_mcp` only, so a consumer receives the rule and cannot reach the
