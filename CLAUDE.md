@@ -314,11 +314,12 @@ then CROSS-CHECK the selection size — pytest's `collected` line — against th
 One gotcha: `-q` prints NO `collected` line, so a script asking for it under `-q` gets
 nothing back and the cross-check quietly never runs. Drop `-q` in a scripted sweep.
 
-**Measure a tree-property figure AFTER the last rebase, immediately before the push.** The
-mandatory `git fetch && git rebase origin/main && <re-run the gates> && git push` re-runs
-the GATES and not the PROSE, so an absolute lands describing a tree that is in no history
-— and at `wip_limit = 3` siblings are landing beside you, so staleness is the ordinary
-case (tracker #888).
+**Measure a tree-property figure — or a QUOTATION — AFTER the last rebase, right before
+the push.** The mandatory `git fetch && git rebase origin/main && <re-run the gates> && git
+push` re-runs the GATES and not the PROSE, so an absolute lands describing a tree in no
+history — and at `wip_limit = 3` siblings land beside you, so staleness is ordinary (tracker
+#888). Your own later edit moves it too (#1777): `git grep -F` a one-line fragment of each
+span; a MISS is a PROMPT, not a verdict.
 
 **A clean control does not mean the round MEASURED anything.** It is the cheapest detector,
 not a complete one. CAUGHT: a constant background failure, and stale bytecode — cache

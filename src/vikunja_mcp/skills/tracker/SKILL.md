@@ -934,29 +934,29 @@ where. Here — what must not be broken:
     failed here — this bump touches not two files, as is commonly believed, but THREE: both
     version files and **the dependency lock**. The cost of an extra round is handled by the
     ceiling above and by the `&&` chain, not by a relaxation in the checking.
-  - **A FIGURE claimed as a property of the TREE is measured AFTER the last rebase — right before
-    the push, and not when it was convenient to obtain.** The chain above orders the CRITERIA
-    re-run after the rebase, and that works. It says nothing about PROSE, and everything else
-    slips through that gap: the sweep record in a docstring, the control round's `collected`, the
-    "Gates on this tree: … N passed" line in the commit message. They are written BEFORE the
-    rebase — and they land describing a tree that is in no history, because the last change to it
-    is made not by you but by a SIBLING that landed while you worked. So the rule is not "measure
-    carefully" but "measure LAST": at the default limit of 3 two others are working beside you,
-    and the release bot arrives after every green landing, so what goes stale is not the edge case
-    but the ordinary one.
-    The measurement is on VMCP-249 (840): its commit carries "Gates on this tree: uv run pytest
+  - **A FIGURE OR A QUOTATION claimed as a property of the TREE is measured AFTER the last rebase
+    — right before the push, not when it was convenient to obtain.** The chain above re-runs the
+    CRITERIA after the rebase and not the PROSE, so everything else slips through: the sweep
+    record in a docstring, the control round's `collected`, a quoted phrase, the "Gates on this
+    tree: … N passed" commit-message line. Written BEFORE the rebase, they land describing a tree
+    in no history: it moved after you wrote — a SIBLING landed, or YOU edited it again. So the
+    rule is not "measure carefully" but "measure LAST": siblings land beside you and the release
+    bot after every green landing, so staleness is ordinary.
+    The measurement is VMCP-249 (840): its commit carries "Gates on this tree: uv run pytest
     tests/unit -> 1136 passed" and the sweep record "control 0 failed / 0 errors / 200 collected"
-    (both lines present — `git show` on the landed sha), while the independent reviewer's
-    re-measurement on the SAME sha gave 1139 passed and 203 collected. Between the measurement and
-    the push, a sibling with three tests landed. The same card's `[worklog]` contains the correct
-    1139 — that is, the author re-measured for the TRACKER and did not re-measure for the PROSE,
-    and that is not one agent's sloppiness but a gap in the prescribed order.
-    The sweep's own deltas reproduced exactly and not one pin turned out blind: what breaks is
-    precisely the control figure used to check that the round and the control measured ONE
-    tree — that is, exactly what the cross-check exists for.
-    In practice: as the last action before `git push`, walk your own prose and the commit
-    message and re-measure every number claimed as a property of THIS tree. Cheaper still is
-    not to write an absolute at all: an assertion of the PROPERTY (an assert) never goes stale.
+    (both on the landed sha), while its independent reviewer's re-measurement on the SAME sha gave
+    1139 passed and 203 collected — a sibling with three tests landed in between. Its `[worklog]`
+    carries the correct 1139: the author re-measured for the TRACKER and not for the PROSE — a gap
+    in the prescribed order, not one agent's slip. The sweep's own deltas reproduced exactly and no
+    pin was blind; what breaks is only the figure certifying round and control measured ONE tree —
+    the whole point of the cross-check.
+    In practice: last thing before `git push`, re-derive every number and quotation your prose and
+    commit message claim of THIS tree. A quotation is the worse half: it reads as authoritative
+    forever, where a number disagrees with a re-run. `git grep -F` a ONE-LINE fragment of each
+    span, requiring a hit OUTSIDE the claiming file; a MISS is a PROMPT, not a verdict — a card's
+    description, a commit message, a tool's output and a retracted wording are no tree strings.
+    Do not wait for a gate. Cheaper still is not to write an absolute at all: an assertion of the
+    PROPERTY (an assert) never goes stale.
   - **Sign a historical absolute with the TREE — `N at `<sha>``.** The anchor idiom (a number,
     the word `at`, a sha in backticks) extends to sweep records too: a figure written that way is
     SEEN by `tests/unit/test_measured_figure_anchors.py`, which requires the named commit to exist
