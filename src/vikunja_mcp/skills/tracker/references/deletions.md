@@ -312,8 +312,12 @@ in order:
 | 6 | 325 | `rm -f "$SP/main.go.orig2"` | ran (literal after the slash) |
 | 7 | 364 | `for f in base_main.go … master_test.go; do rm -f "$SP/$f"; done` | **STALLED on the prompt** |
 
-Three of those seven calls spell `${SP:?}`, all correctly, and the rule was in context for every
-one of them. So neither delivery nor filing failed. What failed is that BOTH recipes the rule
+TWO of those seven calls spell `${SP:?}` — three `rm` commands, four arguments — all correctly,
+and the rule was in context for every one of them. The unit matters and is spelt out because it
+is where this section has already been wrong once: the table's row is a CALL, the title's "three
+times" counts `rm` COMMANDS, and an earlier draft read the first figure off the second.
+
+So neither delivery nor filing failed. What failed is that BOTH recipes the rule
 offered were GLOB-shaped (`find … -delete`, `rm -f "${D:?}"/*.log`), while the commonest teardown
 is "N files I made, by name" — and its natural spelling puts a second variable where the literal
 had been. Rows 1 and 6 are what makes that a trap rather than an obvious sin: TWICE in this one
