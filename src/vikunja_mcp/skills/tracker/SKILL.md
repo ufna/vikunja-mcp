@@ -410,10 +410,14 @@ is forbidden (see "Free slots GET FILLED"), and what is listed below is verified
   was lost that time, but `rm -rf` over a glob is silent — unlike an occupied docker name, which
   fails loudly.
   **And the FORM matters: `rm` through a `$VAR/` is BYPASS-IMMUNE** — no mode, allow rule or hook
-  lifts it, and EVERY argument is tested. Fires on `$VAR/`, quotes and braces included, before a
-  glob, `$`, `/`, a quote, `$(…)` or token end, so empty the subdirectory above with
-  `find "$D" -maxdepth 1 -name '*.log' -delete` or `rm -f "${D:?}"/*.log`: `:?` aborts on an
-  empty variable, the check's point (`references/deletions.md`).
+  lifts it, EVERY argument is tested, and quoting is no fix. Fires on `$VAR/` before a glob, `$`,
+  `/`, a quote, `$(…)` or token end — so **a LITERAL first segment CLEARS it, and that is the
+  trap**: `rm -f "$D/one.log"` runs, the habit forms, and then
+  `for f in …; do rm -f "$D/$f"; done` FIRES on the `$`. Put `:?` — abort on empty — on EVERY
+  variable, the FILENAME half included — `rm -f "${D:?}/${f:?}"`, `rm -f "${D:?}"/*.log` — or
+  keep `rm` out of it: `find "$D" -maxdepth 1 -name '*.log' -delete`. The second `:?` is not
+  symmetry: measured, `rm -rf "${D:?}/$f"` at an empty `$f` is detector-CLEAN and takes the
+  whole DIRECTORY, rc=0 (`references/deletions.md`).
 - **The container name and the port from the docs are FIXED, and therefore shared.** The recipes
   in README/CLAUDE.md were written for one agent: in this repository integration means
   `--name vikunja-test -p 3456:3456`. Copy it as is while a sibling is doing the same, and you

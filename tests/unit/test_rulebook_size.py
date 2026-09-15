@@ -119,6 +119,29 @@ _CEILINGS = {
         "the repo rulebook — read by every session in this checkout",
     ),
     "src/vikunja_mcp/skills/tracker/SKILL.md": (
+        # RAISED 126 470 -> 126 811 by VMCP-333 (1852), and the increment is EXACTLY what the
+        # rewording cost: the file went 126 460 -> 126 801, i.e. +341, and the ceiling moved by the
+        # same 341, so headroom is 10 characters before and after.
+        # WHY THE REWORDING HAD TO GO IN AT ALL, and note that it does NOT refute #1777's filing —
+        # that filing is right, and this card measures the rule being READ there and still missed.
+        # On a live consumer session (dogiators back-end `a22ebd06`, per-task agent
+        # `agent-a2bddb6b9ccd44e4c`) the transcript shows SKILL.md's own header and the string
+        # `BYPASS-IMMUNE` once each, so the agent held this rule; it then wrote `${SP:?}` on three
+        # deletions in a row, and the drain then stalled 2 m 47 s on a prompt over one spelt
+        # `for f in …; do rm -f "$SP/$f"; done`. So what failed was neither delivery nor filing but
+        # the rule's own RECIPES: both were GLOB-shaped, while the commonest teardown is "N files
+        # by name", whose natural spelling is a loop — and TWICE in that same session a literal
+        # first segment had cleared the check, which teaches the wrong generalisation. The +341 buys
+        # the two things a reader cannot derive from the old enumeration: that a LITERAL first segment
+        # CLEARS the check (which is what makes the loop form a trap, not an obvious sin), and
+        # that `:?` belongs on the FILENAME half too — measured, not reasoned: at an empty second
+        # variable that form is detector-CLEAN and removes the whole DIRECTORY, rc=0, in zsh and
+        # in bash alike. Re-measured against Claude Code 2.1.272, two patch versions past the
+        # 2.1.270 `references/deletions.md` names: the breaker and the regex are unchanged.
+        # THE SLACK THIS SPENDS, since the next card here will want it: the ratio cap is
+        # 3.12 x 40 652 = 126 834, so 23 characters of ceiling remain, down from 364. The next
+        # addition pays by SHRINKING something, not by moving the band — re-centring is what the
+        # entry below already argues against.
         # UNCHANGED at 126 470 by VMCP-330 (1777), which RELOCATED the rule below into the
         # scratchpad bullet and left a one-line pointer at the stand: the file went
         # 126 406 -> 126 450, i.e. +44 — a 77-character pointer, less the 33 the rule shed being
@@ -171,7 +194,7 @@ _CEILINGS = {
         # 126 000 x 0.2534 it replaces — and saying so is the point, since a reader must be able to
         # tell a recomputation from a fresh tokenizer run. One correction inside that: the figure
         # replaced was itself off — 126 000 x 0.2534 is 31 928, not the 31 934 that stood here.
-        126_470, "latin",
+        126_811, "latin",
         "the agent rulebook — ships in the wheel, so every consumer pays for it too",
     ),
 }

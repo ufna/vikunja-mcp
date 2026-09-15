@@ -288,3 +288,100 @@ INSIDE the band falls outside it. Nothing in the gate goes red; the records simp
 and a shrink whose cost is rewriting somebody else's evidence is not bookkeeping. Read it as a
 bound on the next ratchet step rather than as a reason never to take one: below 126 428, re-run
 those rounds and re-state them in the same commit, or leave the ceiling alone.
+
+## VMCP-333 (1852): the rule was READ, applied three times, and still missed the LOOP form
+
+The refusal fired a third time, and this round is the one that says the earlier diagnoses were
+about the wrong thing. #1739 read it as a fact about the STAND; #1777 refuted that and moved the
+rule to the bullet that governs teardown. Both filings asked, implicitly, whether the agent HAD the
+rule. This time it demonstrably did.
+
+Measured on a live consumer session — dogiators back-end, session `a22ebd06`, per-task agent
+`agent-a2bddb6b9ccd44e4c` (`tracker-build`, its card DOGEBACK-474 / 1841), whose dispatch brief
+tells it to invoke the `tracker` skill at the start. Its transcript shows SKILL.md's own heading
+and the string `BYPASS-IMMUNE` once each, so the rule was in its context. Every removal it issued,
+in order:
+
+| # | jsonl line | argument | outcome |
+| --- | --- | --- | --- |
+| 1 | 122 | `rm -f "$SP/main.go.orig"` | ran (literal after the slash) |
+| 2 | 161 | `CK=$SP/roundtrip; rm -rf "$CK"` | ran (bare variable) |
+| 3 | 166 | `rm -rf "${SP:?}/roundtrip"` | ran — rule applied |
+| 4 | 183 | `CK=$SP/recount; rm -rf "$CK"` | ran (bare variable) |
+| 5 | 197 | `rm -rf "${SP:?}/recount"` + `rm -f "${SP:?}/empty.md" "${SP:?}/picture.png"` | rule applied |
+| 6 | 325 | `rm -f "$SP/main.go.orig2"` | ran (literal after the slash) |
+| 7 | 364 | `for f in base_main.go … master_test.go; do rm -f "$SP/$f"; done` | **STALLED on the prompt** |
+
+Three of those seven calls spell `${SP:?}`, all correctly, and the rule was in context for every
+one of them. So neither delivery nor filing failed. What failed is that BOTH recipes the rule
+offered were GLOB-shaped (`find … -delete`, `rm -f "${D:?}"/*.log`), while the commonest teardown
+is "N files I made, by name" — and its natural spelling puts a second variable where the literal
+had been. Rows 1 and 6 are what makes that a trap rather than an obvious sin: TWICE in this one
+session a literal first segment cleared the check, which teaches that naming the file is what
+makes a deletion safe.
+
+**Row 7's outcome is INFERRED, and the count in the paragraph above is the reason to say so
+plainly.** No refusal string occurs in either transcript — `Dangerous rm operation` and
+`possibly-empty variable path` are both absent — so what is measured is the SHAPE of a block: the
+`tool_use` is stamped `06:46:06.970Z` and its `tool_result` `06:48:54.353Z`, a **2 m 47 s** stall
+against sub-second neighbours, with a `queued_command` attachment at `06:47:47` (the human typed
+while it sat there). The result is `is_error: false` and the files are gone, so the deletion DID
+eventually run: a human answered the prompt. "Refused" would be the wrong word — the command was
+not rejected, the DRAIN was stopped, which is the cost this rule exists to avoid. An earlier draft
+of this section wrote REFUSED and gave only six rows, dropping row 2 to a 500-character truncation
+in the script that read the transcript, and then drew "five times over" off the row count; an
+independent review caught both. Re-derive from the jsonl lines named above rather than from this
+table.
+
+The trigger table above already predicted row 6 — `$D/$F` is in its **fires** column. Re-run here
+against the same regex, in python and in node independently, agreeing row for row:
+`"$SP/$f"` fires; `"$D/one.log"`, `"${D:?}/${f:?}"`, `"${D:?}/$f"` and `"${D:?}"/*.log` are clean.
+
+### The FILENAME half needs `:?` too, and the detector will not tell you
+
+New here, and it is why the rule now says EVERY variable rather than the first one. Put `:?` on
+the directory half alone and the form is detector-clean — which is exactly the problem. Two arms,
+same stand, `f` set to the empty string:
+
+| form | detector | result |
+| --- | --- | --- |
+| `rm -rf "${D:?}/$f"` | clean | **rc=0, the whole directory gone** |
+| `rm -rf "${D:?}/${f:?}"` | clean | aborts (`f: parameter null or not set`), directory intact |
+
+The quoted wording is bash 5.3's; zsh 5.9 refuses the same form as `f: parameter not set`. This
+is the harness's own
+accident one level down — its prompt names `rm -rf $UNSET/*` becoming `rm -rf /*` — and the check
+does not see it, because the check only ever looks at what follows the FIRST variable.
+
+End to end, the prescribed loop form was run in a seeded directory holding `a_main.go`,
+`b_main.go`, `c_test.go` and `keep.txt`: `for f in a_main.go b_main.go c_test.go; do rm -f
+"${D:?}/${f:?}"; done` produced no prompt and left exactly `keep.txt`.
+
+### Re-read against a later binary
+
+Everything above was measured against Claude Code **2.1.272**, two patch versions past the 2.1.270
+this file's opening names, and nothing moved: the builder still returns
+`{behavior:"ask", decisionReason:{type:"safetyCheck", classifierApprovable:false,
+circuitBreaker:"dangerousRemoval"}}`. The `classifierApprovable:false` half is worth stating
+separately from `bypassImmune`, because it closes a mode this file had not addressed: the `auto`
+permission mode routes prompts to a model classifier, and this one is marked as not approvable by
+it, so `auto` is no more an escape than bypass is.
+
+**The ceiling moved with the rule, by exactly what the rule cost.** SKILL.md went
+126 460 -> 126 801 characters (+341) and `_CEILINGS` 126 470 -> 126 811, so headroom is 10
+characters before and after. That leaves 23 characters below the ratio cap of
+`3.12 x 40 652` = 126 834, down from 364: the next addition to SKILL.md pays by shrinking
+something, and the bound on that direction is the 126 428 floor argued above.
+
+**One diagnostic was traded away at that ceiling, and it is named here so nobody restores it
+blind.** The old bullet said the check fires "quotes and braces included"; the new one says
+"quoting is no fix", which covers `"$D"/…` but no longer states that `${D}/…` — braces with no
+`:?` — fires as well. The behaviour is still prescribed ("`:?` on EVERY variable"), only the
+diagnostic is gone, and the trigger table above still carries the `${D}/*` row. Restoring the
+clause costs about 11 characters against the 23 that remain.
+
+**And "the regex" above is one of TWO.** Beside it in the same binary sits a sibling for
+POSITIONAL and special parameters — `$1`, `$@`, `$*`, `$!` and their `${…}` forms — with the same
+tail, so `$1/$f` fires exactly as `$D/$f` does. Nothing here was measured against it and no filed
+verdict depends on it (every candidate in the tables uses a named variable), but a reader
+extending those tables should test both.
