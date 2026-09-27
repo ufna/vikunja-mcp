@@ -633,6 +633,19 @@ class VikunjaAPI:
     def get_task(self, task_id: int) -> dict:
         return self._req("GET", f"/tasks/{task_id}")
 
+    def search_tasks(self, query: str) -> list:
+        # GET /tasks is the collection route (NOT /tasks/all — absent from the route table on
+        # 2.6.0, where it lands on a catch-all answering 2004 "Invalid model provided"; probed
+        # on the live instance 2026-09-13). `s=` matches the WHOLE query as ONE substring over
+        # title AND description — "split dns" returns 0 hits where each word alone returns hits
+        # — and filters in SQL, so pages fill until the last (the VMCP-124 note above
+        # `_page_size`). The `include_done` QUERY PARAM IS IGNORED on this endpoint: a done
+        # task comes back whether it is sent true or false (same probe), so this method does
+        # not accept one — done-state travels on each returned task's `done` field instead.
+        # EXHAUSTIVE by `_paged_list`, deliberately: the caller acts on absence — a truncated
+        # "no hits" is exactly what gets a duplicate card filed.
+        return self._paged_list("/tasks", params={"s": query})
+
     def update_task(self, task_id: int, **fields: Any) -> dict:
         current = self.get_task(task_id)
         current.update(fields)

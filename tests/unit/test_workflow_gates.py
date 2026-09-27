@@ -2973,6 +2973,7 @@ _VERDICT_POLICY = {
     "file_task":           "NO-MOVE",  # creates a NEW card; never touches this one's labels
     "attach_file":         "NO-MOVE",
     "download_attachment": "NO-MOVE",
+    "search":              "NO-MOVE",  # read-only lookup; answers with hits, writes nothing
 }
 
 

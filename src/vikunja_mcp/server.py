@@ -610,6 +610,20 @@ def get_task(task_id: int) -> dict:
 
 @_mcp_tool
 @_tool
+def search(query: str) -> dict:
+    """Find cards by a keyword, board-wide. WHEN: before file_task — CHECK for an existing
+    card first and related_task it instead of filing a duplicate; and whenever you hold a
+    word from a card's title or body but no id. The server matches the WHOLE query as ONE
+    substring over title AND description, so pass one distinctive word — 'split dns' finds
+    nothing where 'split' finds the card. Every hit carries {id, ref, title, project_id,
+    done}; hits on this tracker's board also carry their stage. get_task(id) for the full
+    dossier of a hit. NOT a key lookup: the ref ('VMCP-27 (82)') is NOT searchable — search
+    by a word from the title, and let the id address the card."""
+    return _wf().search(query)
+
+
+@_mcp_tool
+@_tool
 def download_attachment(task_id: int, attachment_id: int) -> dict:
     """Download a task attachment to a temp file and return its PATH — then Read the path to
     view it (a PNG/JPG renders visually; text/PDF opens as text). The path is returned instead
