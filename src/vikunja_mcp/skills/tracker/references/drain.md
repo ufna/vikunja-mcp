@@ -293,7 +293,11 @@
 
     ```sh
     git add <this task's files>
-    git commit -m "type(scope): … (tracker #N)"    # + the Co-Authored-By trailer
+    git commit -F - <<'MSG'                         # never -m "…": the shell eats backticks
+    type(scope): … (tracker #N)
+
+    Co-Authored-By: …
+    MSG
     # ONE chain, not separate turns: `&&` will not let you push on red criteria, and it
     # shrinks the window in which the race can be lost from your thinking to machine time
     git fetch origin && git rebase origin/main \
