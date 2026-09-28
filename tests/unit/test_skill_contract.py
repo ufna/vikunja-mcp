@@ -3502,7 +3502,9 @@ def _review_sweep(tmp_path, *, mine: bool = True) -> tuple[dict, dict]:
             c["id"], verdict="approve", report="ок"),
         "review_task(needs_work)": lambda wf, c: wf.review_task(
             c["id"], verdict="needs_work", report="вопрос человеку"),
-        "file_task": lambda wf, c: wf.file_task("находка", related_task_id=c["id"]),
+        "file_task": lambda wf, c: wf.file_task(
+            "находка", related_task_id=c["id"], breaks="it breaks"
+        ),
         "handoff": lambda wf, c: wf.handoff(c["id"], to="neighbour", title="другая половина"),
         "transfer_task": lambda wf, c: wf.transfer_task(
             c["id"], to="neighbour", reason="не та доска"),

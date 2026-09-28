@@ -806,12 +806,18 @@ def decompose(task_id: int, subtasks: list[dict], ordered: bool = False) -> dict
 def file_task(
     title: str, description: str = "", priority: int = 0,
     related_task_id: int | None = None, project_id: int | None = None,
-    queue: bool = False, icebox: bool = False,
+    queue: bool = False, icebox: bool = False, breaks: str = "",
 ) -> dict:
     """File a task DISCOVERED mid-work (a bug/tech-debt OUTSIDE your current task) into
     Backlog for human triage. WHEN: you hit a problem unrelated to the current task with
     nowhere to put it — park it here, do NOT fix it silently and do NOT drag it into your
-    diff. This is NOT splitting your own large task — use decompose for that (it puts
+    diff.
+    BREAKS IS REQUIRED (#1987) for every filing except queue=True: one sentence naming what
+    goes wrong — for a user, an agent or a tool run — if this is never fixed. It becomes the
+    first line of the card. If you cannot name one, DO NOT FILE: a finding about text (a
+    wording, a stale figure, a claim wider than its measurement, a blind spot in a prose gate)
+    is dropped, not parked in Backlog or Icebox. The call refuses without it, nothing created.
+    This is NOT splitting your own large task — use decompose for that (it puts
     subtasks in Queue with a parenttask). Files into Backlog (NOT Queue — a human
     prioritizes), marks it with a [filed-by-agent] comment and, if related_task_id is
     given, adds a 'related' relation to the task it was found during. No ownership needed
@@ -858,12 +864,13 @@ def file_task(
     is still the string to echo. One case the ref cannot cover: if the call RAISES after
     the card was created (a scope gap on the move/relation/marker write), the card exists
     but you got no id and no ref — say so plainly rather than reconstructing either.
-    ICEBOX OPT-IN: pass icebox=True for a finding that is REAL but very minor — cosmetic
-    legacy, wording, a nit in code nobody maintains — the kind you would otherwise drop in
-    Backlog knowing full well no human will ever prioritise it. The card lands in the Icebox
-    column labelled `icebox`: the freezer. Use it to keep Backlog meaning "a human still owes
-    this a decision"; do NOT use it to park work you simply did not want to do, and do not
-    treat filing there as having addressed the finding — say in your report that you froze it.
+    ICEBOX OPT-IN: pass icebox=True for a BEHAVIOUR defect that is real but very minor — in
+    legacy or code nobody maintains — the kind you would otherwise drop in Backlog knowing full
+    well no human will ever prioritise it. Never for wording: that is dropped, not frozen. The
+    card lands in the Icebox column labelled `icebox`: the freezer. Use it to keep Backlog
+    meaning "a human still owes this a decision"; do NOT use it to park work you simply did
+    not want to do, and do not treat filing there as having addressed the finding — say in
+    your report that you froze it.
     Not combinable with queue=True (opposite instructions — refused, nothing created). It IS
     allowed cross-project, unlike queue: another project's Queue injects work their human never
     sanctioned, another project's Icebox wakes nobody. If the target board predates this stage
@@ -874,6 +881,7 @@ def file_task(
     return _wf().file_task(
         title, description=description, priority=priority,
         related_task_id=related_task_id, project_id=project_id, queue=queue, icebox=icebox,
+        breaks=breaks,
     )
 
 

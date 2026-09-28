@@ -15,7 +15,8 @@ is what `test_card_language.py` does.
 
 WHAT IS AND IS NOT IN HERE, because the boundary is the whole design and it is not obvious.
 
-* IN: the BODY of every comment the product itself writes. Nothing else in the package composes
+* IN: the BODY of every comment the product itself writes, plus the `What breaks:` line
+  `file_task` puts at the top of a description (#1987). Nothing else in the package composes
   card prose.
 * OUT — THE MARKER. Every value below is a body only; the `[claim]` / `[worklog]` / `[attach]`
   bracket stays a literal at its own call site in `workflow.py`. That is not tidiness, it is the
@@ -116,6 +117,11 @@ _TABLE: dict[str, dict[str, str]] = {
               "legacy, not expected to be picked up",
         "ru": "заведено агентом из проекта id={project_id} в Icebox: очень мелкое / легаси, "
               "браться не планируется",
+    },
+    # #1987: the impact line file_task puts at the top of the new card's DESCRIPTION.
+    "filed_breaks": {
+        "en": "What breaks: {breaks}",
+        "ru": "Что сломается: {breaks}",
     },
     "filed_related": {
         "en": " (found while working on #{related_task_id})",

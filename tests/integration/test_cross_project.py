@@ -33,6 +33,7 @@ def test_file_task_lands_in_target_projects_backlog_with_relation(cross):
         description="агент A просит агента B",
         related_task_id=src["id"],
         project_id=pid_target,
+        breaks="it breaks",
     )
     new_id = res["filed"]["id"]
     assert res["filed"]["project_id"] == pid_target
@@ -50,7 +51,7 @@ def test_file_task_into_unshared_project_refused_nothing_created(cross):
     boss, wf, _home, _target, pid_private = cross
     title = f"never-lands-{uuid.uuid4().hex[:6]}"
     with pytest.raises(WorkflowError, match="can't file into project"):
-        wf.file_task(title=title, project_id=pid_private)
+        wf.file_task(title=title, project_id=pid_private, breaks="it breaks")
     # fail-fast: в закрытом проекте не осиротело НИЧЕГО (проверяет boss — владелец)
     view = boss.kanban_view(pid_private)
     board = boss.view_tasks(pid_private, view["id"])

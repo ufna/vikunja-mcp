@@ -961,13 +961,14 @@ def test_file_task_files_finding_into_backlog_with_marker_and_relation(env):
     api, wf, t = env
     # пустой title — отказ
     with pytest.raises(WorkflowError, match="title"):
-        wf.file_task(title="   ")
+        wf.file_task(title="   ", breaks="it breaks")
     # находка по ходу работы над t: паркуем в Backlog и связываем с t
     res = wf.file_task(
         title="race in claim self-heal window",
         description="заметил по ходу работы",
         priority=2,
         related_task_id=t["id"],
+        breaks="it breaks",
     )
     new_id = res["filed"]["id"]
     assert new_id != t["id"]
@@ -981,7 +982,7 @@ def test_file_task_files_finding_into_backlog_with_marker_and_relation(env):
 
 def test_file_task_without_relation_has_no_link(env):
     api, wf, t = env
-    res = wf.file_task(title="techdebt: refactor config walk-up")
+    res = wf.file_task(title="techdebt: refactor config walk-up", breaks="it breaks")
     new_id = res["filed"]["id"]
     assert api.stage_of(new_id) == "Backlog"
     assert not any(subj == new_id for subj, _other, _kind in api.relations)
@@ -1000,6 +1001,7 @@ def test_file_task_cross_project_lands_in_targets_backlog(env):
         priority=1,
         related_task_id=t["id"],
         project_id=other["id"],
+        breaks="it breaks",
     )
     new_id = res["filed"]["id"]
     other_view = api.kanban_view(other["id"])
@@ -1020,7 +1022,7 @@ def test_file_task_cross_project_no_access_fails_fast_nothing_created(env):
     secret = api.add_project("secret", buckets=STAGES, forbidden=True)
     before = len(api.tasks)
     with pytest.raises(WorkflowError, match="can't file into project"):
-        wf.file_task(title="x", project_id=secret["id"])
+        wf.file_task(title="x", project_id=secret["id"], breaks="it breaks")
     assert len(api.tasks) == before        # fail-fast: доска резолвится ДО create_task
 
 
@@ -1028,9 +1030,10 @@ def test_file_task_cross_project_unknown_or_pseudo_project_refused(env):
     api, wf, _t = env
     before = len(api.tasks)
     with pytest.raises(WorkflowError, match="can't file into project 999999"):
-        wf.file_task(title="x", project_id=999999)
+        wf.file_task(title="x", project_id=999999, breaks="it breaks")
     with pytest.raises(WorkflowError, match="positive"):
-        wf.file_task(title="x", project_id=-1)  # псевдо-проекты Vikunja (favorites = -1)
+        # псевдо-проекты Vikunja (favorites = -1)
+        wf.file_task(title="x", project_id=-1, breaks="it breaks")
     assert len(api.tasks) == before
 
 
@@ -1039,13 +1042,16 @@ def test_file_task_cross_project_target_without_backlog_refused(env):
     virgin = api.add_project("virgin", buckets=["To-Do", "Doing", "Done"])  # без setup
     before = len(api.tasks)
     with pytest.raises(WorkflowError, match="Backlog"):
-        wf.file_task(title="x", project_id=virgin["id"])
+        wf.file_task(title="x", project_id=virgin["id"], breaks="it breaks")
     assert len(api.tasks) == before
 
 
 def test_file_task_explicit_own_project_id_is_todays_behavior(env):
     api, wf, t = env
-    res = wf.file_task(title="own finding", related_task_id=t["id"], project_id=wf.project_id)
+    res = wf.file_task(
+        title="own finding", related_task_id=t["id"], project_id=wf.project_id,
+        breaks="it breaks",
+    )
     new_id = res["filed"]["id"]
     assert api.stage_of(new_id) == "Backlog"
     assert "project_id" not in res["filed"]    # без кросс-добавок в результате
@@ -1070,7 +1076,7 @@ def test_file_task_cross_project_401_propagates_as_vikunja_error(env):
 
     api.kanban_view = boom                      # 401 lands on the target-board resolve
     with pytest.raises(VikunjaError) as ei:
-        wf.file_task(title="x", project_id=other["id"])
+        wf.file_task(title="x", project_id=other["id"], breaks="it breaks")
     assert ei.value.status == 401
 
 
@@ -1137,7 +1143,7 @@ def test_file_task_returns_the_ref_and_its_index_is_the_servers_not_the_id(env):
     `"ref": self._ref(created)` from workflow.file_task and this test is RED at the first
     assertion (KeyError)."""
     api, wf, _t = env
-    res = wf.file_task(title="a finding worth naming")
+    res = wf.file_task(title="a finding worth naming", breaks="it breaks")
     new_id = res["filed"]["id"]
     index = api.tasks[new_id]["index"]
 
@@ -1208,13 +1214,13 @@ def test_file_task_never_reads_back_the_card_it_just_created(env):
     api.get_task = counting_get
     api.view_tasks = counting_view
 
-    res = wf.file_task(title="own-project finding")
+    res = wf.file_task(title="own-project finding", breaks="it breaks")
     assert reads.count(res["filed"]["id"]) == 0, \
         f"file_task read back the card it just created ({reads}) — the ref must stay free"
 
     other = api.add_project("neighbor", buckets=STAGES, identifier="NB")
     reads.clear()
-    res = wf.file_task(title="cross finding", project_id=other["id"])
+    res = wf.file_task(title="cross finding", project_id=other["id"], breaks="it breaks")
     assert reads.count(res["filed"]["id"]) == 0, \
         "cross-project file_task read the new card back — that is the branch where the token " \
         "is least likely to be able to, and the card would already exist when it failed"
@@ -1233,7 +1239,7 @@ def test_file_task_cross_project_ref_carries_the_targets_prefix(env):
     api, wf, t = env
     other = api.add_project("neighbor", buckets=STAGES, identifier="NB")
     res = wf.file_task(title="repo B needs an endpoint", related_task_id=t["id"],
-                       project_id=other["id"])
+                       project_id=other["id"], breaks="it breaks")
     new_id = res["filed"]["id"]
 
     assert res["filed"]["ref"] == f"NB-{api.tasks[new_id]['index']} ({new_id})"
@@ -1260,7 +1266,9 @@ def test_file_task_ref_degrades_to_the_bare_id_when_the_server_omits_the_identif
 
     # (1) prefix-less PROJECT: the server still sends an identifier, "#<index>" — kept verbatim
     plain = api.add_project("no-prefix", buckets=STAGES, identifier="")
-    res = wf.file_task(title="filed into a project with no prefix", project_id=plain["id"])
+    res = wf.file_task(
+        title="filed into a project with no prefix", project_id=plain["id"], breaks="it breaks"
+    )
     new_id = res["filed"]["id"]
     assert res["filed"]["ref"] == f"#{api.tasks[new_id]['index']} ({new_id})"
     assert res["filed"]["ref"] != f"#{new_id}", \
@@ -1275,7 +1283,7 @@ def test_file_task_ref_degrades_to_the_bare_id_when_the_server_omits_the_identif
         return created
 
     api.create_task = create_without_identifier
-    res = wf.file_task(title="filed against a server that omits identifier")
+    res = wf.file_task(title="filed against a server that omits identifier", breaks="it breaks")
     new_id = res["filed"]["id"]
     assert res["filed"]["ref"] == f"#{new_id}"
     assert "HGI-" not in res["filed"]["ref"], \
@@ -2629,7 +2637,7 @@ def test_the_per_stage_ownerless_exits_state_only_what_the_board_really_does():
             f"{label} no longer parks an ownerless card in Backlog"
     api = FakeAPI(buckets=STAGES)
     wf = Workflow(api, project_id=3)
-    filed = wf.file_task("a finding")["filed"]["id"]
+    filed = wf.file_task("a finding", breaks="it breaks")["filed"]["id"]
     assert (api.stage_of(filed), api.tasks[filed]["assignees"]) == ("Backlog", [])
 
     # --- Your Call: call_human KEEPS the assignee, so ownerless there is an anomaly ---

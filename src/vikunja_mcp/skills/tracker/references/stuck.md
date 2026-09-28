@@ -179,10 +179,9 @@
   - **A finding outside the slice of the card under review is a `file_task`, not a verdict
     and not a return.** The verdict is about this card; a `needs_work` carrying an unrelated
     finding sends the implementer off to fix somebody else's thing. **But `file_task` is not
-    automatic here: a finding about PROSE becomes a card only if it changes what the reader
-    does, otherwise it goes as a `comment` on the card whose text is under discussion** (see
-    "The THRESHOLD for filing" in the section "Decomposition and filing findings"); a finding
-    about BEHAVIOUR is a card, as before.
+    automatic here: a finding about TEXT is dropped unless it would make someone do the wrong
+    thing** (see "The THRESHOLD for filing" in the section "Decomposition and filing
+    findings"); a finding about BEHAVIOUR is a card with its `breaks`, as before.
 
 ## After Review
 

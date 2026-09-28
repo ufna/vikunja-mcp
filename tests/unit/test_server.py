@@ -255,7 +255,7 @@ def test_scope_gap_401_does_not_duplicate_the_filed_card(monkeypatch):
     _wire_scope_gap(monkeypatch, Workflow(api, api.project["id"]))
 
     before = len(api.tasks)
-    result = server.file_task("found a leak")
+    result = server.file_task("found a leak", breaks="it breaks")
 
     assert len(api.tasks) - before == 1, "scope-gap 401 re-ran file_task and DUPLICATED the card"
     assert "projects:views_buckets" in result["error"]
@@ -267,7 +267,7 @@ def test_file_task_tool_passes_project_id_through(monkeypatch):
     api = FakeAPI(buckets=STAGES)
     other = api.add_project("neighbor", buckets=STAGES)
     monkeypatch.setattr(server, "_wf", lambda: Workflow(api, api.project["id"]))
-    result = server.file_task("cross-filed", project_id=other["id"])
+    result = server.file_task("cross-filed", project_id=other["id"], breaks="it breaks")
     assert result["filed"]["project_id"] == other["id"]
 
 

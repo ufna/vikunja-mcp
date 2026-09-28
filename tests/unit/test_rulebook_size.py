@@ -69,9 +69,10 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 #
 # The script is load-bearing, not a label: characters are a PROXY for the tokens this gate
 # actually cares about, and the rate differs by language (see the script test at the bottom).
-# BOTH ARE LATIN SINCE #997, so the two ceilings are finally in one currency: 3.11x apart in
-# characters against 3.02x in tokens (126 470 x 0.2534 = 32 047 against 40 652 x 0.2608 =
-# 10 602). They used to disagree by nearly half — 2.88x in characters was 5.12x in tokens at
+# BOTH ARE LATIN SINCE #997, so the two ceilings are finally in one currency: 1.78x apart in
+# characters against 1.73x in tokens (72 000 x 0.2534 = 18 245 against 40 500 x 0.2608 =
+# 10 562), recomputed over the same per-character rates when #1987 lowered both ceilings.
+# They used to disagree by nearly half — 2.88x in characters was 5.12x in tokens at
 # `d3884bc`, when SKILL.md was 85.6% Cyrillic by letter and CLAUDE.md 0.0%.
 # BOTH HALVES MOVED TOGETHER when #1640 raised CLAUDE.md 40 000 -> 40 652, which is what this
 # pair is for. The token half is arithmetic over the SAME anchored per-character rates, not a
@@ -79,24 +80,14 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 # 40 652 x 0.2608 is exactly as valid as the 40 000 x 0.2608 it replaces — and stating that is
 # the point, since a reader must be able to tell a recomputation from a re-measurement.
 #
-# SKILL.md's ceiling ROSE from 115 000 to 126 470 in this unit while the budget it stands for
-# FELL from 53 419 tokens to 32 047, a 40.0% ratchet down in the unit that matters. That is the
-# case this gate was labelled for, resolved the way it prescribes: the ceiling was derived from
-# the character headroom the file always had (10 161) rather than bumped until the file fitted.
-# The headroom it actually ships with is 9 959 — the translated text kept moving under later
-# fixes, and this figure is the one measured LAST, immediately before the push, which is the
-# only figure a reader can check. All figures here measured at `7bc02c9`+.
-#
 # Headroom is deliberately modest — a few thousand characters, i.e. a rule or two — because a
-# generous ceiling is the same as no ceiling.
-# Measured at the split: CLAUDE.md 34 574 characters (down from 155 270 at `f77977e`) and
-# SKILL.md 104 596 (down from 202 619 at the same commit). SKILL.md's ceiling has more headroom
-# than CLAUDE.md's for a stated reason rather than a generous one: its two universal sections —
-# "Traces of the work" and "A second independent pass", needed by every agent on every task —
-# were deliberately NOT moved to references, so its rules layer is genuinely larger and its next
-# ratchet step is condensing those two in place, not relocating them.
+# generous ceiling is the same as no ceiling. SKILL.md's history before #1987 (the 115 000 ->
+# 126 811 climb and the reasons for each step) is in git; #1987 moved the commit+push recipe to
+# `references/drain.md` and the second-pass procedure to `references/review.md`, which is what
+# brought the core down to about 70 000 characters.
 _CEILINGS = {
     "CLAUDE.md": (
+        # LOWERED 40 652 -> 40 500 by #1987, which shrank the file 40 642 -> 40 483.
         # RAISED 40 000 -> 40 652 by #1640, and the increment is EXACTLY what the rule cost:
         # the file went 39 876 -> 40 528, i.e. +652, and the ceiling moved by the same 652, so
         # the headroom is 124 characters before and after. That arithmetic is the whole
@@ -115,86 +106,13 @@ _CEILINGS = {
         # Architecture bullets are `workspace_cmd.py` 4 319, `config.py` 3 624, `workflow.py`
         # 2 947 — so the workflow bullet is the THIRD longest, and the first version of this
         # comment pointed the next card at the wrong one.
-        40_652, "latin",
+        40_500, "latin",
         "the repo rulebook — read by every session in this checkout",
     ),
     "src/vikunja_mcp/skills/tracker/SKILL.md": (
-        # RAISED 126 470 -> 126 811 by VMCP-333 (1852), and the increment is EXACTLY what the
-        # rewording cost: the file went 126 460 -> 126 801, i.e. +341, and the ceiling moved by the
-        # same 341, so headroom is 10 characters before and after.
-        # WHY THE REWORDING HAD TO GO IN AT ALL, and note that it does NOT refute #1777's filing —
-        # that filing is right, and this card measures the rule being READ there and still missed.
-        # On a live consumer session (dogiators back-end `a22ebd06`, per-task agent
-        # `agent-a2bddb6b9ccd44e4c`) the transcript shows SKILL.md's own header and the string
-        # `BYPASS-IMMUNE` once each, so the agent held this rule; it then wrote `${SP:?}` on three
-        # deletions in a row, and the drain then stalled 2 m 47 s on a prompt over one spelt
-        # `for f in …; do rm -f "$SP/$f"; done`. So what failed was neither delivery nor filing but
-        # the rule's own RECIPES: both were GLOB-shaped, while the commonest teardown is "N files
-        # by name", whose natural spelling is a loop — and TWICE in that same session a literal
-        # first segment had cleared the check, which teaches the wrong generalisation. The +341 buys
-        # the two things a reader cannot derive from the old enumeration: that a LITERAL first segment
-        # CLEARS the check (which is what makes the loop form a trap, not an obvious sin), and
-        # that `:?` belongs on the FILENAME half too — measured, not reasoned: at an empty second
-        # variable that form is detector-CLEAN and removes the whole DIRECTORY, rc=0, in zsh and
-        # in bash alike. Re-measured against Claude Code 2.1.272, two patch versions past the
-        # 2.1.270 `references/deletions.md` names: the breaker and the regex are unchanged.
-        # THE SLACK THIS SPENDS, since the next card here will want it: the ratio cap is
-        # 3.12 x 40 652 = 126 834, so 23 characters of ceiling remain, down from 364. The next
-        # addition pays by SHRINKING something, not by moving the band — re-centring is what the
-        # entry below already argues against.
-        # UNCHANGED at 126 470 by VMCP-330 (1777), which RELOCATED the rule below into the
-        # scratchpad bullet and left a one-line pointer at the stand: the file went
-        # 126 406 -> 126 450, i.e. +44 — a 77-character pointer, less the 33 the rule shed being
-        # reworded for its new home — so headroom falls 64 -> 20 and no ceiling moves. It was left
-        # alone DELIBERATELY, in BOTH directions. Raising it for a relocation would buy budget
-        # for text that teaches nothing new. Lowering it is the shape this gate prefers, but the
-        # relocation did not shrink the file; and had it been made to, every ceiling below
-        # 126 428 — where the live ratio falls under the pinned CENTRE, not the band's floor —
-        # silently flips two rounds recorded in this file: `_PINNED_RATIO` back to 3.10 goes
-        # GREEN, and the 3.12 mutant leaves the band. Neither turns anything red, so a shrink
-        # here is not free bookkeeping — it is a rewrite of somebody else's evidence.
-        # RAISED 125 998 -> 126 470 by VMCP-328 (1739), and the increment is EXACTLY what the rule
-        # cost: the file went 125 934 -> 126 406, i.e. +472, and the ceiling moved by the same 472,
-        # so headroom is 64 characters before and after — the same arithmetic #1705 ran in the
-        # shrinking direction (126 000 -> 125 998 against a file 2 characters shorter).
-        # WHY THE RULE HAD TO GO IN AT ALL: the sweep-stand recipe teaches agents to build and tear
-        # down scratch trees, and the obvious spelling of the tear-down — `rm -f $D/*_test.go` —
-        # stops the round DEAD on a harness permission prompt that no mode, allow rule or hook can
-        # lift. That was read as a fact about the STAND, so the rule was filed beside the stand —
-        # REFUTED by #1777, and by MEASUREMENT rather than by the live incident that prompted the
-        # card: the refusal fires on ordinary teardown, with no stand anywhere near it — the regex
-        # re-run over teardown forms has `$SP/1777/*` clean and `D=$SP/1777; rm -f $D/*.log`
-        # FIRING. So the rule now lives in the scratchpad bullet of "What does collide" and the
-        # recipe keeps a pointer. The measurement behind it is in
-        # `skills/tracker/references/deletions.md`, which is where this
-        # gate sends SKILL.md's evidence — `docs/dossier/` is CLAUDE.md's layer, and the first
-        # version of this card put it there. Why that was a defect and not a preference: the wheel
-        # carries `src/vikunja_mcp` only, so a consumer receives the rule and cannot reach the
-        # dossier at all, and a pointer would not have fixed it.
-        # THE RATIO ASSERT BELOW IS WHAT SIZED THE RULE — but it was the assert being REPLACED that
-        # did the sizing, and the first version of this comment credited the wrong one. Under the
-        # assert that ships (3.11x ± 0.01, band 3.10-3.12) the cap is 3.12 x 40 652 = 126 834, not
-        # the 126 427 first written here: that is 3.11 x 40 652, the cap under the assert this card
-        # REPLACED. Read the two bands in CEILING characters, since that is what the assert sees:
-        # the old one allowed a rule of 429, the shipped one 836, and the rule as it stands costs
-        # 472. It still had to be cut — a 950-character rule puts the ceiling at 126 948, past
-        # either cap — and 364 characters of ceiling slack now remain, so the claim that this
-        # landing exhausted the pair's slack was wrong too.
-        # RE-CENTRING HAS A PRICE, and this entry is where it gets written down. Moving the assert
-        # 3.10 -> 3.11 raised the band's FLOOR from 125 615 to 126 022, so a future shrink meets the
-        # ratio assert 384 characters below today's file instead of 791 — against a gate whose
-        # stated preferred direction is DOWN. AND IT IS NOW LOAD-BEARING, which reverses what the
-        # first correction said here: 126 470 / 40 652 = 3.111040, so `abs(r - 3.10) < 0.01` FAILS
-        # and putting the assert back to 3.10 turns this gate RED. It was merely tidy while the
-        # rule cost 425 and the ceiling was 126 423; at 472 it is past the old band's 429 maximum.
-        # #1640's move was forced by a band already red, so cite that card for the recomputation
-        # below and NOT as precedent for re-centring a band that is not.
-        # THE PAIR ABOVE IS RECOMPUTED, NOT RE-MEASURED, on the #1640 precedent: only a ceiling
-        # moved, no text changed script, so 126 470 x 0.2534 is exactly as valid as the
-        # 126 000 x 0.2534 it replaces — and saying so is the point, since a reader must be able to
-        # tell a recomputation from a fresh tokenizer run. One correction inside that: the figure
-        # replaced was itself off — 126 000 x 0.2534 is 31 928, not the 31 934 that stood here.
-        126_811, "latin",
+        # LOWERED 126 811 -> 72 000 by #1987: the file went to 70 385 when two evidence-heavy
+        # blocks moved to references/, leaving ~1 600 characters of headroom.
+        72_000, "latin",
         "the agent rulebook — ships in the wheel, so every consumer pays for it too",
     ),
 }
@@ -295,24 +213,9 @@ def _cyrillic_share_of_letters(text: str) -> float:
 # Which script each ceiling was derived in. NOT decoration: see the test below.
 _EXPECTED_SHARE = {"cyrillic": (0.5, 1.0), "latin": (0.0, 0.1)}
 
-# THE PINNED CENTRE AND ITS WIDTH, named once instead of retyped — VMCP-329 (1753).
-#
-# Of the two numbers only the CENTRE was ever written twice, and it was kept in step by hand
-# across five commits: 2.88 at `f12bfdc` -> 3.15 at `7bc02c9` -> 3.11 at `9302d48` -> 3.10 at
-# `6d347ff` -> 3.11 at `bc1e413`, each of them retyping it into the refusal to match. That
-# worked five times out of five — on care, with nothing checking it. The WIDTH the refusal
-# never stated at all, so for that half there is no track record to lean on in either
-# direction. Naming both removes the sixth chance to get either one wrong.
-#
-# What those same five commits did NOT keep in step is the PROSE the refusal sent its reader
-# to, and that is the card: the pointer was true at `f12bfdc` alone, where the centre and the
-# docstring's pair were both 2.88.
-#
-# This is a rename, not a re-centring. The band is 3.11 +/- 0.01 as it shipped, and
-# 126 470 / 40 652 = 3.111040, so a centre of 3.10 puts the live ratio outside it and this gate
-# red — VMCP-328 (1739) measured that, and the sweep in
-# `test_the_ratio_refusal_routes_to_the_live_pair` re-runs it against this spelling.
-_PINNED_RATIO = 3.11
+# THE PINNED CENTRE AND ITS WIDTH, named once instead of retyped — VMCP-329 (1753). Re-centred
+# 3.11 -> 1.78 by #1987 with both ceilings: 72 000 / 40 500 = 1.7778.
+_PINNED_RATIO = 1.78
 _RATIO_BAND = 0.01
 
 

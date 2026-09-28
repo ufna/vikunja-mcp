@@ -1,6 +1,7 @@
 # The parallel drain: slots, `exclude`, returns, `workspace` refusals
 
-> **A reference for SKILL.md, not rules of its own.** Read it **when `wip.limit > 1` and you are running several agents at once**.
+> **A reference for SKILL.md, not rules of its own.** Read it **when you land a task (the commit+push recipe, at ANY limit) or run several agents
+> at once (`wip.limit > 1`)**.
 > What is binding lives in SKILL.md itself — what is here is the shapes of the replies,
 > the measured gotchas and the reasons a rule is written exactly the way it is.
 
@@ -277,3 +278,437 @@
   `git rebase --abort` (which one is its call, knowing its own work; `--abort` throws away what
   was replayed), after which `workspace <id>` hands the tree back normally again. The tool itself
   does not make that choice and fixes nothing silently.
+
+## Landing: the full commit+push recipe
+
+- **Commit+push is part of the transition to Review, not a separate step.** The per-task agent
+  commits the diff of its own task as its own commit on the MAIN BRANCH
+  (`type(scope): … (tracker #N)` + a `Co-Authored-By` trailer) and PUSHES it — BEFORE
+  `advance(to='review')`; `evidence` = that commit's sha. (If it dispatched its own
+  implementer, it accepts that work and commits itself, under its own name.)
+  - **Integration is rebase + RE-RUNNING the checks + push, not just `git push`.** In a
+    parallel drain you sit in your own worktree on a THROWAWAY branch `task/<id>`: a bare
+    `git push` pushes that branch, the main branch is left without your work, and every tool
+    reports success — the task quietly ends up outside the release pipeline. Push EXPLICITLY:
+
+    ```sh
+    git add <this task's files>
+    git commit -m "type(scope): … (tracker #N)"    # + the Co-Authored-By trailer
+    # ONE chain, not separate turns: `&&` will not let you push on red criteria, and it
+    # shrinks the window in which the race can be lost from your thinking to machine time
+    git fetch origin && git rebase origin/main \
+      && <RE-RUN THIS TASK'S ACCEPTANCE CRITERIA — the ones the orchestrator gave in the brief> \
+      && git push origin HEAD:main   # rejected (not fast-forward) — do not retry blindly, see below
+    # REJECTED? The FIRST question is not "who won" but "did the work NOT land after all?": the
+    # server may have taken the ref and died on the response (502, a dropped connection) — the
+    # client sees an error, the commit is on main. `git fetch` in this chain is load-bearing:
+    # on a stale tracking ref the check LIES.
+    git fetch origin && git merge-base --is-ancestor HEAD origin/main
+    #   0 → your commit is ALREADY on main: the push landed, the client's error was a lie. Do NOT
+    #       spend a round and do NOT call a human — this HEAD's sha IS the evidence, go
+    #       to the confirmations
+    #   1 → your work is not on main. NOW find out WHO won the race:
+    git log --oneline HEAD..origin/main
+    #   empty     → no race at all (protected branch, no rights, hook) — rounds
+    #               will not help: call_human
+    #   non-empty → mechanics (the bot's bump, a sibling's commit) — repeat the block,
+    #               up to 2 × max(wip.limit, wip.active) rounds
+    git rev-parse HEAD           # evidence CANDIDATE — read AFTER a successful push, not before
+    # and only now — confirm that this sha really landed (both are silent on success):
+    git cat-file -e "<sha>^{commit}"                   # 0 — the commit exists; 128 — no such commit
+    git merge-base --is-ancestor "<sha>" origin/main   # 0 — it is REALLY on main; 1 — it is not
+    ```
+
+    (`main` here is the repository's main branch name; if it is called something else, put that.)
+    Re-running AFTER the rebase is not belt-and-braces: while you worked, a neighbour may have
+    landed on the main branch, and a rebase can splice two individually correct changes into one
+    incorrect one WITHOUT A CONFLICT. A cleanly merged diff ≠ a correct diff — only a run tells.
+
+    **And "the push went through" without the last two commands is faith in the absence of an
+    error message, not a fact.** `git rev-parse HEAD` only PRINTS the local HEAD: a full
+    40-character sha is returned with exit code 0 by both it and `rev-parse --verify`, even if
+    no such object is in the repository at all — that is, the check usually used to catch "the
+    agent named a sha that never existed" catches exactly that not at all. And existence is not
+    enough: a PRE-rebase sha keeps resolving (the object lives until gc collects it), while it
+    is not on the main branch and never will be — in a parallel drain a rebase before the push
+    is the norm, not the exception. So there are two commands, and their exit codes MEAN
+    different things: `cat-file -e` → 128 "no such commit here" (invented, a typo — or you
+    simply did not fetch), `merge-base --is-ancestor` → 1 "the commit exists, but it is not on
+    main" (pre-rebase, orphaned, unpushed). On success both print NOTHING — read the exit code,
+    not the output. The quotes around `"<sha>^{commit}"` are mandatory: in zsh with
+    `extendedglob` the unquoted form dies with `no matches found` before git even runs, and that
+    looks like a verdict of "bad sha". Your own push updates the local `origin/main` itself — no
+    separate fetch before the check is needed; but check SOMEONE ELSE'S sha (as a reviewer, as
+    the orchestrator) only after `git fetch origin`, otherwise a commit that did land on main
+    gives the same 128 as an invented one. If it does not check out, the task did NOT land: fix
+    it (re-push) and re-check; do not send `evidence` with an unconfirmed sha.
+
+    A rebase conflict breaks the chain at `rebase` (there will be no push) and you resolve it
+    yourself — the task's context is precisely yours; if you cannot, or the rounds have run out
+    (`2 × max(wip.limit, wip.active)`, see "Where the ceiling comes from"), `call_human`.
+    **And remember what happens to the worktree when you do:**
+    `call_human` takes the card to **Your Call**, which means that from that moment your worktree
+    is DEAD as far as `--gc` is concerned (only a task in Design/Build behind you keeps it alive).
+    What holds it is not the stage but UNSAVED work: while there is anything uncommitted or
+    unpushed inside — and after a conflict or a rejected push that is exactly the case — the
+    protections will not let it be removed. But if you managed a `git rebase --abort` and the
+    worktree became clean and fully pushed, it may be swept on any tick while you wait for an
+    answer: the work will not be lost (only what is already on the main branch is swept), but the
+    directory may cease to exist. So once the human has answered, call
+    `workspace <id>` again rather than assuming you are still standing in your own worktree.
+    In sequential mode, in the main checkout, the recipe is THE SAME minus the throwaway branch.
+  - **A rejected push is the NORM, not a sign of trouble: your main rival is a machine.** If the
+    repository has an auto-release (a bot that pushes its own commit after EVERY green landing),
+    a fresh rebase goes stale almost immediately after ANY landing, and a rejected push becomes
+    the expected outcome rather than an edge case. Measured on vikunja-mcp's first live parallel
+    drain (2026-07-30): of 46 landings on the main branch in one day, **17 were made by CI**, not
+    by an agent; its bump commit arrives **37 s … 2 min 55 s** after the task commit (median
+    1 min 41 s), the median interval between adjacent landings is 2 min, 65 % are ≤ 3 min.
+    But the rival is BOUNDED: one commit per landing, and its own push is marked
+    `[skip ci]` — it does not trigger itself and does not push twice in a row. So on its own the
+    machine costs at most ONE round.
+  - **A rejected push does not yet mean the work did not land — ASK THAT FIRST.** The server
+    may have taken the ref and died on the response (502, "the remote end hung up unexpectedly"):
+    the client honestly prints an error while the commit is on main. The first command after a
+    rejection is not the race analysis but `git fetch origin && git merge-base --is-ancestor HEAD
+    origin/main`. **Exit 0 — the work is ON MAIN**: the push landed, there is nothing to retry and
+    nobody to call — you take this HEAD's sha as evidence and go on to the two confirmations.
+    **Exit 1 — the work is not there**, and only then does the race analysis below kick in; this
+    branch is not softened by one word — the EXIT CODE decides, not a guess like "an empty range,
+    so it probably landed after all". Why the check stands BEFORE the analysis and not inside its
+    empty branch: a landed push with a sibling already sitting on top gives a NON-EMPTY range,
+    i.e. it looks like honest mechanics — and the next round quietly corrupts the evidence,
+    `git rebase origin/main` THROWS AWAY your commit (it is already upstream), HEAD moves onto
+    someone else's tip, `git push` prints "Everything up-to-date", and `git rev-parse HEAD` hands
+    back the SIBLING's sha, on which both confirming commands honestly pass. Two clarifications,
+    both measured: `git fetch` here is load-bearing — on a stale remote-tracking ref the same
+    check answers "it did not land" about work that did; and HEAD here is YOUR commit (the chain
+    rebased it, a rejected push does not move it), and if `git log -1` shows something other than
+    your `(tracker #N)`, you simply did not commit — that is a different trouble, and exit 0 says
+    nothing about it.
+  - **A round is spent ONLY on a lost race — once you are sure the work did not land, look at WHO
+    won.** The check above returned 1 → `git log --oneline HEAD..origin/main`: HEAD is your
+    commit on the OLD base, so those are exactly the ones that overtook you. **Empty — there was
+    no race at all** (a protected branch, no push rights, a pre-receive hook, the wrong remote):
+    the next round will lose in exactly the same way, and it costs a full run of the criteria —
+    the ceiling is not spent on that, `call_human`
+    IMMEDIATELY, with git's refusal text. **Non-empty — that is mechanics** (the bot's bump, a
+    sibling's commit): the main branch honestly moved forward, that is exactly what a rebase
+    fixes, the round is yours. Look on EVERY lost round rather than recalling at the end: that
+    same list is ready-made evidence for the escalation (below), and it cannot be assembled after
+    the fact.
+  - **Where the ceiling comes from and why it is `2 × max(wip.limit, wip.active)` and not a
+    constant.** The ceiling must be strictly above the worst PURELY MECHANICAL run, otherwise it
+    calls a human on arithmetic. With N active tasks, each of the N−1 siblings that manages to
+    land during your integration brings its own bump along too: 2·(N−1) rounds, plus the trailing
+    bump of the landing that beat your `fetch` — 2·(N−1)+1 in all, and the ceiling = **2 × N**.
+    At the default limit of 3
+    the worst mechanical run equals 5 and the ceiling is **6** (this repo's measured case); at a
+    limit of 1 the ceiling is 2, at 4 it is 8, at 5 it is 10. These are DIFFERENT numbers and must
+    not be confused: 5 is what the mechanics can produce, 6 is what you call a human after.
+    **N is how many tasks are ACTUALLY in Design/Build (`wip.active`), NOT the limit: rework
+    re-enters Build past the `claim` gate, so `wip.active` legitimately exceeds `wip.limit`**
+    (measured on this board: 5-7 at a limit of 3 — and VMCP-252 (851) spent all 6 rounds under
+    exactly that on pure mechanics, with green gates and not a single rebase conflict, after which
+    it went to Your Call with its work finished and pushed). The `max` is there to keep the
+    ceiling from DROPPING when there are fewer active tasks than the limit. The numbers are
+    set by the PROJECT CONFIG and the current board, not by habit: everyone's `wip_limit` is their
+    own, while the rulebook is one for all and
+    rewrites itself at MCP server start — a consumer at limit 4 cannot "raise the number
+    locally", it can only receive a rule that computes. The orchestrator names both numbers in
+    your brief (it sees `wip` in every `next_task` response). **`wip.active` is the BOARD's
+    state, and there is nowhere to read it from the way you can read the limit: if it was not
+    named, compute from the limit alone**, i.e. by the old `2 × wip.limit`; the error is then only
+    in the safe direction — you escalate earlier than you should have. The limit is different:
+    **if it was not named, do not guess,
+    read it**: `wip_limit` lives in the repo config `.vikunja-mcp.toml` (walk-up from your
+    directory), and you DO have it — that key is committed, so the file is laid out into a linked
+    worktree too, unlike the gitignored `.vikunja-mcp.env` with the token. No such key in the
+    file — the limit is the default, 3; `enforce_single_wip = true` set — the limit is 1. And only
+    if no toml was found at all — **take 6**: that is not a guess but the same derivation, because
+    `wip_limit` exists ONLY in the toml (never in env), so "no file" also means the default limit,
+    and 2 × 3 is exactly 6. The old hard-coded six was a guess and broke from limit 4 on: there
+    the worst mechanical run is already 7, i.e. a ceiling of 6 called a human on exactly the
+    arithmetic the formula was introduced for. And it is an upper bound, not a tuning
+    knob: the earlier "3" was exactly the length of the MOST ORDINARY bad run (neighbour A's bump
+    → neighbour B's commit → B's bump), i.e. it called a human precisely when the next round would
+    almost certainly have won; and without an auto-release the only rivals are siblings, the worst
+    run is half as long, and you simply will not reach the ceiling — there is no point lowering it.
+  - **Hit the ceiling — say WHAT kept winning, not "push it for me".** At the default limit the
+    mechanics do not produce that many, so the loop is NOT CONVERGING (a conflict that keeps
+    resolving into itself; a sibling stuck in its own push cycle; criteria that went flaky under
+    rebase). In a wide drain — or when humans push to main as well, which this arithmetic does not
+    model — pure mechanics reach the ceiling too. The two cannot be told apart by the NUMBER of
+    rounds, but they can by the list of winners, which is why the question to the human IS that
+    list: "N rounds in a row, and here is what landed on the main branch each time".
+  - **The criteria are run EVERY round — including when all that arrived was the version bump.**
+    The temptation is clear: the bump is machine-made and mechanically recognisable (a bot author,
+    a subject of the form `chore: v<semver> [skip ci]`, a couple of diff lines). Do not do it —
+    and not because "the diff is small", but because: (a) you rebase not onto a COMMIT but onto a
+    RANGE, onto everything that arrived since your `fetch`, and at these intervals a bump
+    routinely lands in there TOGETHER with a sibling's real commit — that is, the case where the
+    relaxation is safe is exactly the case where it saves nothing; (b) "it is only a bump here" is
+    a rule YOU execute in prose: get it wrong and it does not fail, it SILENTLY switches the
+    guarantee off, and there is nothing left to catch that; (c) "inertness by eye" has already
+    failed here — this bump touches not two files, as is commonly believed, but THREE: both
+    version files and **the dependency lock**. The cost of an extra round is handled by the
+    ceiling above and by the `&&` chain, not by a relaxation in the checking.
+  - **A FIGURE OR A QUOTATION claimed as a property of the TREE is measured AFTER the last rebase
+    — right before the push, not when it was convenient to obtain.** The chain above re-runs the
+    CRITERIA after the rebase and not the PROSE, so everything else slips through: the sweep
+    record in a docstring, the control round's `collected`, a quoted phrase, the "Gates on this
+    tree: … N passed" commit-message line. Written BEFORE the rebase, they land describing a tree
+    in no history: it moved after you wrote — a SIBLING landed, or YOU edited it again. So the
+    rule is not "measure carefully" but "measure LAST": siblings land beside you and the release
+    bot after every green landing, so staleness is ordinary.
+    The measurement is VMCP-249 (840): its commit carries "Gates on this tree: uv run pytest
+    tests/unit -> 1136 passed" and the sweep record "control 0 failed / 0 errors / 200 collected"
+    (both on the landed sha), while its independent reviewer's re-measurement on the SAME sha gave
+    1139 passed and 203 collected — a sibling with three tests landed in between. Its `[worklog]`
+    carries the correct 1139: the author re-measured for the TRACKER and not for the PROSE — a gap
+    in the prescribed order, not one agent's slip. The sweep's own deltas reproduced exactly and no
+    pin was blind; what breaks is only the figure certifying round and control measured ONE tree —
+    the whole point of the cross-check.
+    In practice: last thing before `git push`, re-derive every number and quotation your prose and
+    commit message claim of THIS tree. A quotation is the worse half: it reads as authoritative
+    forever, where a number disagrees with a re-run. `git grep -F` a ONE-LINE fragment of each
+    span, requiring a hit OUTSIDE the claiming file; a MISS is a PROMPT, not a verdict — a card's
+    description, a commit message, a tool's output and a retracted wording are no tree strings.
+    Do not wait for a gate. Cheaper still is not to write an absolute at all: an assertion of the
+    PROPERTY (an assert) never goes stale.
+  - **Sign a historical absolute with the TREE — `N at `<sha>``.** The anchor idiom (a number,
+    the word `at`, a sha in backticks) extends to sweep records too: a figure written that way is
+    SEEN by `tests/unit/test_measured_figure_anchors.py`, which requires the named commit to exist
+    and to be an ancestor of HEAD. Without an anchor it does not see the figure at all —
+    `collected 200` is just a number to it. It checks the LABEL, not the value: the record passes
+    even when the truth is 203, because what is asked is the tree's resolvability, not the
+    arithmetic. And that is enough — a reader who wants to check CAN, because the tree is NAMED.
+    The bullet above is not cancelled by the anchor: a figure claimed as a property of YOUR tree
+    is still measured after the rebase; the anchor is for one that is historical by construction.
+    And an anchor does not live long on a branch: a sha taken before the mandatory rebase is
+    orphaned by that rebase, so sign with what will actually land.
+    **Do NOT build a gate that DERIVES `collected` itself and compares it against what was
+    written.** In CLAUDE.md that shape has already been evaluated by measurement and rejected: it
+    is red on arrival and turns a docstring edit in someone else's card into a red suite in a hot
+    file; here it costs twice as much, because pytest would have to be run twice.
+    **And do NOT retroactively rewrite records that have already landed in other people's cards.**
+    Where an anchor exists, it is honest for its own tree; where there is none, the rule applies
+    to FUTURE records.
+  - **A COMMIT MESSAGE must contain no literal ci-skip marker — not in quotes, not as a
+    quotation.** The gotcha this very task stepped on while writing the paragraphs above: CI
+    looks for the marker across the WHOLE message text, body and code spans included — so a commit
+    that merely QUOTES the release bump's subject cancels its own run. And you will see no
+    refusal: the push goes through, git is silent, both sha checks are green, the task looks
+    delivered — but there is no run, no auto-release, and the edit never reaches the rollout
+    channel, i.e. it does not reach the rulebook's consumers at all. Writing about the release
+    commit — name the marker DESCRIPTIVELY ("the ci-skip marker", "that marker in the bump's
+    subject"); in a FILE the literal is harmless, it is dangerous only in a commit message. And
+    there is more than one spelling: GitHub suppresses the run on a whole FAMILY
+    (`[ci skip]`, `[no ci]`, `[skip actions]`, `[actions skip]` — and on the
+    `skip-checks: true` trailer), so the rule is about the family, not about the single form
+    this repo's bump emits (that is the one you will most likely quote — but the enumeration is
+    here so that "I wrote it differently" does not read as "so it is allowed"). And that a run
+    for your sha did in the end GET CREATED is checked by the next bullet, with the first of its
+    two checks.
+  - **BUILD THE COMMIT BODY WITH `git commit -F - <<'MSG'`, NOT with `-m "…"` — otherwise the
+    shell eats part of the text silently (#773).** Mechanically it is a sibling of the trap
+    above: the push goes through, git says nothing, both sha checks are green, the run is green —
+    and the message is not what you wrote. Inside DOUBLE quotes a backtick is command
+    substitution, and this repository's idiom is to wrap every identifier in backticks, so the
+    more carefully you keep the style, the likelier you step on it. Measured on a live shell,
+    four forms:
+
+    ```sh
+    git commit -m "keeps `blocked` and `epic` and $HOME"   # EATEN: "keeps  and  and /Users/…"
+    git commit -m "keeps \`blocked\`"        # survives — but EVERY one must be escaped, by hand
+    git commit -F - <<MSG                    # ALSO substitutes: `echo GONE` really runs
+    git commit -F - <<'MSG'                  # correct: verbatim, including $HOME and $(date)
+    ```
+
+    **The quotes around `MSG` are load-bearing** — without them the heredoc fixes NOTHING, and
+    that is the third line above, not a nitpick. The rule closes the whole class: a backtick,
+    `$VAR` and `$(…)` break equally quietly, and the loss is not limited to omission — `$(…)`
+    will INSERT foreign output into the message. That is also why "count the backticks after the
+    commit" is no good as a check: it requires remembering the text you have just lost, and it
+    does not catch insertion at all.
+    The incident it was found on is commit `5389be0` of this repository: three words
+    (`blocked`, `epic`, `claim`) vanished from the body, the sentence was left incomplete, the
+    history was not rewritten (a force-push to main for the sake of a message is not the right
+    price).
+  - **After the push there are TWO checks, and they are about DIFFERENT things: that the run WAS
+    CREATED and that it ended GREEN.** "A run exists" is not "all is well", and that is a
+    measured hole, not a worry: on the night of 31.07 seven of fifteen consecutive runs on the
+    main branch ended RED (identically in all seven: `lint-and-unit` success, `integration`
+    failure, `release` **skipped**), each time the agent honestly reported "a run exists" — and
+    each time the landing never reached the rollout channel. Seven is a LOWER bound, not a total:
+    the measurement window ended on its own last red, and that same night there was at least one
+    more that fell outside it (`d6195e1`, the same three jobs). The checks are separated not for
+    symmetry: their DEADLINES differ, because a run is asynchronous. The commands and job names
+    below are THIS repository's (GitHub Actions, `gh`), because that is where they were measured;
+    in a project with a different CI those change, but the split into two checks does not, nor the
+    order "`status` before `conclusion`", nor the fact that an unfinished run is "unknown" and not
+    "green".
+    - **EXISTENCE — right after the push.** This is the defence against a swallowed ci-skip
+      marker (the bullet above), and it asks not about duration but about a fact: the run was
+      either created or it never will be.
+      `gh run list --commit "$(git rev-parse HEAD)" --json databaseId,status,conclusion`.
+      **The sha here must be the FULL 40-character one:** measured — with an abbreviated one the
+      same command returns an empty list `[]` and exit code 0, i.e. it looks exactly like "there
+      is no run" and raises a false alarm about the marker. Empty on the FULL sha — that is an
+      alarm; but if only seconds have passed since the push, ask a second time a little later
+      before raising it: exactly how long it takes from the push being accepted to the run being
+      created is NOT measured here, and a false alarm about the marker costs a human a round.
+      **And even empty on the full sha is NOT yet the marker: a run is created for the push's
+      TIP, not for every commit in it.** If your commit arrived non-tip (one push carried more
+      than one), it will have NO run and no check-suite AT ALL — while the work did land. ONE
+      step tells them apart: `git log --oneline <your FULL sha>..origin/main`, and if there is a
+      commit above whose `gh run list --commit <its FULL sha>` returns a run, the marker has
+      nothing to do with it. Measured on this repo: `bc960b2` has zero runs and `check-suites`
+      `total_count: 0`, not one spelling of the marker in its message, and yet it is an ancestor
+      of `stable`, while its descendant `b6c7502` carries a green run 31086601577; 1 of 21 task
+      commits in the last 40 landings arrived that way (~5 %). Raise the alarm only when nothing
+      is above OR the descendant has no run either. But even in the "good" outcome one thing
+      stays true, and it must be said in the report: nobody ran the tree AT your commit — what
+      was green was the neighbour's combined thread.
+    - **THE OUTCOME — ONE look, as the LAST action of the turn.** Both obvious forms are wrong:
+      "wait for green" blocks you for minutes and dies together with a killed turn, "ask right
+      after the push" almost always lands in an in-flight run. So ask LATER, but by ORDER rather
+      than by waiting: first `advance(to='review')`, the report and `--release`, and only then a
+      single `gh run view <id> --json status,conclusion,jobs`. Measured over 40 runs of
+      this repo, each on its FIRST attempt (two were later re-run by hand, and a re-run's
+      `updatedAt` carries a HUMAN's delay — 31 min and 3 h 26 min — which is not about CI; the
+      runner queue itself is far more modest: 0 s on 35 of 38 runs, 80 s at most): from appearing
+      to concluding is 42–120 s, median 60 s. And the bias is in your favour but is NOT a
+      separation: red runs 42–55 s (median 46), green runs 53–120 s (median 65) — the bands
+      OVERLAP at 53–55 s, so duration alone cannot tell a fast green from a slow red. The bias's
+      mechanics are measured per job and they are NOT "integration fails early": `integration` is
+      never the critical path at all (16–29 s against `lint-and-unit`'s 38–46 s), the run's length
+      is set by `lint-and-unit`, and a GREEN run additionally runs `release` (8–15 s), which a red
+      one SKIPS. Hence the conclusion: by the end of the turn the answer is usually already there,
+      and slightly more often in exactly the case the check exists for. **And know WHERE the
+      answer will go: `advance` is already behind you, it will not make it into the
+      `worklog`.** Write it as a separate `comment` on the card — that tool gates neither stage
+      nor ownership, so a card in Review will accept it — and into your summary for the
+      orchestrator. Take the run's id from the first check, and run the command from the MAIN
+      checkout: by this point `--release` has already removed your worktree.
+    - **Branch on `status`, NOT on `conclusion`.** `conclusion` is meaningful ONLY at
+      `status == "completed"`. An in-flight run was caught live, here it is verbatim:
+      `{"conclusion":"","databaseId":30636770459,"status":"in_progress"}` — the verdict is the
+      EMPTY STRING, not `null`, so a jq fallback `.conclusion // "unknown"` does NOT fire here
+      either (it catches only `null`). So "`conclusion` is not `success` ⇒ not green"
+      is a broken check: it reads an in-flight run as red and teaches you to distrust your own
+      alarm.
+      * `completed` + `success` — say exactly that in the report.
+      * `completed` + `failure` — **this is the hole; do not swallow it.** Name the run's
+        id/url in a comment and WHICH job failed (`jobs` in the same response); a
+        `release: skipped` beside it is the visible sign that the rollout channel did not move.
+        A red `lint-and-unit` is YOUR commit, and the main branch is broken for everyone: it
+        runs the same `ruff`/`pytest` you already ran, PLUS `uv sync --locked` — a check your
+        criteria do not contain at all (`uv run` syncs WITHOUT `--locked`), so a lock that has
+        drifted goes red only there. A red `integration` alone is the environment-failure class.
+        In both cases there is a cheap action available to you without a human:
+        `gh run rerun <id> --failed`. It moves nothing on the board and costs you no time — but
+        it is NOT a diagnosis: measured on this very card, re-running a red run gave red again,
+        and only the next one came out green. And it OVERWRITES the same run's `conclusion`
+        rather than creating a new one: `8b4bfa5`, one of those seven reds, reads as `success`
+        today. So "the run is green" is an answer about NOW, not evidence that it was green
+        straight away. If you re-ran it, say so, and say that you did not check ITS outcome.
+      * not `completed` — that is **UNKNOWN**, neither "green" nor "red". Do not wait, do not
+        guess and do not write "the run is fine": name the run's id in a comment and say outright
+        that you did not wait for the outcome. This branch is finished off by the reviewer — see
+        "Independent review of changes": it is late BY CONSTRUCTION, and here that is a virtue,
+        not a flaw.
+    - **Know exactly how urgent this is, so as neither to panic nor to relax.** A red run
+      does not lose the work forever: the next GREEN landing moves the rollout channel along with
+      your commit (checked: the red `8fc53f8` is an ancestor of the current `stable`), and that
+      night catching up took between 1 and 48 minutes. What is expensive is something else — the
+      session's LAST landing: there will be no green after it, and the channel stands until the
+      next session. Nobody knows in advance which landing will be the last — which is why EVERYONE
+      looks.
+  - **The push is mandatory.** The independent reviewer is a separate session/identity, it
+    pulls the fix from the remote; without a push there is nothing for the review to look at.
+  - **Check-point early.** Take the task's CORE all the way to commit+push and
+    `advance(to='review')` BEFORE taking on optional extra work (polish, nice-to-haves). If the
+    turn is killed
+    during the extra work, the task is already safely in Review and pushed, not abandoned
+    in Build with an uncommitted diff. Symmetric to the reviewer's "record the verdict at once".
+    **In your own worktree the rule narrows** (otherwise it argues with "release the worktree"
+    below): from the moment of `advance(to='review')` the task has left Build, so as far as
+    `--gc` is concerned this worktree is already DEAD and the orchestrator may sweep it on any
+    tick. Nothing will be lost (only what is clean and pushed is swept — the work is already on
+    the main branch), but the directory may vanish from under you in the middle of the extra
+    work. So: do extra work that needs THIS directory BEFORE `advance`; if you took it on
+    afterwards, commit and push it by the same recipe, leave `--release` as the VERY last action
+    and do not be surprised if the worktree has already been removed.
+  - **One task = one commit.** Do not mix in other people's edits: `git add`
+    only this task's files (a shared file — by hunks, not whole).
+  - **Worked in your own worktree — release it after `advance(to='review')`:**
+    `vikunja-mcp workspace --release <id>` (fine from inside that worktree — the CLI works from
+    the main checkout itself). Success is `{"released": true, ...}`, and from that moment your
+    directory IS GONE: do everything remaining (the report, any commands) from the main checkout.
+    **"Everything remaining" includes every agent YOU DISPATCHED: `--release` is the last action
+    with respect to THEM too, not only to you.** One still standing in that tree is not a state
+    `--release` can see — the removal succeeds, the directory goes, and it runs on against an
+    unlinked cwd. What dies is its RESULT, never TRACKED work, which a successful release proves
+    is committed and pushed (ignored files are the separate subtlety below). So let every agent of
+    yours return BEFORE you release, and give any auditor that RUNS anything its own clone rather
+    than your tree. Measured live on VMCP-323 (1685); the evidence is in `references/drain.md`.
+    **TWO subtleties of SUCCESS, and they are the same two fields read in `--gc`'s `released`
+    list.** (1) `branch_deleted: false` — the directory is gone but the `task/<id>` branch remains
+    (`git branch -D` failed; the `warning` carries the reason and the command that cleans it up).
+    The work is not lost and the next `workspace <id>` will reattach to that branch — but finish
+    the branch off, otherwise they pile up silently.
+    (2) `removed_ignored: [paths]` — ignored files were DESTROYED along with the worktree, files
+    the `dirty` guard does not see at all (`git status --porcelain` does not show ignored ones).
+    It is a post-mortem list, not a warning: there is nothing to get back. What lands here is
+    exactly what this same file's browser recipes prescribe — `shot-<id>.png` in your worktree and
+    `--output-dir .playwright-mcp/<id>`; reproducible junk (`.venv/`, `__pycache__/`, tool caches,
+    `*.pyc`) is NOT included in the list, so the field being present = something unidentified was
+    lost. Name the files in the report. **To stay out of it: everything you need AFTER the task,
+    carry out of the worktree BEFORE `advance(to='review')`** — the screenshot via `attach_file`,
+    notes as a comment in the tracker (see "Check-point early": after `advance` the worktree is
+    already dead).
+    **`released: false` is NOT an error, and what to read is the field, not the exit code:**
+    the code is 0 either way, and what happened is told by `code` (the machine-readable key) and
+    `reason` (the human text), and the reaction must DIFFER:
+    - `code: "dirty"` (`"working tree is dirty (…)"`) or `code: "unpushed"`
+      (`"N commit(s) not on origin/…"`) — PROTECTION: uncommitted
+      or unpushed work is left. Work out WHAT is left, take it through to a push and retry. Do
+      not remove the worktree by hand (`rm -rf`, `git worktree remove --force`) — that is how
+      work is lost.
+    - `code: "detached-build"` — your worktree is NOT ON the `task/<id>` branch, almost always
+      because of an interrupted `git rebase origin/main`. The work is not lost (the commits are
+      on the branch), but it can be neither released nor worked in until the rebase is played
+      out: run `git rebase --continue` (play it out) or `git rebase --abort` (return to the
+      branch, losing what was replayed) in THAT worktree — the exact commands with the path are
+      in `reason` — and retry. The choice is yours: the tool does not make it, because `--abort`
+      throws work away.
+    - `code: "locked"` — the worktree was locked by a human (`git worktree lock`), and git will
+      not let a locked worktree be removed. This is NOT a tool failure and NOT a loss: the work
+      is in place, nothing was deleted, and the lock is an explicit human "hands off". Do NOT
+      unlock it yourself and do not apply `remove -f -f`: whoever set the lock removes it
+      (`git worktree unlock <path>` — the exact command is in `reason`). The tool deleted nothing
+      and lost nothing, but the directory's existence does NOT follow from this: the same code
+      also comes back for a locked entry whose directory has already been carried off by hand
+      (`prune` does not drop it). Take the path from `path`, and name the lock and the path in
+      your summary to the orchestrator — from there it is for the human.
+    - `code: "populated-gitlink"` — the worktree holds a gitlink (a submodule) whose directory is
+      NOT EMPTY, and removing such a worktree means destroying its contents silently. This is
+      PROTECTION, like `dirty`, but the cause is different and you need to know it: `git status`
+      says NOTHING AT ALL about paths under a gitlink, so the `dirty` guard is blind there — and
+      blind not only to ignored files but to ANY content, including ordinary
+      untracked-and-NOT-ignored content that in any other directory of the worktree it would have
+      seen and held the worktree for. Such a worktree used to be removed with exit code 0, without
+      `--force` and without a single field in the report (measured on a real submodule). Nothing
+      was deleted and nothing was lost. The cure is yours, and it is not "commit it": a commit
+      does not empty the submodule's directory. Take what you need out of it (the paths are in
+      `reason`), empty the directory and retry `--release`. The pipeline NEVER populates
+      submodules (neither `git submodule` nor `--recurse-submodules`), so a non-empty directory
+      means that YOU or your subagent put something there.
+    - `code: "no-worktree"` (`"no worktree for this task"`) — there simply is no worktree: you
+      already released it, or
+      `--gc` picked it up (see "Check-point early" — after `advance` it may). There is NOTHING to
+      do, this is success after the fact; repeating the call is pointless.
+  - This deliberately overrides the harness default "commit only when explicitly
+    asked": in this flow a finished task commits and pushes itself.
+    The tag and moving `stable` are NOT part of this — that is a separate release task.

@@ -1484,3 +1484,19 @@ row rewritten into a lie about the board passes; that question stays with
 `test_the_per_stage_ownerless_exits_state_only_what_the_board_really_does`. The full sweep
 record — eighteen mutation rounds against four controls, plus two whole-suite rounds — is in
 the new test's own docstring.
+
+## `file_task` requires `breaks`; text findings are dropped (#1987)
+
+Asked for by the human after the board kept filling with low-value cards. Measured at `01108ae`:
+since 2026-09-01, 27 of 33 non-release commits were `docs`/`test`; 63% of `src/vikunja_mcp`
+lines were comments or docstrings; the core SKILL.md was 21 450 words; both open agent-filed
+cards were prose about prose. The August board analysis had already found 37 of 48 open cards
+to be prose about prose and 10 more to be defects in the finding apparatus itself.
+
+The mechanism is a loop, not a bug: mandatory finding generators on every card (independent
+review, second pass), every fix to prose being new measurable prose, gates on prose whose blind
+spots became cards, and findings with only recording outlets (card, #902's comment, #1640's
+Icebox) and no "drop". #902 and #1640 moved the stream; this card cuts it at the source —
+the `breaks` gate refuses a filing that names no failure, the THRESHOLD rule drops text
+findings, the second pass is optional, and the commit+push recipe and second-pass procedure
+moved out of the core SKILL.md into `references/drain.md` and `references/review.md`.

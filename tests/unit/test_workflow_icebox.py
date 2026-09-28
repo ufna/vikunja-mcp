@@ -94,7 +94,7 @@ def test_a_board_without_the_icebox_column_stays_fully_operational(unmigrated):
     assert wf.next_task()["task"]["id"] == t["id"]
     wf.advance(t["id"], to="review", worklog="did it", evidence="abc123")
     assert api.stage_of(t["id"]) == "Review"
-    filed = wf.file_task(title="an ordinary finding")
+    filed = wf.file_task(title="an ordinary finding", breaks="it breaks")
     assert api.stage_of(filed["filed"]["id"]) == "Backlog"
 
 
@@ -111,7 +111,9 @@ def test_asking_for_the_icebox_column_where_there_is_none_is_a_workflow_error(un
 
 def test_file_task_icebox_lands_in_the_column_carrying_the_label(env):
     api, wf = env
-    res = wf.file_task(title="legacy: tooltip copy is off by a word", icebox=True)
+    res = wf.file_task(
+        title="legacy: export ignores the locale", icebox=True, breaks="dates export as US"
+    )
     new_id = res["filed"]["id"]
     assert api.stage_of(new_id) == "Icebox"
     assert res["filed"]["stage"] == "Icebox"
@@ -137,7 +139,7 @@ def test_file_task_icebox_on_a_board_without_the_column_refuses_creating_nothing
     api, wf = unmigrated
     before = len(api.tasks)
     with pytest.raises(WorkflowError, match="Icebox"):
-        wf.file_task(title="legacy nit", icebox=True)
+        wf.file_task(title="legacy nit", icebox=True, breaks="it breaks")
     assert len(api.tasks) == before
 
 
@@ -146,7 +148,9 @@ def test_file_task_icebox_is_allowed_cross_project(env):
     fill (it wakes their fleet), while another project's ICEBOX wakes nobody at all."""
     api, wf = env
     other = api.add_project("neighbor", buckets=["Inbox", *STAGES])
-    res = wf.file_task(title="their legacy nit", project_id=other["id"], icebox=True)
+    res = wf.file_task(
+        title="their legacy nit", project_id=other["id"], icebox=True, breaks="it breaks"
+    )
     new_id = res["filed"]["id"]
     other_view = api.kanban_view(other["id"])
     target = next(
@@ -162,14 +166,14 @@ def test_file_task_cross_project_icebox_without_the_column_refuses_creating_noth
     other = api.add_project("neighbor", buckets=REQUIRED_STAGES)
     before = len(api.tasks)
     with pytest.raises(WorkflowError, match="Icebox"):
-        wf.file_task(title="x", project_id=other["id"], icebox=True)
+        wf.file_task(title="x", project_id=other["id"], icebox=True, breaks="it breaks")
     assert len(api.tasks) == before
 
 
 def test_plain_file_task_is_untouched_by_the_new_parameter(env):
     """Back-compat: the default path keeps its column, its marker and its result keys."""
     api, wf = env
-    res = wf.file_task(title="an ordinary finding")
+    res = wf.file_task(title="an ordinary finding", breaks="it breaks")
     new_id = res["filed"]["id"]
     assert api.stage_of(new_id) == "Backlog"
     assert label_titles(api, new_id) == []

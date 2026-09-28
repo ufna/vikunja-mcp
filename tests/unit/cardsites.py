@@ -85,11 +85,11 @@ def drive_every_comment_site(api, wf, tmp_path):
     big = api.add_task("big", "Build", assignee=api.me_user)
     wf.decompose(big["id"], [{"title": "part one"}, {"title": "part two"}], ordered=True)
 
-    wf.file_task("a finding", description="found it", related_task_id=big["id"])
+    wf.file_task("a finding", description="found it", related_task_id=big["id"], breaks="it breaks")
     wf.file_task("a queued finding", queue=True)
-    wf.file_task("a plain finding")
+    wf.file_task("a plain finding", breaks="it breaks")
     neighbour = api.add_project("neighbour", buckets=STAGES)
-    wf.file_task("a cross-project finding", project_id=neighbour["id"])
+    wf.file_task("a cross-project finding", project_id=neighbour["id"], breaks="it breaks")
 
     # a card crossing a project boundary, both shapes (#1179): handoff writes [handoff] here
     # and [filed-by-agent] over there, transfer_task writes [moved] on the card it moves.

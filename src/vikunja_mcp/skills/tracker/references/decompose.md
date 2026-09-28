@@ -55,70 +55,44 @@
   marker can go stale, and the human will see that.
 - **`file_task` is about a FINDING outside your task.** If along the way you run into a bug or
   tech debt that does not belong to the current task — do not fix it silently and do not drag it
-  into your diff: file `file_task(title, description?, priority?, related_task_id?, queue?)`.
-  The task lands in Backlog (NOT Queue — a human prioritises) with a `[filed-by-agent]` marker;
-  pass the `related_task_id` of your current task to tie the finding to its context.
+  into your diff: file `file_task(title, breaks, description?, priority?, related_task_id?,
+  queue?)`. **`breaks` is required (#1987)**: one sentence naming what goes wrong — for a user,
+  an agent or a tool run — if the finding is never fixed; it becomes the first line of the card,
+  and the call refuses without it, nothing created. Cannot name one? Then it is not a finding
+  worth a card — see the THRESHOLD below. The task lands in Backlog (NOT Queue — a human
+  prioritises) with a `[filed-by-agent]` marker; pass the `related_task_id` of your current task to tie the finding to its context.
   This is orthogonal to decompose: decompose splits YOUR big task into subtasks in
   Queue, `file_task` parks a finding that belongs elsewhere in Backlog for a human to triage.
-- **`icebox=True` when the finding is REAL but nobody will ever prioritise it** (#1640) — cosmetic
-  legacy, wording, a nit in code nobody maintains. The card goes to the `Icebox` column with the
-  `icebox` label instead of Backlog. The point is what it protects: Backlog means "a human still
-  owes this a decision", and a stream of findings nobody will ever pick makes that promise false,
-  so the freezer is where you put the ones you would otherwise be filing into oblivion.
-  Two ways to get this wrong, and they pull in opposite directions. Do NOT freeze work you simply
-  did not want to do — the test is whether a reasonable human WOULD prioritise it, not whether you
-  would enjoy it. And do NOT treat filing there as having dealt with the finding: say in your
-  report that you froze it and why, so the human can disagree while it is still cheap.
+- **`icebox=True` when a BEHAVIOUR defect is real but nobody will ever prioritise it** (#1640) —
+  a minor misbehaviour in legacy code nobody maintains. The card goes to the `Icebox` column with
+  the `icebox` label instead of Backlog, so Backlog keeps meaning "a human still owes this a
+  decision". `breaks` is required here too. **Icebox is NOT for text** — a wording, a stale
+  figure, a nit in a comment is dropped, not frozen (#1987): a freezer that accepts everything
+  only moved the flood one column to the right. Do not freeze work you simply did not want to
+  do, and say in your report that you froze something and why.
   It is refused together with `queue=True` (opposite instructions), and it IS allowed
   cross-project where `queue` is not — their Queue injects work their human never sanctioned,
   their Icebox wakes nobody. On a board created before the freezer existed the call refuses with
   NOTHING created and names `vikunja-mcp setup`; file without `icebox=True` to reach their Backlog.
-- **The THRESHOLD for filing: a finding about PROSE becomes a CARD only if it changes what the
-  reader WILL DO. Otherwise — a COMMENT on the card whose text is under discussion.** The QUESTION
-  itself is not new — "change not a single decision of the reader" already stands in the stopping
-  criterion of the second pass (the section "A second independent pass over YOUR OWN text"). But do
-  NOT carry that rule over here wholesale: there this question is ONE OF THREE conjuncts, next to
-  "not attribution" and "already covered by the neighbouring text", and it decides whether to turn
-  another round; here it stands ALONE and decides whether to file a card. Ask it literally: having
-  read the corrected text, will an agent do SOMETHING DIFFERENT — a different command, a different
-  branch, a different conclusion out of a tool's answer? Yes — a card. No (the wording is more
-  precise, the example more vivid, two neighbouring paragraphs argue with each other but the action
-  out of both is one) — `comment` on the card whose text you are discussing: `get_task` returns all
-  comments, so the finding will be seen by the next one who opens THAT CARD. The road "text → card"
-  is exactly one and implicit — `git blame` down to the commit and the `(tracker #N)` trailer in
-  it; the file itself does not promise it.
-  - **SCOPE: the rule is about a finding you are ABOUT TO FILE, that is, one OUTSIDE your slice.**
-    A finding in YOUR OWN not-yet-delivered text you fix IN THE SAME diff — "I will comment
-    instead of fixing" is not something the threshold permits, and the second pass is not
-    shortened by it. From the same session: the blocking finding of the second pass over #874 left
-    as a SECOND COMMIT on the same card (`ad2a77a` → `a44c4c7`), not as a comment and not as a new
-    card. And a card on SOMEONE ELSE'S board is unreachable by comment — `comment` only travels
-    within your own project, so there it is still `file_task(project_id=…)`.
-  - **Why there is a threshold — one drain session's accounting of the HUMAN (2026-08-06), and it
-    is about the DYNAMICS, not about quality.** 13 cards in Backlog at the start, 11 substantive
-    landings, 10 cards filed, BACKLOG became 17 — the work DOES NOT CONVERGE. In the landed diffs
-    1095 added lines, of them 640 (58 %) prose (comments and docstrings). Five of the ten filed
-    are pure prose and pins. Not one of THOSE findings was false: the chain works, what is bad is
-    the DYNAMICS — the class "text A contradicts text B" and "a claim wider than its measurement"
-    REPRODUCES ITSELF, because a fix is new text, and the next careful pass measures that one.
-    **The numbers are NOT re-derivable, neither from git nor from the board** — this is manual
-    accounting for that session, not a slice of the tree: that day 20 commits landed in the main
-    branch (bumps excluded), and no window of 11 in a row gives 1095. Do not "refine" them by
-    recounting — they move only together with a new measurement by the human.
-  - **BOUNDARY: the rule is about PROSE. A finding about BEHAVIOUR is filed as a card as before,
-    regardless of size.** A gate that does not refuse; a tool that moves a card to the wrong place;
-    the order of branches in `next_task` — that is behaviour, and a one-line diff softens nothing
-    here. The threshold touches the class that produced it, and that class is DOUBLE: both "a claim
-    wider than its measurement" and "text A contradicts text B" — that is, not only the declared
-    measurement, but also the text's consistency with the text beside it.
-  - **What the threshold does NOT cancel — and that is part of the decision, not a caveat.**
-    Neither the second independent pass, nor the independent review. Both paid off in the SAME
-    session the threshold was counted on: the second pass caught the blocking defect of #874
-    EARLIER than review, and review caught, in #860, a loud loss of the report being replaced by a
-    quiet false report. What is being cut is the SOURCE of cards, not the checks: run the checks
-    exactly as before, and put their findings into a comment if they do not change what the reader
-    does. If you read this threshold as permission not to call a second pass or not to review —
-    you read the wrong thing.
+- **The THRESHOLD for filing: a finding about TEXT is DROPPED — no card, no Icebox, no comment**
+  (#1987, replacing #902's "comment instead of a card"). Text means prose anywhere: comments,
+  docstrings, SKILL.md, CLAUDE.md, dossiers, reports — a wording, a stale figure, a claim wider
+  than its measurement, two paragraphs that disagree, a blind spot in a gate that checks prose.
+  The one exception is text that would make an agent or a human DO THE WRONG THING — run a wrong
+  command, take a wrong branch, draw a wrong conclusion from a tool's answer. That is a behaviour
+  defect in disguise: fix it in your own diff if it is in your slice, or file it with a `breaks`
+  that names the wrong action.
+  - **Why dropping, not recording.** Every recording channel was tried and each one only moved
+    the flood: a card per finding made Backlog not converge (13 cards -> 11 landings, 10 filed ->
+    17), the comment threshold (#902) and the freezer (#1640) kept the stream and changed its
+    address. The class reproduces itself — a fix is new text, and the next careful pass measures
+    that one — so the only cut that works is at the source.
+  - **SCOPE: a finding in YOUR OWN not-yet-delivered text you fix in the same diff**, as before;
+    this rule is about findings outside your slice.
+  - **BOUNDARY: behaviour is filed as before, regardless of size** — a gate that does not refuse,
+    a tool that moves a card to the wrong place, the wrong branch in `next_task`.
+  - **What it does NOT cancel:** independent review of behaviour changes. What changed is where
+    a prose finding goes (nowhere), not whether real defects get checked.
 - **`queue=True` — ONLY when a human explicitly asked for a task to be filed into work**
   (an answer on a Your Call card, a direct "file a task for X" in chat or in comments): their
   instruction IS the triage, the card will land straight in YOUR project's Queue — unassigned,

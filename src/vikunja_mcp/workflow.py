@@ -3269,7 +3269,7 @@ class Workflow:
     def file_task(
         self, title: str, description: str = "", priority: int = 0,
         related_task_id: int | None = None, project_id: int | None = None,
-        queue: bool = False, icebox: bool = False,
+        queue: bool = False, icebox: bool = False, breaks: str = "",
     ) -> dict:
         """File a finding (a bug/tech-debt OUTSIDE the current task) into Backlog for
         human triage — NOT into Queue (a human prioritizes). Optionally: a 'related'
@@ -3291,18 +3291,30 @@ class Workflow:
         downstream can check a fabricated one; see _ref).
 
         icebox=True (#1640) files into the freezer instead: the Icebox column plus the
-        `icebox` label, for a finding that is real but very minor — cosmetic legacy, lyricism,
-        something nobody is ever expected to pick up. It is the honest destination for the
-        finding an agent would otherwise drop in Backlog to sit forever, and it exists so that
+        `icebox` label, for a BEHAVIOUR defect that is real but very minor — legacy nobody is
+        ever expected to pick up. Never wording: since #1987 that is dropped, not frozen. It is
+        the honest destination for the finding an agent would otherwise drop in Backlog, and it exists so that
         Backlog keeps meaning "work a human still has to triage". It is NOT combinable with
         queue (opposite instructions: "do this now" against "nobody will do this") and, unlike
         queue, it IS allowed cross-project — the asymmetry is the whole reason queue is
         refused there. Another project's Queue injects work their human never sanctioned and
         wakes their fleet; another project's Icebox wakes nobody and claims nothing of theirs.
         Both destinations are resolved BEFORE the card is created, so a board that predates
-        this stage refuses with nothing left behind."""
+        this stage refuses with nothing left behind.
+
+        breaks (#1987): what goes wrong if the finding is never fixed. Required for every filing
+        but queue=True (a human asked for that card); a finding where nothing breaks is dropped,
+        not filed anywhere. Rendered as the first line of the description."""
         if not (title or "").strip():
             raise WorkflowError("a non-empty title is required for the new task")
+        breaks = (breaks or "").strip()
+        if not breaks and not queue:
+            raise WorkflowError(
+                "file_task needs `breaks`: one sentence naming what goes wrong — for a user, an "
+                "agent or a tool run — if this is never fixed. If nothing goes wrong (a wording, "
+                "a stale figure, a claim wider than its measurement, a blind spot in a prose "
+                "gate), do not file it anywhere, Icebox included: drop it. Nothing was created."
+            )
         target = self.project_id if project_id is None else int(project_id)
         cross = target != self.project_id
         if queue and cross:
@@ -3338,9 +3350,12 @@ class Workflow:
         # бакетов один на Workflow, так что лишнего запроса это не стоит.
         if icebox and not cross:
             self._bucket("Icebox")
+        description = (description or "").strip()
+        if breaks:
+            head = card_text(self.language, "filed_breaks", breaks=breaks)
+            description = f"{head}\n\n{description}" if description else head
         created = self.api.create_task(
-            target, title.strip(),
-            description=(description or "").strip(), priority=int(priority or 0),
+            target, title.strip(), description=description, priority=int(priority or 0),
         )
         new_id = created["id"]
         if cross:

@@ -107,11 +107,7 @@ measured shape of both exemptions.
   precedent. It governs the prose the tool authors onto a card (the two-COLUMN table in
   `cardtext.py`, ONE module by rule) and — the larger half — rides in every `next_task` payload
   so the AGENT writes its spec/worklog/review report in the same language. **It NEVER governs a
-  marker.** Two of the twelve are literally PARSED — the review offering compares the last
-  `startswith("[worklog]")` comment against the last `startswith("[review]")` one — so a
-  per-language spelling THERE drops every card written under the other setting out of the
-  offering, silently; the other ten are frozen with them so the vocabulary is not
-  half-translated.
+  marker** — two of them are parsed by the review offering (why: `cardtext.py`'s docstring).
   **`siblings = { backend = 17 }` is a FIFTH toml-only key, default `{}`** (tracker #1179) — the
   OTHER tracker projects this repo may hand work to, by name. Same class and same reason as the
   four above: which boards this repo can push work onto is committed policy, never widened by one
@@ -119,10 +115,8 @@ measured shape of both exemptions.
   may touch, and `file_task`'s free-form `project_id` is deliberately left un-narrowed by it. What
   it buys is DISCOVERABILITY, and that is the whole feature: it rides in every `next_task` payload,
   because an agent in `dogiators-front` had no way to learn a `dogiators-backend` existed at all,
-  let alone that it was id 17 — its own toml named neither. Refused by name: a non-table value, a
-  blank name, a non-int or bool id (TOML `true` would silently address project 1), a non-positive
-  id, THIS project's own id (a self-handoff deadlocks), and two names for one id (the registry is
-  read id->name too, for provenance).
+  let alone that it was id 17 — its own toml named neither. What it refuses is enumerated in
+  `config.py` (a bool id, THIS project's own id, two names for one id, …).
   → **Dossier: `docs/dossier/config.md`**
 - `src/vikunja_mcp/api.py` — REST client. **Vikunja gotchas are codified here: PUT =
   create, POST = FULL-REPLACE update** → every update is read-modify-write; kanban view
@@ -346,14 +340,17 @@ tree — its mutant under your round is caught loudly, your restore under its ro
 The remedy is a separate tree, not a stronger control.
 
 **A prose claim that quotes a string as being IN this repository is checked** —
-`tests/unit/test_repo_quotation_claims.py` reads the sentence around one of the assertive
-idioms its `_CLAIM_TRIGGERS` names (read the SYMBOL, not the paraphrase beside it) and
-requires every phrase quoted there to occur, whitespace-flattened, somewhere in what `git
-ls-files` carries OUTSIDE THE FILE making the claim. Two consequences: **use one of those
-idioms when you mean it** (the gate is exactly as wide as its vocabulary), and **when the
-quotation is NOT meant to be a repo string** — another repository, a card description, a
-tool's output, a wording quoted BECAUSE it was retracted — name it in that file's ratchet
-with your reason beside it.
+`tests/unit/test_repo_quotation_claims.py` requires every phrase quoted beside one of its
+`_CLAIM_TRIGGERS` idioms to occur in what `git ls-files` carries outside the claiming file. A
+quotation that is NOT a repo string (another repo, a card, a tool's output, a retracted wording)
+goes in that file's ratchet with your reason.
+
+**Prose gates are FROZEN, and a finding about text is DROPPED (tracker #1987).** The gates that
+read prose (quotation claims, figure anchors, the sweep contract, rulebook cross-references and
+size, the skill contract's content pins) stay, but get no siblings; a blind spot in one is not a
+finding. A wording, a stale figure or a claim wider than its measurement outside your slice is
+not a card, not Icebox and not a comment — SKILL.md's "The THRESHOLD for filing". Code comments
+say WHY in a few lines; the post-mortem goes to the card and the dossier, never into code.
 
 → **Dossier: `docs/dossier/testing.md`** — how one sweep lied by 16× and in both
 directions at once, the four measured forms of a blind control, why the stale-figure sweep
@@ -445,11 +442,11 @@ drain next. That agent owns the whole lifecycle (`get_task` → spec/`advance(to
 implement, possibly spawning its own sub-agents → commit+push → `advance(to='review')`);
 the orchestrator does no task content itself. EVERY task reaching Review gets independent
 agent review, not just bugs (the orchestrator dispatches a sibling reviewer; only an `epic`
-container is exempt). Whenever the effective limit exceeds 1 — this repo's
-`.vikunja-mcp.toml` says `wip_limit = 3`, and a project that says nothing gets the same 3
-by default — the same pump keeps several per-task agents in flight, each in its OWN
-worktree from `vikunja-mcp workspace <id>`, and passes `exclude=[ids it has a live agent
-on]`. **Any `workspace` failure degrades to one slot in this checkout, never a stopped
+container is exempt; a text-only card gets one light pass). Whenever the effective limit
+exceeds 1 — this repo's `.vikunja-mcp.toml` says `wip_limit = 3`, and a project that says
+nothing gets the same 3 by default — the same pump keeps several per-task agents in flight,
+each in its OWN worktree from `vikunja-mcp workspace <id>`, and passes `exclude=[ids it has a
+live agent on]`. **Any `workspace` failure degrades to one slot in this checkout, never a stopped
 loop.**
 
 Run it under `/loop`. **Pick the mode by supervision**: self-paced (`/loop`, no interval) is

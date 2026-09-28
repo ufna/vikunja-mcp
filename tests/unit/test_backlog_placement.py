@@ -191,7 +191,7 @@ def test_the_filed_marker_names_which_destination_the_card_was_filed_into(langua
     api = FakeAPI(buckets=STAGES)
     wf = Workflow(api, project_id=3, language=language)
 
-    filed = wf.file_task(title="a finding I discovered myself")["filed"]["id"]
+    filed = wf.file_task(title="a finding I discovered myself", breaks="it breaks")["filed"]["id"]
     asked = wf.file_task(title="work a human asked for", queue=True)["filed"]["id"]
 
     assert api.stage_of(filed) == "Backlog"
@@ -270,7 +270,9 @@ def test_no_tool_pointed_at_a_backlog_card_moves_it_into_queue(tmp_path):
         for assigned in (False, True):
             api = FakeAPI(buckets=STAGES)
             wf = Workflow(api, project_id=3)
-            card_id = wf.file_task(title=f"a finding, then aimed at by {name}")["filed"]["id"]
+            card_id = wf.file_task(
+                title=f"a finding, then aimed at by {name}", breaks="it breaks"
+            )["filed"]["id"]
             assert api.stage_of(card_id) == "Backlog"
             if assigned:
                 api.add_assignee(card_id, api.me_user["id"])
